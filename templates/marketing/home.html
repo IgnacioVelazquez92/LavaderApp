@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Lavaderos | Tu lavadero, organizado y online{% endblock %}
+{% block meta_description %}Software para lavaderos de autos: turnos, servicios y clientes en un solo lugar. Simple, rápido y 100% online.{% endblock %}
+
+{% block hero %}
+<section class="bg-body-tertiary rounded-3 p-4 p-md-5 mb-4 border text-center">
+  <h1 class="display-5 fw-bold">Gestioná tu lavadero sin planillas</h1>
+  <p class="lead text-body-secondary mb-4">
+    Turnos, servicios, cobros y clientes en una sola plataforma. Fácil de usar, desde cualquier dispositivo.
+  </p>
+  <div class="d-grid gap-2 d-sm-flex justify-content-sm-center">
+    <a href="/accounts/signup/" class="btn btn-primary btn-lg px-4">Probar gratis</a>
+    <a href="/accounts/login/" class="btn btn-outline-secondary btn-lg px-4">Ingresar</a>
+  </div>
+</section>
+{% endblock %}
+
+{% block content %}
+<section class="row g-4 text-center">
+  <div class="col-md-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h3 class="h5">📅 Turnos y servicios</h3>
+        <p class="text-body-secondary mb-0">Organizá agenda, tipos de lavado y extras sin caos ni papelitos.</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h3 class="h5">👤 Clientes & Vehículos</h3>
+        <p class="text-body-secondary mb-0">Historial por cliente y vehículo, recordatorios y fidelización.</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h3 class="h5">💳 Cobros simples</h3>
+        <p class="text-body-secondary mb-0">Registrá cobros y recibos. Todo queda ordenado y exportable.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mt-5">
+  <div class="row align-items-center g-4">
+    <div class="col-lg-6">
+      <h2 class="h4">Por qué elegirnos</h2>
+      <ul class="list-unstyled mb-0">
+        <li class="mb-2">✅ <strong>Fácil</strong>: en minutos ya estás trabajando.</li>
+        <li class="mb-2">✅ <strong>Online</strong>: funciona en celular, tablet o PC.</li>
+        <li class="mb-2">✅ <strong>Escalable</strong>: multi-sucursal listo para crecer.</li>
+        <li class="mb-2">✅ <strong>Soporte local</strong>: te ayudamos a configurarlo.</li>
+      </ul>
+    </div>
+    <div class="col-lg-6">
+      <div class="p-4 bg-body-tertiary border rounded-3">
+        <h3 class="h5 mb-3">¿Listo para empezar?</h3>
+        <p class="text-body-secondary">Creá tu cuenta gratis y probá el sistema. Sin tarjeta.</p>
+        <a href="/accounts/signup/" class="btn btn-primary">Crear cuenta</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

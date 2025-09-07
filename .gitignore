@@ -1,0 +1,102 @@
+# ==========================
+# Python
+# ==========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+*.manifest
+*.spec
+
+# ==========================
+# Entornos virtuales
+# ==========================
+venv/
+.venv/
+env/
+ENV/
+*.env
+*.venv
+
+# ==========================
+# Archivos de sistema
+# ==========================
+.DS_Store
+Thumbs.db
+
+# ==========================
+# VSCode / IDEs
+# ==========================
+.vscode/
+.idea/
+*.swp
+
+# ==========================
+# Logs y debug
+# ==========================
+*.log
+*.pot
+*.pyc
+*.pkl
+*.sqlite3-journal
+
+# ==========================
+# Django
+# ==========================
+# Base de datos local (SQLite)
+db.sqlite3
+
+# Archivos de migración compilados (los .pyc se ignoran arriba)
+*/migrations/__pycache__/
+*/migrations/*.pyc
+
+# Archivos de desarrollo
+media/
+staticfiles/
+
+# ==========================
+# Archivos de compilación front-end (si aplican)
+# ==========================
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# ==========================
+# Archivos de despliegue
+# ==========================
+*.tar.gz
+*.zip
+*.bak
+
+# ==========================
+# Seguridad
+# ==========================
+# Variables de entorno (si usas python-decouple o django-environ)
+.env
+*.env.local
+.env.*.local
+
+# ==========================
+# Pytest / coverage
+# ==========================
+.coverage
+htmlcov/
+.tox/
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ==========================
+# PostgreSQL
+# ==========================
+# No ignoramos dumps útiles, pero si temporales
+*.sql~

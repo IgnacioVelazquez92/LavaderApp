@@ -1,4 +1,4 @@
-# Documentación de Modelos — SaaS Lavaderos (MVP mejorado)
+# Documentación de Modelos — SaaS Lavaderos
 
 Este documento consolida el **modelo de datos** y lo complementa con **reglas de negocio**, **procesos granulares con entradas/salidas**, **estados**, **restricciones** e **indicadores**. El objetivo es mantener un **MVP simple, vendible y operable**, evitando complejidades innecesarias pero dejando espacio para escalar.
 
@@ -13,7 +13,7 @@ Este documento consolida el **modelo de datos** y lo complementa con **reglas de
 - **Operable en campo**: flujos en 5–7 toques; mínimos obligatorios.
 - **Medible**: ventas, ticket promedio, servicios top, métodos de pago, propinas.
 
-### Mejoras sugeridas (sin complejizar)
+### Mejoras sugeridas
 
 1. **Índices y restricciones** (ver §5) para evitar inconsistencias y acelerar consultas.
 2. **Estados explícitos de venta** (ver §3.1) y transiciones claras.
@@ -925,604 +925,1953 @@ flowchart LR
 
 # Plan detallado por app (Django) — SaaS Lavaderos (MVP)
 
-> Objetivo: que cada app tenga **responsabilidades claras**, **módulos internos** y **flujos** listos para implementar.  
-> Convención de diagramas: usar `flowchart` sin etiquetas en aristas para máxima compatibilidad.
+> Objetivo: que cada app tenga **responsabilidades claras**, **módulos internos** y **flujos** listos para implementar.
 
-# Stubs de implementación (Django) — listo para codear
+# Estructura General del Proyecto — Preparada para Codear Luego
 
-> Estructura de archivos y `services.py` por app con firmas, `dataclass` DTO y docstrings.  
-> Incluye un `tenancy.py` y `permissions.py` básicos. Listo para tests y wiring con DRF.
+> **Objetivo**: dejar listas las **carpetas** y **convenciones** globales (templates/estáticos), sin entrar aún en los `.py` de cada app.  
+> En siguientes pasos haremos zoom **app por app**.
 
 ```bash
-lavaderos/
+lavaderosapp/
 ├── manage.py
+├── .env                     # variables de entorno
+├── .gitignore
+├── README.md
 ├── lavaderos/
 │   ├── __init__.py
-│   ├── settings.py
-│   ├── urls.py
-│   ├── tenancy.py
-│   ├── middleware.py
-│   └── permissions.py
-└── apps/
+│   ├── urls.py                       # enrutamiento global (incluye urls de apps)
+│   ├── tenancy.py                    # utilidades multi-tenant (header/subdominio)
+│   ├── middleware.py                 # middlewares propios (tenant, auditoría, etc.)
+│   ├── permissions.py                # permisos/restricciones transversales
+│   └── settings/
+│       ├── __init__.py
+│       ├── base.py                   # común a todos los entornos
+│       ├── development.py            # dev: DEBUG, sqlite, email consola
+│       ├── production.py             # prod: Postgres, seguridad, email real
+│       └── render.py                 # (si aplica) ajustes para Render
+├── templates/                        # templates globales y overrides de librerías
+│   ├── base.html                     # layout principal del sitio
+│   ├── includes/                     # fragmentos reusables (partials)
+│   │   ├── _navbar.html              # navbar condicional (auth/no-auth)
+│   │   ├── _messages.html            # mensajes flash (Django messages)
+│   │   ├── _footer.html              # pie de página global
+│   │   └── _pagination.html          # paginación reusable
+│   ├── account/                      # overrides HTML de django-allauth
+│   │   ├── login.html                # opcional: personalizar login
+│   │   ├── signup.html               # opcional: personalizar registro
+│   │   └── ...                       # (resto de vistas de allauth si se necesitan)
+│   └── errors/                       # páginas de error (mejor UX)
+│       ├── 401.html
+│       ├── 403.html
+│       ├── 404.html
+│       └── 500.html
+├── static/                           # assets globales que versionamos (sin CDN)
+│   ├── css/
+│   │   ├── bootstrap.min.css         # Bootstrap local (descargado)
+│   │   ├── app.css                   # estilos propios globales
+│   ├── js/
+│   │   ├── bootstrap.bundle.min.js   # Bootstrap JS (incluye Popper)
+│   │   └── app.js                    # scripts propios globales
+│   ├── img/
+│   │   └── logo.png                  # imágenes globales
+│   └── vendor/                       # otras librerías de terceros (opcional)
+│       └── ...                       # ej. bootstrap-icons/ chart.js/ etc.
+├── media/                            # uploads de usuarios (en dev; en prod va a storage)
+├── staticfiles/                      # destino de collectstatic (no tocar a mano)
+└── apps/                             # **todas** las apps de dominio (código por módulos)
     ├── accounts/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── serializers.py
-    │   ├── views.py
-    │   └── urls.py
     ├── org/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── selectors.py
-    │   └── urls.py
     ├── customers/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── normalizers.py
-    │   └── urls.py
     ├── vehicles/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── validators.py
-    │   └── urls.py
     ├── catalog/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   └── urls.py
     ├── pricing/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── validators.py
-    │   └── urls.py
     ├── sales/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── calculations.py
-    │   ├── fsm.py
-    │   └── urls.py
     ├── payments/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── validators.py
-    │   └── urls.py
     ├── invoicing/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── pdf.py
-    │   └── urls.py
     ├── notifications/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   ├── renderers.py
-    │   └── urls.py
     ├── cashbox/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   └── urls.py
     ├── saas/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   ├── services.py
-    │   └── urls.py
     ├── audit/
-    │   ├── __init__.py
-    │   ├── models.py
-    │   └── middleware.py
     └── app_log/
-        ├── __init__.py
-        ├── models.py
-        └── services.py
 ```
 
 ---
 
-## `lavaderos/tenancy.py`
+## Convenciones y Propósito de Cada Carpeta (Global)
 
-```python
-# lavaderos/tenancy.py
-from contextvars import ContextVar
-from typing import Optional
+- **`templates/` (global)**
 
-_current_empresa_id: ContextVar[Optional[str]] = ContextVar("empresa_id", default=None)
+  - **`base.html`**: layout principal; define bloques (`title`, `navbar`, `content`, `extra_css`, `extra_js`).
+  - **`includes/`**: _partials_ reusables.
+    - `_navbar.html`: navbar único con lógica `user.is_authenticated` (muestra menús distintos para invitados/usuarios).
+    - `_messages.html`: muestra `django.contrib.messages`.
+    - `_footer.html`, `_pagination.html`: utilidades comunes.
+  - **`account/`**: _overrides_ de **django-allauth** (páginas de login/registro/reset).
+  - **`errors/`**: plantillas personalizadas de errores (401/403/404/500).
+  - **Buenas prácticas**: las vistas **de cada app** van en `apps/<app>/templates/<app>/...` para evitar colisiones de nombre.
 
-def set_current_empresa_id(empresa_id: Optional[str]) -> None:
-    """Fija el tenant actual (empresa) en un contextvar (thread-safe)."""
-    _current_empresa_id.set(empresa_id)
+- **`static/` (global)**
 
-def get_current_empresa_id() -> Optional[str]:
-    """Obtiene el tenant actual (empresa) del contexto."""
-    return _current_empresa_id.get()
+  - **`css/`**: `bootstrap.min.css` local (sin CDN), temas de **Bootswatch** en `/bootswatch/` y `app.css` propio global.
+  - **`js/`**: `bootstrap.bundle.min.js` (con Popper) y `app.js` global.
+  - **`img/`**: imágenes globales (logo, ilustraciones).
+  - **`vendor/`**: librerías externas adicionales (ej. bootstrap-icons).
+  - **En producción**: correr `collectstatic` → Django recopila todo a `staticfiles/` (servido por Nginx/servidor web).
+
+- **`media/`**
+
+  - Subidas de usuario en desarrollo. En producción conviene S3/Cloud Storage (no commitear).
+
+- **`apps/<app>/templates/<app>/`**
+
+  - Templates específicos de cada módulo (ej. `customers/list.html`).
+  - La **convención** `<app>` como namespace evita conflictos entre apps.
+
+- **`apps/<app>/static/<app>/`**
+
+  - Estilos/JS/imágenes propios **de la app**. Se referencian con `{% static 'app/archivo.css' %}`.
+  - Mantiene acotado el alcance de assets por módulo.
+
+- **`lavaderos/tenancy.py`**
+
+  - Utilidades para resolver el **tenant** actual (empresa) vía subdominio o header (`X-Empresa-Id`).
+  - MVP: se puede setear empresa en sesión/header; a futuro, middleware.
+
+- **`lavaderos/middleware.py`**
+
+  - Middlewares propios (multi-tenant, auditoría simple, etc.). Se añaden en `settings` cuando toque.
+
+- **`lavaderos/permissions.py`**
+
+  - Permisos transversales (ej. `IsMemberOfEmpresa`, `HasRole`). Se usan luego en vistas/clases.
+
+- **`lavaderos/settings/*`**
+  - División **limpia por entorno**:
+    - `base.py`: común a todos.
+    - `development.py`: DEBUG, sqlite, email consola, hosts locales.
+    - `production.py`: Postgres, seguridad, email real, allowed hosts por env.
+    - `render.py`: específico para Render.com (si lo usás), típicamente con `DATABASE_URL`.
+
+---
+
+## Reglas de Herencia de Templates (resumen pro)
+
+- **`base.html`** es la raíz. Todas las vistas extienden de ahí.
+- Navbar se **incluye** con un parcial (`includes/_navbar.html`) y **decide** su contenido con `user.is_authenticated`.
+- Si una página necesita un navbar distinto, **sobrescribe** el bloque `{% block navbar %}` en su template.
+- **Allauth**: cualquier template en `templates/account/` con nombre coincidente **sobrescribe** el default (login, signup, etc.).
+
+---
+
+# Plan de Trabajo por Aplicación (MVP) — Guía Operativa
+
+> **Meta**: documentar, app por app, **propósito**, **alcance MVP**, **páginas/URLs**, **flujos**, **dependencias** y **contratos de entrada/salida** a nivel conceptual (sin código).  
+> Así, cuando empecemos a programar, cada módulo tendrá claro qué hace y cómo se integra.
+
+---
+
+# Módulo 1 — `apps/accounts` (Autenticación, Perfil y Membresías)
+
+> **Objetivo:** Integrar **django-allauth** (login/registro/cierre de sesión y recuperación de clave), exponer vistas server-rendered para **Perfil** y **Membresías**, y modelar la relación **Usuario ↔ Empresa (rol)** del SaaS.  
+> **Fuera de alcance:** alta/edición de Empresa/Sucursal (vive en `apps/org`) y flujos de operación/ventas.
+
+---
+
+## 1) Estructura del módulo (MVP final)
+
+```
+apps/accounts/
+├─ __init__.py
+├─ apps.py
+├─ admin.py
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                  # EmpresaMembership (User↔Empresa, rol)
+├─ urls.py                    # /cuenta/perfil/, /cuenta/membresias/
+├─ views.py                   # ProfileView, MembershipListView (server-rendered)
+├─ forms/
+│  ├─ __init__.py             # Login/Signup + Reset/Set/Change Password (Bootstrap)
+│  └─ profile.py              # ProfileForm (Bootstrap)
+├─ services/
+│  ├─ __init__.py
+│  ├─ memberships.py          # ensure_membership, cambio de rol
+│  └─ profile.py              # update_user_profile
+├─ selectors.py               # memberships_for(user), etc.
+├─ permissions.py             # helpers de rol (admin/operador/auditor)
+├─ templates/
+│  └─ accounts/
+│     ├─ profile.html
+│     ├─ memberships.html
+│     └─ _profile_form.html
 ```
 
-## `lavaderos/middleware.py`
+### Estructura global de templates (overrides + layout)
 
-```python
-# lavaderos/middleware.py
-from django.http import HttpRequest
-from lavaderos.tenancy import set_current_empresa_id
-from typing import Callable
-
-class TenantBySubdomainMiddleware:
-    """
-    Resuelve empresa por subdominio: <empresa>.miapp.com
-    En MVP puedes usar un header 'X-Empresa-Id' para simplificar.
-    """
-    def __init__(self, get_response: Callable):
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest):
-        empresa_id = request.headers.get("X-Empresa-Id")  # MVP
-        set_current_empresa_id(empresa_id)
-        response = self.get_response(request)
-        return response
 ```
-
-## `lavaderos/permissions.py`
-
-```python
-# lavaderos/permissions.py
-from rest_framework.permissions import BasePermission
-
-class IsMemberOfEmpresa(BasePermission):
-    """
-    Permite acceso si el usuario está asociado a la empresa actual.
-    Requiere que el viewset resuelva empresa actual (header o subdominio).
-    """
-    def has_permission(self, request, view):
-        empresa_id = request.headers.get("X-Empresa-Id")
-        if not request.user.is_authenticated or not empresa_id:
-            return False
-        # MVP: asume que todo user autenticado con header es válido.
-        # En producción: validar EmpresaMembership.
-        return True
-
-class HasRole(BasePermission):
-    """
-    Valida que el usuario tenga un rol requerido (definido en la vista, e.g. view.required_roles).
-    """
-    def has_permission(self, request, view):
-        required = getattr(view, "required_roles", None)
-        if not required:
-            return True
-        # MVP: rol en user.profile.role o en membership.
-        user_role = getattr(getattr(request.user, "profile", None), "role", None)
-        return user_role in required
+templates/
+├─ base.html
+├─ includes/
+│  ├─ _navbar.html            # menú Cuenta, selector de empresa, logout
+│  └─ _messages.html          # alerts Bootstrap (django.messages)
+└─ account/                   # overrides de allauth (sin “s”)
+   ├─ login.html
+   ├─ signup.html
+   ├─ password_reset.html
+   ├─ password_reset_done.html
+   ├─ password_reset_from_key.html
+   ├─ password_reset_from_key_done.html
+   ├─ password_change.html            # ambio estando logueado
+   └─ password_change_done.html
 ```
 
 ---
 
-# APPS
+## 2) Qué hace cada cosa (resumen ejecutivo)
 
-## `apps/accounts/services.py`
+- **`models.py`**: `EmpresaMembership(user, empresa, rol)` con unicidad `(user, empresa)`.
+- **`forms/__init__.py`**: _todos_ los formularios clave de allauth (login, signup, reset, set, change) inyectan clases Bootstrap a widgets (`form-control`, `form-select`, `form-check-input`) y placeholders/`autocomplete`.
+- **`forms/profile.py`**: `ProfileForm` con el mismo patrón Bootstrap.
+- **`views.py`**: vistas delgadas; mutaciones en **services**, lecturas en **selectors**.
+- **`services/*`**: casos de uso (perfil y membresías), con logging mínimo.
+- **`selectors.py`**: consultas para vistas/UX (p.ej., membresías del usuario).
+- **`templates/account/*`**: todos los flujos de allauth con el layout de `base.html`.
+- **`_messages.html`**: muestra feedback como alerts.
+- **`_navbar.html`**: accesos a Perfil, Membresías, Selector de empresa y Logout.
 
-```python
-# apps/accounts/services.py
-from dataclasses import dataclass
-from typing import Optional, Literal
-from django.contrib.auth import get_user_model
+> **Principio:** vistas finas; lógica en services/selectors; estilos Bootstrap desde los **forms** (no repetimos clases en cada template).
 
-User = get_user_model()
-Role = Literal["admin", "operador", "auditor"]
+---
 
-@dataclass
-class UserProfileDTO:
-    user_id: int
-    email: str
-    role: Role
-
-@dataclass
-class EmpresaOwnerDTO:
-    empresa_id: str
-    user_id: int
-    sucursal_id: Optional[str]
-
-def create_empresa_with_owner(*, nombre_empresa: str, subdominio: str,
-                              owner_email: str, owner_password: str,
-                              sucursal_nombre: str = "Principal") -> EmpresaOwnerDTO:
-    """
-    Crea EMPRESA, SUCURSAL inicial y usuario owner (admin).
-    Retorna ids para enlazar front/onboarding.
-    """
-    raise NotImplementedError
-
-def assign_role(*, user_id: int, empresa_id: str, role: Role) -> UserProfileDTO:
-    """
-    Asigna rol al usuario dentro de una empresa (EmpresaMembership).
-    """
-    raise NotImplementedError
-```
-
-## `apps/org/services.py`
+## 3) Settings esenciales (lo mínimo para que funcione igual en todos los entornos)
 
 ```python
-# apps/org/services.py
-from dataclasses import dataclass
-from typing import Optional, Any
+INSTALLED_APPS += [
+    "django.contrib.sites",
+    "allauth",
+    "allauth.account",
+    "apps.org",        # debe migrar antes que accounts (FK)
+    "apps.accounts",
+]
+SITE_ID = 1
 
-@dataclass
-class EmpresaDTO:
-    id: str
-    nombre: str
-    subdominio: str
-    activo: bool
+MIDDLEWARE += [
+    "allauth.account.middleware.AccountMiddleware",  # requerido por allauth reciente
+]
 
-@dataclass
-class SucursalDTO:
-    id: str
-    empresa_id: str
-    nombre: str
-    codigo_erp: Optional[str]
+TEMPLATES[0]["DIRS"] = [BASE_DIR / "templates"]
+# ¡Importante! para allauth:
+# "django.template.context_processors.request" debe estar en context_processors
 
-def create_empresa(*, nombre: str, subdominio: str) -> EmpresaDTO:
-    """
-    Alta de empresa (tenant). Unicidad de subdominio.
-    """
-    raise NotImplementedError
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
 
-def create_sucursal(*, empresa_id: str, nombre: str, codigo_erp: Optional[str]=None) -> SucursalDTO:
-    """
-    Crea una sucursal para la empresa.
-    """
-    raise NotImplementedError
+# Email-only login (MVP)
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_EMAIL_VERIFICATION = "none"   # en prod real: "mandatory"
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_LOGOUT_ON_GET = True          # logout inmediato (sin logout.html)
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
 
-def set_config(*, empresa_id: str, clave: str, valor_json: Any, scope: str="app") -> None:
-    """
-    Guarda o actualiza EMPRESA_CONFIG[clave].
-    """
-    raise NotImplementedError
-
-def get_config(*, empresa_id: str, clave: str, default: Any=None) -> Any:
-    """
-    Lee EMPRESA_CONFIG[clave] o retorna default.
-    """
-    raise NotImplementedError
-```
-
-## `apps/customers/services.py`
-
-```python
-# apps/customers/services.py
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class CustomerDTO:
-    id: str
-    nombre: str
-    apellido: str
-    email: Optional[str]
-    telefono_wpp: Optional[str]
-
-def upsert_cliente(*, empresa_id: str, nombre: str, apellido: str,
-                   email: Optional[str]=None, telefono_wpp: Optional[str]=None) -> CustomerDTO:
-    """
-    Crea/actualiza cliente evitando duplicados por (empresa_id + email/telefono).
-    Normaliza email y teléfono.
-    """
-    raise NotImplementedError
-
-def get_or_create_facturacion(*, cliente_id: str, razon_social: str,
-                              cuit: str, direccion: str,
-                              ciudad: str, provincia: str, codigo_postal: str) -> str:
-    """
-    Asegura un registro de CLIENTE_FACTURACION y retorna su id.
-    """
-    raise NotImplementedError
-```
-
-## `apps/vehicles/services.py`
-
-```python
-# apps/vehicles/services.py
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class VehicleDTO:
-    id: str
-    cliente_id: str
-    tipo_vehiculo_id: str
-    marca: str
-    modelo: str
-    patente: Optional[str]
-
-def normalizar_patente(patente: str) -> str:
-    """
-    Uppercase, sin guiones/espacios. Validar longitud/formato si aplica.
-    """
-    raise NotImplementedError
-
-def upsert_vehiculo(*, empresa_id: str, cliente_id: str, tipo_vehiculo_id: str,
-                    marca: str, modelo: str, patente: Optional[str]=None) -> VehicleDTO:
-    """
-    Unicidad por (empresa_id, patente_normalizada) cuando patente no es None.
-    """
-    raise NotImplementedError
-```
-
-## `apps/catalog/services.py`
-
-```python
-# apps/catalog/services.py
-from dataclasses import dataclass
-
-@dataclass
-class ServicioDTO:
-    id: str
-    empresa_id: str
-    nombre: str
-    descripcion: str
-    activo: bool
-
-def create_servicio(*, empresa_id: str, nombre: str, descripcion: str="") -> ServicioDTO:
-    """
-    Alta de servicio con validación de nombre único por empresa (normalizado).
-    """
-    raise NotImplementedError
-
-def toggle_servicio(*, servicio_id: str, activo: bool) -> ServicioDTO:
-    """
-    Activa/inactiva servicio.
-    """
-    raise NotImplementedError
-```
-
-## `apps/pricing/services.py`
-
-```python
-# apps/pricing/services.py
-from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
-from typing import Optional
-
-@dataclass
-class PrecioResolucion:
-    precio: Decimal
-    moneda: str
-    vigente_desde: date
-    vigente_hasta: Optional[date]
-
-def create_precio(*, empresa_id: str, sucursal_id: str, servicio_id: str,
-                  tipo_vehiculo_id: str, precio: Decimal, moneda: str,
-                  vigencia_inicio: date, vigencia_fin: Optional[date]=None) -> str:
-    """
-    Crea precio validando no-solapamiento para la tupla (empresa, sucursal, servicio, tipo).
-    Retorna id del registro PRECIO_SERVICIO.
-    """
-    raise NotImplementedError
-
-def resolver_precio(*, empresa_id: str, sucursal_id: str, servicio_id: str,
-                    tipo_vehiculo_id: str, fecha: date) -> PrecioResolucion:
-    """
-    Selecciona el precio vigente en 'fecha' para la tupla dada.
-    Error si no hay coincidencia única.
-    """
-    raise NotImplementedError
-```
-
-## `apps/sales/services.py`
-
-```python
-# apps/sales/services.py
-from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
-from typing import List, Dict
-
-@dataclass
-class VentaDTO:
-    id: str
-    estado: str
-    subtotal: Decimal
-    descuento: Decimal
-    propina: Decimal
-    total: Decimal
-    saldo_pendiente: Decimal
-
-def crear_venta(*, empresa_id: str, sucursal_id: str, cliente_id: str, vehiculo_id: str) -> VentaDTO:
-    """
-    Crea venta en estado 'borrador' con importes en cero.
-    """
-    raise NotImplementedError
-
-def agregar_items(*, venta_id: str, items: List[Dict], fecha_precio: date) -> VentaDTO:
-    """
-    items = [{'servicio_id': str, 'cantidad': int, 'tipo_vehiculo_id': str}]
-    Resuelve precio por pricing.resolver_precio(); total_linea=cantidad*precio; recalcula totales.
-    """
-    raise NotImplementedError
-
-def finalizar_venta(*, venta_id: str) -> VentaDTO:
-    """
-    Cambia a 'terminado' si tiene ítems; 'pagado' si saldo_pendiente=0.
-    """
-    raise NotImplementedError
-```
-
-## `apps/payments/services.py`
-
-```python
-# apps/payments/services.py
-from dataclasses import dataclass
-from decimal import Decimal
-from typing import Optional
-from apps.sales.services import VentaDTO
-
-@dataclass
-class PagoDTO:
-    id: str
-    metodo: str
-    monto: Decimal
-    es_propina: bool
-
-def registrar_pago(*, venta_id: str, metodo: str, monto: Decimal,
-                   es_propina: bool=False, idempotency_key: Optional[str]=None) -> VentaDTO:
-    """
-    Crea PAGO y actualiza saldo de la venta.
-    Regla: si es_propina=False, monto <= saldo_pendiente.
-    Si idempotency_key ya existe, retorna estado actual sin duplicar.
-    """
-    raise NotImplementedError
-```
-
-## `apps/invoicing/services.py`
-
-```python
-# apps/invoicing/services.py
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class ComprobanteDTO:
-    id: str
-    tipo: str
-    numero: str
-    pdf_url: str
-
-def emitir_comprobante(*, venta_id: str, tipo: str, punto_venta: str,
-                       cliente_facturacion_id: Optional[str]=None) -> ComprobanteDTO:
-    """
-    Emite comprobante no fiscal numerado por (sucursal, tipo).
-    Debe usar transacción con select_for_update sobre SECUENCIA_COMPROBANTE.
-    Genera snapshot de totales y pdf_url (dummy en MVP).
-    """
-    raise NotImplementedError
-```
-
-## `apps/notifications/services.py`
-
-```python
-# apps/notifications/services.py
-from typing import Dict
-
-def render_plantilla(cuerpo_tpl: str, contexto: Dict[str, str]) -> str:
-    """
-    Reemplaza placeholders {{clave}} por valores del contexto (simple).
-    """
-    raise NotImplementedError
-
-def enviar_notificacion(*, venta_id: str, plantilla_clave: str) -> str:
-    """
-    Renderiza plantilla y registra LOG_NOTIF (estado enviado/fallido).
-    Retorna log_notif_id.
-    """
-    raise NotImplementedError
-```
-
-## `apps/cashbox/services.py`
-
-```python
-# apps/cashbox/services.py
-from dataclasses import dataclass
-from datetime import datetime
-from decimal import Decimal
-from typing import List
-
-@dataclass
-class CierreTotalDTO:
-    metodo: str
-    monto: Decimal
-    propinas: Decimal
-
-@dataclass
-class CierreCajaDTO:
-    id: str
-    sucursal_id: str
-    abierto_en: datetime
-    cerrado_en: datetime
-    totales: List[CierreTotalDTO]
-
-def cerrar_caja(*, empresa_id: str, sucursal_id: str,
-                desde: datetime, hasta: datetime) -> CierreCajaDTO:
-    """
-    Suma PAGO por método en el rango; separa propinas; crea CIERRE_CAJA y CIERRE_CAJA_TOTAL.
-    Maneja solapamientos y guarda nota si hay diferencias.
-    """
-    raise NotImplementedError
-```
-
-## `apps/saas/services.py`
-
-```python
-# apps/saas/services.py
-from dataclasses import dataclass
-from typing import Optional
-from decimal import Decimal
-from datetime import date
-
-@dataclass
-class SuscripcionDTO:
-    id: str
-    empresa_id: str
-    plan_id: str
-    estado: str
-    inicio: date
-    fin: Optional[date]
-
-def asignar_plan(*, empresa_id: str, plan_id: str) -> SuscripcionDTO:
-    """
-    Crea/actualiza SUSCRIPCION_SAAS para una empresa.
-    """
-    raise NotImplementedError
-
-def emitir_factura_saas(*, empresa_id: str, periodo: date, total: Decimal, moneda: str="ARS") -> str:
-    """
-    Genera FACTURA_SAAS para el periodo dado. Retorna factura_id.
-    """
-    raise NotImplementedError
-```
-
-## `apps/audit/middleware.py`
-
-```python
-# apps/audit/middleware.py
-from typing import Callable
-from django.http import HttpRequest
-
-class SimpleAuditMiddleware:
-    """
-    MVP: registra acción, usuario y path en APP_LOG o AUDITORIA_CAMBIO básica.
-    """
-    def __init__(self, get_response: Callable):
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest):
-        # hook antes/después para registrar según necesidad
-        response = self.get_response(request)
-        return response
-```
-
-## `apps/app_log/services.py`
-
-```python
-# apps/app_log/services.py
-from typing import Optional, Any
-
-def log_event(*, empresa_id: Optional[str], nivel: str, origen: str,
-              evento: str, mensaje: str, meta_json: Optional[Any]=None) -> None:
-    """
-    Registra un evento de aplicación (info/warn/error) vinculado a empresa.
-    """
-    raise NotImplementedError
+ACCOUNT_FORMS = {
+    "login": "apps.accounts.forms.LoginForm",
+    "signup": "apps.accounts.forms.SignupForm",
+    "reset_password": "apps.accounts.forms.ResetPasswordForm",
+    "reset_password_from_key": "apps.accounts.forms.ResetPasswordKeyForm",
+    "change_password": "apps.accounts.forms.ChangePasswordForm",  # opcional
+}
 ```
 
 ---
 
-# Siguientes pasos recomendados
+## 4) Rutas y vistas (qué URL usa qué template)
 
-1. Crear **modelos mínimos** por app para que los stubs puedan importar/consultar.
-2. Implementar **tests unitarios** por servicio (pytest + pytest-django).
-3. Conectar **DRF ViewSets** a estos servicios, aplicando `IsMemberOfEmpresa` y `HasRole`.
-4. Agregar **fixtures/seeds** (tipos de vehículo, servicios demo, precios) para prueba rápida en dev.
+**Allauth (ya provisto, con nuestros overrides):**
+
+- `/accounts/login/` → `account/login.html`
+- `/accounts/signup/` → `account/signup.html`
+- `/accounts/logout/` → inmediato si `ACCOUNT_LOGOUT_ON_GET=True` (sin template)
+- `/accounts/password/reset/` → `account/password_reset.html`
+- `/accounts/password/reset/done/` → `account/password_reset_done.html`
+- `/accounts/password/reset/key/<uidb36>-<key>/` → `account/password_reset_from_key.html`
+- `/accounts/password/reset/key/done/` → `account/password_reset_from_key_done.html`
+- `/accounts/password/change/` → `account/password_change.html` _(opcional)_
+- `/accounts/password/change/done/` → `account/password_change_done.html` _(opcional)_
+
+**Accounts (esta app):**
+
+- `/cuenta/perfil/` → perfil (GET/POST)
+- `/cuenta/membresias/` → listado de empresas y rol; botón **“Activar”** → `/org/seleccionar/?empresa=<id>`
+
+---
+
+## 5) Modelado de membresías (multi-tenant)
+
+- `EmpresaMembership(user, empresa, rol)` con choices (`admin`, `operador`, `auditor`).
+- Un registro **único por (user, empresa)**.
+- **Dependencia**: `org.Empresa` debe existir y migrar **antes**.
+- Uso en UI: `memberships.html` linkea al selector `/org/seleccionar/`.
+
+---
+
+## 6) UX / UI (convenciones)
+
+- **Bootstrap 5** global en `base.html` (tema Bootswatch ok).
+- **Mensajes** → `_messages.html` (alerts).
+- **Navbar** → `_navbar.html` con acciones de cuenta y chip de empresa activa (si `empresa_id` en sesión).
+- **Accesibilidad**: labels y `autocomplete` correctos; placeholders coherentes.
+
+---
+
+## 7) Seguridad / permisos
+
+- Vistas del módulo → requieren **usuario autenticado**.
+- No se mutan empresas ni roles desde `accounts`.
+- CSRF por defecto en formularios server-rendered.
+- Reutilizar `permissions.py` donde aplique.
+
+---
+
+## 8) Pasos de verificación rápida
+
+1. Migrar `org` y `accounts` (en ese orden).
+2. Crear una **Empresa** en admin y asignar membresía al usuario.
+3. Probar: signup → login → perfil → membresías → activar empresa.
+4. Probar “¿Olvidaste tu contraseña?” en login:
+   - reset → done → link email → set password → done.
+
+---
+
+## 9) Estado actual y próximos pasos
+
+- **Estado**: `accounts` completo (allauth con Bootstrap, perfil, membresías, integración con selector de `org`).
+- **Siguiente**: `apps/org` CRUD Empresa/Sucursal y middleware de tenancy (inyectar `empresa_activa` en request/plantillas).
+- **Producción**: valorar `ACCOUNT_EMAIL_VERIFICATION="mandatory"` y backend SMTP real.
+
+> **Decisión registrada:** estilos centralizados en **forms**; overrides de templates en `templates/account/`; vistas delgadas con lógica en services/selectors. La selección de empresa vive en `org` y se invoca desde “Membresías”.
+
+# Módulo 2 — `apps/org` (Organización, Sucursales y Configuración)
+
+> **Objetivo:** Definir y administrar las **Empresas** (tenants), sus **Sucursales** y la **configuración extensible** de cada una. Este módulo también provee la lógica para seleccionar y fijar la **empresa activa** en sesión (lo que habilita el multi-tenant).
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/org/
+├─ __init__.py
+├─ apps.py                 # Config de la app (name="apps.org")
+├─ admin.py                # Registro de Empresa y Sucursal en el admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py               # Modelos: Empresa, EmpresaConfig, Sucursal
+├─ urls.py                 # Rutas propias (empresas, sucursales, selector)
+├─ views.py                # Vistas server-rendered (listados, formularios, selector)
+├─ forms/
+│  ├─ __init__.py
+│  └─ org.py               # Formularios de alta/edición de Empresa/Sucursal
+├─ services/
+│  ├─ __init__.py
+│  ├─ empresa.py           # Casos de uso: crear/editar Empresa, config
+│  └─ sucursal.py          # Casos de uso: CRUD de Sucursales
+├─ selectors.py            # Lecturas: empresas de un user, sucursales activas, config
+├─ permissions.py          # Checks de rol sobre Empresa/Sucursal
+├─ templates/
+│  └─ org/
+│     ├─ empresas.html     # Listado de empresas
+│     ├─ empresa_form.html # Form de alta/edición de empresa
+│     ├─ sucursales.html   # Listado de sucursales
+│     ├─ sucursal_form.html# Form de alta/edición de sucursal
+│     └─ selector.html     # Selector de empresa activa
+├─ static/
+│  └─ org/
+│     ├─ org.css           # Estilos de pantallas de organización
+│     └─ org.js            # Scripts para formularios/UX
+└─ emails/
+   └─ empresa_created.txt  # Notificación (opcional) cuando se crea una empresa
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `Empresa`: tenant raíz (nombre, subdominio, logo, activo).
+  - `Sucursal`: locales físicos de la empresa.
+  - `EmpresaConfig`: pares clave/valor (json) por empresa.
+- **`forms/org.py`**: validación y normalización de formularios.
+- **`services/empresa.py`**: crear empresa con defaults, actualizar configuración.
+- **`services/sucursal.py`**: CRUD de sucursales.
+- **`selectors.py`**: consultas de lectura (`empresas_para_usuario(user)`, `sucursales_de(empresa)`).
+- **`views.py`**: orquestan GET/POST para listados, formularios y selector de empresa activa.
+- **`templates/org/*`**: vistas HTML que extienden de `base.html`.
+
+---
+
+## 2) Endpoints propuestos
+
+- `/org/empresas/` → Listado de empresas (solo admin interno).
+- `/org/empresas/nueva/` → Alta de empresa.
+- `/org/empresas/<id>/editar/` → Edición de empresa.
+- `/org/sucursales/` → Listado de sucursales de la empresa activa.
+- `/org/sucursales/nueva/` → Alta de sucursal.
+- `/org/sucursales/<id>/editar/` → Edición de sucursal.
+- `/org/seleccionar/` → Selector de empresa activa (fija `empresa_id` en sesión).
+
+---
+
+## 3) Contratos de entrada/salida
+
+### Empresas
+
+- **Input:** nombre, subdominio único, logo opcional.
+- **Proceso:** crear empresa; asociar al usuario actual como `admin`.
+- **Output:** empresa creada, redirect a listado.
+
+### Sucursales
+
+- **Input:** nombre, dirección opcional, código interno.
+- **Proceso:** crear sucursal vinculada a empresa activa.
+- **Output:** sucursal visible en listados de ventas/pagos.
+
+### Selector de empresa
+
+- **Input:** `empresa_id` (via GET o POST).
+- **Proceso:** verificar membresía del usuario; setear en `request.session["empresa_id"]`.
+- **Output:** redirect al dashboard de la empresa seleccionada.
+
+---
+
+## 4) Dependencias e integraciones
+
+- Depende de **`accounts`** para validar usuario y rol en cada empresa.
+- Expone a todo el sistema el **`empresa_id` en sesión**, usado por `tenancy.py`.
+- Plantillas globales (`_navbar.html`) muestran un switcher para cambiar de empresa.
+
+---
+
+## 5) Seguridad
+
+- Solo usuarios con rol **admin** en la empresa pueden editar datos y sucursales.
+- El selector valida que el usuario tenga membresía antes de fijar empresa activa.
+
+---
+
+# Módulo 3 — `apps/customers` (Clientes)
+
+> **Objetivo del módulo:** Administrar los datos de los clientes (contacto, cumpleaños, facturación). Este módulo provee la información base para asociar clientes a vehículos, ventas y notificaciones.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/customers/
+├─ __init__.py
+├─ apps.py                   # Config de la app (name="apps.customers")
+├─ admin.py                  # Registro de Cliente en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                 # Modelo Cliente (+ ClienteFacturacion opcional)
+├─ urls.py                   # Rutas propias (listado, alta, edición, detalle)
+├─ views.py                  # Vistas server-rendered CRUD de clientes
+├─ forms/
+│  ├─ __init__.py
+│  └─ customer.py           # Formularios de alta/edición (validaciones mínimas)
+├─ services/
+│  ├─ __init__.py
+│  └─ customers.py          # Casos de uso: crear/editar cliente, manejar facturación
+├─ selectors.py              # Lecturas: buscar cliente por nombre/teléfono/email
+├─ normalizers.py            # Normalización de datos (ej. limpiar WhatsApp, capitalizar nombres)
+├─ templates/
+│  └─ customers/
+│     ├─ list.html           # Listado de clientes + búsqueda
+│     ├─ form.html           # Alta/edición de cliente
+│     ├─ detail.html         # (Opcional MVP) detalle con datos y vehículos
+│     └─ _form_fields.html   # Partial con los campos (incluible en alta/edición)
+├─ static/
+│  └─ customers/
+│     ├─ customers.css       # Estilos propios para listados/formularios
+│     └─ customers.js        # Mejoras UX (búsqueda instantánea, validación simple)
+└─ emails/
+   └─ birthday.txt           # (Opcional) plantilla para felicitación de cumpleaños
+```
+
+### Rol de cada componente
+
+- **`models.py`**: define `Cliente` (nombre, apellido, email, tel, fecha_nac, json extra) y opcional `ClienteFacturacion`.
+- **`forms/customer.py`**: encapsula validación (ej. email único, teléfono limpio).
+- **`services/customers.py`**: mutaciones (crear cliente, editar datos, asignar facturación).
+- **`selectors.py`**: consultas de lectura (`buscar_cliente(q)`).
+- **`normalizers.py`**: helpers para normalizar input (whatsapp → formato internacional).
+- **`views.py`**: CRUD con forms y render a templates.
+- **`templates/customers/*`**: interfaz UI (list, form, detail).
+
+---
+
+## 2) Endpoints propuestos
+
+- `/clientes/` → Listado + búsqueda.
+- `/clientes/nuevo/` → Alta cliente.
+- `/clientes/<id>/editar/` → Edición cliente.
+- `/clientes/<id>/detalle/` → Detalle (opcional MVP).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Alta Cliente
+
+- **Input (POST)**: nombre, apellido, email, tel_wpp, fecha_nac.
+- **Proceso**: validar campos, normalizar teléfono, persistir.
+- **Output**: cliente creado, redirect a listado.
+
+### Edición Cliente
+
+- **Input (POST)**: mismos campos.
+- **Proceso**: validar cambios, actualizar registro.
+- **Output**: redirect con mensaje “Cliente actualizado”.
+
+### Búsqueda Cliente
+
+- **Input (GET)**: `q` (cadena).
+- **Proceso**: selectors buscan en nombre, email o tel.
+- **Output**: listado filtrado.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `org`**: todos los clientes están ligados a una empresa.
+- **Relaciona con `vehicles`**: un cliente puede tener uno o varios vehículos.
+- **Relaciona con `sales`**: las ventas requieren un cliente asociado.
+- **Relaciona con `notifications`**: notificaciones opcionales (ej. cumpleaños).
+
+---
+
+## 5) Seguridad
+
+- Todas las vistas requieren usuario autenticado.
+- Validar que el cliente pertenece a la empresa activa (tenant).
+
+---
+
+## 6) Roadmap inmediato
+
+1. Definir modelos (`Cliente`, opcional `ClienteFacturacion`).
+2. Crear `forms` y `normalizers`.
+3. Implementar CRUD básico en vistas.
+4. Templates: list + form funcional.
+5. Integrar selector de empresa activa (filtrar clientes por empresa).
+
+# Módulo 4 — `apps/vehicles` (Vehículos)
+
+> **Objetivo del módulo:** Administrar los vehículos de los clientes, clasificarlos por tipo y mantenerlos disponibles para asociar a las ventas. Cada vehículo pertenece a un cliente y a una empresa (tenant).
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/vehicles/
+├─ __init__.py
+├─ apps.py                   # Config de la app (name="apps.vehicles")
+├─ admin.py                  # Registro de Vehículo y TipoVehículo en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                 # Modelos: Vehiculo, TipoVehiculo
+├─ urls.py                   # Rutas propias (listado, alta, edición, detalle)
+├─ views.py                  # Vistas server-rendered CRUD de vehículos
+├─ forms/
+│  ├─ __init__.py
+│  └─ vehicle.py            # Formularios de alta/edición de vehículo
+├─ services/
+│  ├─ __init__.py
+│  ├─ vehicles.py           # Casos de uso: crear/editar vehículo
+│  └─ types.py              # Casos de uso: CRUD de TipoVehiculo
+├─ selectors.py              # Lecturas: buscar por patente, por cliente, listar tipos
+├─ validators.py             # Validaciones específicas (ej. patente única por empresa)
+├─ templates/
+│  └─ vehicles/
+│     ├─ list.html           # Listado de vehículos
+│     ├─ form.html           # Alta/edición de vehículo
+│     ├─ detail.html         # (Opcional) detalle de vehículo
+│     └─ _form_fields.html   # Partial de formulario
+├─ static/
+│  └─ vehicles/
+│     ├─ vehicles.css        # Estilos propios
+│     └─ vehicles.js         # Scripts UX (validaciones cliente-side, búsqueda rápida)
+└─ emails/
+   └─ vehicle_added.txt      # (Opcional) notificación al cliente al registrar vehículo
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `TipoVehiculo` (auto, moto, camioneta, etc.).
+  - `Vehiculo` (marca, modelo, patente, relación a cliente y tipo).
+- **`forms/vehicle.py`**: validación y presentación de campos.
+- **`services/vehicles.py`**: comandos para crear/editar vehículos.
+- **`services/types.py`**: comandos para crear/editar tipos de vehículo.
+- **`selectors.py`**: consultas rápidas (`vehiculos_de(cliente)`, `buscar_por_patente(pat)`).
+- **`validators.py`**: helpers para validar unicidad de patente dentro de empresa.
+- **`templates/vehicles/*`**: pantallas de CRUD.
+
+---
+
+## 2) Endpoints propuestos
+
+- `/vehiculos/` → Listado de vehículos (con filtro por cliente).
+- `/vehiculos/nuevo/` → Alta de vehículo.
+- `/vehiculos/<id>/editar/` → Edición.
+- `/vehiculos/<id>/detalle/` → Detalle (opcional MVP).
+- `/tipos-vehiculo/` → Listado y alta de tipos de vehículo (admin empresa).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Alta Vehículo
+
+- **Input (POST)**: cliente, tipo_vehiculo, marca, modelo, patente.
+- **Proceso**: validar unicidad de patente en empresa; persistir.
+- **Output**: vehículo creado, redirect a listado o al detalle del cliente.
+
+### Edición Vehículo
+
+- **Input (POST)**: mismos campos.
+- **Proceso**: validar cambios; actualizar registro.
+- **Output**: redirect con mensaje “Vehículo actualizado”.
+
+### Búsqueda por patente
+
+- **Input (GET)**: `q` (string).
+- **Proceso**: buscar coincidencias de patente en empresa activa.
+- **Output**: listado filtrado.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `customers`**: todo vehículo debe estar asociado a un cliente.
+- **Depende de `org`**: el vehículo pertenece a la empresa activa.
+- **Se integra con `sales`**: al crear ventas, se selecciona un vehículo de un cliente.
+- **Se integra con `pricing`**: el tipo de vehículo determina el precio del servicio.
+
+---
+
+## 5) Seguridad
+
+- Todas las vistas requieren usuario autenticado.
+- Validar que el vehículo pertenece a la empresa activa.
+- Validar que el usuario tenga rol habilitado para CRUD de vehículos.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Definir modelos (`TipoVehiculo`, `Vehiculo`).
+2. Crear formularios y validadores (unicidad de patente).
+3. Implementar vistas CRUD.
+4. Templates básicos de listado y form.
+5. Integrar selector de empresa activa (filtrar vehículos por empresa).
+
+# Módulo 5 — `apps/catalog` (Catálogo de Servicios)
+
+> **Objetivo del módulo:** Administrar el catálogo de **servicios** que ofrece el lavadero (lavado, encerado, interior, etc.), que luego serán asociados a precios y ventas. Este módulo es la fuente central de qué se puede vender.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/catalog/
+├─ __init__.py
+├─ apps.py                   # Config de la app (name="apps.catalog")
+├─ admin.py                  # Registro de Servicio en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                 # Modelo Servicio
+├─ urls.py                   # Rutas propias (listado, alta, edición)
+├─ views.py                  # Vistas server-rendered CRUD de servicios
+├─ forms/
+│  ├─ __init__.py
+│  └─ service.py            # Formulario de alta/edición de servicio
+├─ services/
+│  ├─ __init__.py
+│  └─ services.py           # Casos de uso: crear, editar, desactivar servicio
+├─ selectors.py              # Lecturas: listar activos, buscar por nombre
+├─ templates/
+│  └─ catalog/
+│     ├─ list.html           # Listado de servicios
+│     ├─ form.html           # Alta/edición
+│     └─ _form_fields.html   # Partial de formulario
+├─ static/
+│  └─ catalog/
+│     ├─ catalog.css         # Estilos propios
+│     └─ catalog.js          # Scripts UX
+└─ emails/
+   └─ service_updated.txt    # (Opcional) aviso interno si cambia un servicio
+```
+
+### Rol de cada componente
+
+- **`models.py`**: define `Servicio` (nombre, descripción, activo, timestamps).
+- **`forms/service.py`**: validación de nombre único en empresa, activo por defecto.
+- **`services/services.py`**: mutaciones (crear, editar, archivar servicio).
+- **`selectors.py`**: consultas (`servicios_activos(empresa)`).
+- **`views.py`**: CRUD básico sobre el modelo.
+- **`templates/catalog/*`**: interfaz de listado y formulario.
+
+---
+
+## 2) Endpoints propuestos
+
+- `/catalogo/servicios/` → Listado de servicios.
+- `/catalogo/servicios/nuevo/` → Alta servicio.
+- `/catalogo/servicios/<id>/editar/` → Edición servicio.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Alta Servicio
+
+- **Input (POST)**: nombre, descripción opcional.
+- **Proceso**: validar unicidad, crear servicio.
+- **Output**: servicio activo, redirect a listado.
+
+### Edición Servicio
+
+- **Input (POST)**: nombre, descripción, activo (bool).
+- **Proceso**: actualizar registro.
+- **Output**: redirect con mensaje “Servicio actualizado”.
+
+### Listado Servicios
+
+- **Input (GET)**: opcional `q` (búsqueda por nombre).
+- **Proceso**: obtener servicios activos de la empresa.
+- **Output**: render de `list.html`.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `org`**: cada servicio pertenece a una empresa.
+- **Relaciona con `pricing`**: para asociar precios por sucursal y tipo de vehículo.
+- **Relaciona con `sales`**: los ítems de venta hacen referencia a un servicio.
+
+---
+
+## 5) Seguridad
+
+- Solo usuarios autenticados y con rol `admin` o `operador` en la empresa pueden administrar servicios.
+- Lecturas accesibles a cualquier usuario con membresía en la empresa activa.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Definir modelo `Servicio`.
+2. Crear formulario y vistas CRUD.
+3. Templates: listado y form simples.
+4. Integrar con `pricing` (precios referencian servicios).
+
+# Módulo 6 — `apps/pricing` (Precios por Sucursal y Tipo de Vehículo)
+
+> **Objetivo del módulo:** Definir y resolver el **precio vigente** de cada **Servicio × TipoVehículo × Sucursal** dentro de una Empresa. Es la fuente única de verdad para cálculos de ventas.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/pricing/
+├─ __init__.py
+├─ apps.py                    # Config de la app (name="apps.pricing")
+├─ admin.py                   # Registro de modelos en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                  # Modelos: PrecioServicio (con vigencias)
+├─ urls.py                    # Rutas propias (listado, alta, edición)
+├─ views.py                   # Vistas server-rendered para CRUD y consulta
+├─ forms/
+│  ├─ __init__.py
+│  └─ price.py               # Form de alta/edición (validaciones de rango y unicidad lógica)
+├─ services/
+│  ├─ __init__.py
+│  ├─ pricing.py             # Comandos: crear/actualizar precio; cerrar vigencias
+│  └─ resolver.py            # Resolución: obtener precio vigente dado (srv, tipo, suc)
+├─ selectors.py               # Lecturas: listar precios por combinaciones/estado
+├─ validators.py              # Reglas: solapamiento de vigencias, moneda válida, monto > 0
+├─ templates/
+│  └─ pricing/
+│     ├─ list.html            # Listado con filtros (sucursal, servicio, tipo, vigencia)
+│     ├─ form.html            # Alta/edición de precio
+│     └─ _form_fields.html    # Partial del formulario
+└─ static/
+   └─ pricing/
+      ├─ pricing.css          # Estilos propios
+      └─ pricing.js           # UX: filtros dinámicos, pequeñas validaciones
+```
+
+### Rol de cada componente
+
+- **`models.py`**: `PrecioServicio(empresa, sucursal, servicio, tipo_vehiculo, precio, moneda, vigencia_inicio, vigencia_fin, activo)`.
+- **`forms/price.py`**: valida montos, moneda y evita rangos inválidos.
+- **`validators.py`**: chequea **solapamientos** de vigencias por misma combinación (srv×tipo×suc).
+- **`services/pricing.py`**: alta/edición “segura”: cierra vigencia anterior si corresponde, crea nueva tarifa.
+- **`services/resolver.py`**: **API interna** para ventas: `get_precio_vigente(empresa, sucursal, servicio, tipo, fecha=None)`.
+- **`selectors.py`**: listados/filtros (por sucursal, servicio, estado, fecha).
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET /precios/` → listado con filtros (sucursal, servicio, tipo, estado, vigencia).
+- `GET /precios/nuevo/` → alta de precio.
+- `POST /precios/nuevo/` → crear precio (cierra/ajusta vigencias previas si aplica).
+- `GET /precios/<id>/editar/` → edición.
+- `POST /precios/<id>/editar/` → actualizar precio (opcional: finalizar vigencia).
+
+> Nota: el **resolver** de precios **no expone vista**; es consumido por `sales` vía `services.resolver`.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Alta/Edición de Precio
+
+- **Input (POST)**: `sucursal_id`, `servicio_id`, `tipo_vehiculo_id`, `precio` (decimal), `moneda` (str), `vigencia_inicio` (date), `vigencia_fin` (opcional).
+- **Proceso**:
+  - Validar que **no haya solapamiento** de vigencias para la misma combinación.
+  - Si existe un precio vigente que choca, **cerrar** su `vigencia_fin` al día anterior.
+  - Persistir nuevo registro “activo”.
+- **Output**: creación/actualización exitosa; redirect a `/precios/` con mensaje.
+
+### Resolución de Precio (uso interno)
+
+- **Input**: `empresa`, `sucursal`, `servicio`, `tipo_vehiculo`, `fecha` (default: hoy).
+- **Proceso**: buscar registro con `vigencia_inicio <= fecha <= vigencia_fin (o NULL)` y `activo=True` con mayor prioridad por fecha de inicio más reciente.
+- **Output**: objeto `PrecioServicio` o excepción `PrecioNoDisponibleError`.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `org`**: Sucursal y Empresa.
+- **Depende de `catalog`**: Servicio.
+- **Depende de `vehicles`**: TipoVehiculo.
+- **Usado por `sales`**: cálculo de ítems en venta (precio unitario cacheado).
+
+---
+
+## 5) Seguridad
+
+- Solo usuarios autenticados con rol **`admin`** en la empresa pueden **crear/editar** precios.
+- Usuarios **`operador`** pueden **listar/consultar**.
+- Validar pertenencia a la **empresa activa** en todas las operaciones.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Modelo `PrecioServicio` + migraciones.
+2. Validadores → no solapar vigencias; monto/moneda válidos.
+3. Servicio `pricing.create_or_replace(...)` para alta segura.
+4. Servicio `resolver.get_precio_vigente(...)` consumible por `sales`.
+5. Vistas + templates (list/form) y filtros básicos.
+
+# Módulo 7 — `apps/sales` (Ventas / Órdenes de Servicio)
+
+> **Objetivo del módulo:** Crear y gestionar **Ventas** con sus **ítems**, manejar **estados** del ciclo (FSM) y mantener **totales** consistentes. Provee la orden madre para pagos, comprobantes y notificaciones.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/sales/
+├─ __init__.py
+├─ apps.py                       # Config de la app (name="apps.sales")
+├─ admin.py                      # Registro de Venta y VentaItem en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                     # Modelos: Venta, VentaItem (foreign keys a org/customers/vehicles/catalog)
+├─ urls.py                       # Rutas propias (listado, nueva, detalle/editar, acciones)
+├─ views.py                      # Vistas server-rendered (CRUD de venta e ítems, acciones de estado)
+├─ forms/
+│  ├─ __init__.py
+│  ├─ sale.py                    # Formulario base de Venta (cliente, vehículo, sucursal, notas)
+│  └─ item.py                    # Formulario de ítem (servicio, cantidad) — precio se resuelve
+├─ services/
+│  ├─ __init__.py
+│  ├─ sales.py                   # Comandos: crear_venta, actualizar_venta, finalizar, cancelar
+│  ├─ items.py                   # Comandos: agregar_item, quitar_item, actualizar_cantidad
+│  └─ lifecycle.py               # Orquestación de cambios de estado y side-effects (hooks)
+├─ selectors.py                  # Lecturas: listar ventas por estado/fecha, detalle con ítems
+├─ calculations.py               # Cálculos: subtotal, descuentos, propina, total, saldo_pendiente
+├─ fsm.py                        # Máquina de estados permitidos: borrador→en_proceso→terminado→pagado/cancelado
+├─ templates/
+│  └─ sales/
+│     ├─ list.html               # Listado y filtros (estado, sucursal, rango fechas)
+│     ├─ create.html             # Crear venta (elige cliente, vehículo, sucursal)
+│     ├─ detail.html             # Detalle/edición: ítems, totales, acciones (finalizar, cancelar)
+│     ├─ _item_row.html          # Partial para fila de ítem
+│     └─ _summary_card.html      # Partial con totales (se recalcula tras cambios)
+├─ static/
+│  └─ sales/
+│     ├─ sales.css               # Estilos propios
+│     └─ sales.js                # UX: añadir/quitar ítems sin recargar (progressive enhancement)
+└─ signals.py                    # (Opcional) Señales post-save para recalcular totales/side-effects
+```
+
+### Rol de cada componente
+
+- **`models.py`**: `Venta` (empresa, sucursal, cliente, vehículo, estado, totales, saldo_pendiente) y `VentaItem` (servicio, cantidad, precio unitario cacheado).
+- **`calculations.py`**: funciones puras para recomputar `subtotal`, `descuento`, `propina`, `total` y `saldo_pendiente`.
+- **`fsm.py`**: define estados permitidos y transiciones válidas.
+- **`services/sales.py`** y **`services/items.py`**: mutaciones atómicas que invocan cálculos y validaciones; devuelven objetos/DTO simples.
+- **`services/lifecycle.py`**: hooks de cambio de estado (p.ej. al pasar a `pagado` disparar invoicing/notif, si aplica).
+- **`selectors.py`**: consultas optimizadas para listas y detalle.
+- **`views.py`**: orquestan GET/POST y render; delgadas (delegan en services).
+
+---
+
+## 2) Endpoints propuestos (UI server-rendered)
+
+- `GET  /ventas/` → Listado (filtros: estado, sucursal, fecha).
+- `GET  /ventas/nueva/` → Form para crear venta (selecciona cliente, vehículo, sucursal).
+- `POST /ventas/nueva/` → Crear venta (estado inicial: `borrador`).
+- `GET  /ventas/<uuid>/` → Detalle/editar: ver ítems, totales y acciones.
+- `POST /ventas/<uuid>/items/agregar/` → Agregar ítem (servicio, cantidad).
+- `POST /ventas/<uuid>/items/<item_id>/actualizar/` → Cambiar cantidad.
+- `POST /ventas/<uuid>/items/<item_id>/eliminar/` → Quitar ítem.
+- `POST /ventas/<uuid>/finalizar/` → Transición a `terminado` (bloquea edición de ítems salvo rol admin).
+- `POST /ventas/<uuid>/cancelar/` → Transición a `cancelado`.
+- _(No UI directa aquí)_ **Pagos**: iniciados desde `apps/payments` en `/ventas/<uuid>/pagos/nuevo/` → al registrarse pagos, esta app actualiza saldo/estado.
+
+> Nota: endpoints de **pago** viven en `apps/payments`, pero el **detalle de venta** debe enlazarlos claramente.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### 3.1 Crear Venta
+
+- **Input (POST)**: `cliente_id`, `vehiculo_id`, `sucursal_id`, `notas` (opcional).
+- **Proceso**: `services.sales.crear_venta` valida pertenencia a empresa activa y estado inicial `borrador`.
+- **Output**: `venta_id` y redirect a `/ventas/<id>/`.
+
+### 3.2 Agregar/Actualizar/Quitar Ítems
+
+- **Input (POST)**:
+  - Agregar: `servicio_id`, `cantidad`.
+  - Actualizar: `item_id`, `cantidad`.
+  - Quitar: `item_id`.
+- **Proceso**:
+  - Resolver **precio vigente** con `apps.pricing.services.resolver.get_precio_vigente(...)` usando `(sucursal, servicio, tipo_vehiculo del vehículo)`.
+  - Cachear `precio_unitario` en `VentaItem`.
+  - Recalcular totales con `calculations.py` y grabar en `Venta`.
+- **Output**: venta actualizada; render parcial de totales o redirect con mensaje.
+
+### 3.3 Finalizar/Cancelar Venta (FSM)
+
+- **Input (POST)**: acción `finalizar` o `cancelar` sobre una venta en estado válido.
+- **Proceso**: `fsm.py` valida transición; `services.lifecycle` ejecuta side-effects (ej. bloquear edición de ítems al finalizar).
+- **Output**: venta en nuevo estado; mensajes de confirmación.
+
+### 3.4 Sincronía con Pagos
+
+- **Input**: desde `apps/payments` al registrar `PAGO(venta_id, metodo, monto, es_propina)`.
+- **Proceso**: `apps/payments` invoca a `services.sales` para actualizar `saldo_pendiente`; si saldo=0 → transición a `pagado`.
+- **Output**: venta `pagada`; habilita emisión de comprobante (módulo invoicing).
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de**: `org` (empresa/sucursal), `customers` (cliente), `vehicles` (vehículo/tipo), `catalog` (servicio), `pricing` (resolución de precio).
+- **Usado por**: `payments` (pagos a venta), `invoicing` (comprobante), `notifications` (aviso “listo”), `cashbox` (cierre por periodo).
+
+---
+
+## 5) Seguridad
+
+- Todas las vistas requieren autenticación y membresía en la **empresa activa**.
+- Edición de ítems **solo** en `borrador` o `en_proceso`; `terminado` restringe (configurable por rol).
+- No permitir agregar ítems si no hay precio vigente para la combinación.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Modelos `Venta` y `VentaItem`.
+2. `calculations.py` (funciones puras) + `fsm.py` (transiciones).
+3. Services de venta e ítems (mutaciones atómicas).
+4. Vistas + templates (crear, detalle con ítems, acciones).
+5. Integración con `pricing` (resolver precios) y con `payments` (actualizar saldo/estado).
+
+# Módulo 8 — `apps/payments` (Pagos)
+
+> **Objetivo del módulo:** Registrar **pagos** para una venta (método, monto, propina), actualizar el **saldo** y, cuando corresponda, marcar la venta como **pagada**. Debe garantizar **idempotencia** básica y trazabilidad por referencias externas.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/payments/
+├─ __init__.py
+├─ apps.py                      # Config de la app (name="apps.payments")
+├─ admin.py                     # Registro de Pago en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                    # Modelo: Pago (venta, metodo, monto, es_propina, referencia, idempotency_key)
+├─ urls.py                      # Rutas propias (alta desde venta, listado opcional)
+├─ views.py                     # Vistas server-rendered (form de pago, confirmaciones)
+├─ forms/
+│  ├─ __init__.py
+│  └─ payment.py               # Form de registro de pago (validaciones mínimas)
+├─ services/
+│  ├─ __init__.py
+│  ├─ payments.py              # Comandos: registrar_pago(), revertir_pago() (opcional)
+│  └─ reconciliation.py        # (Opcional) conciliaciones simples por método/fecha
+├─ selectors.py                 # Lecturas: pagos por venta, por fecha, por método
+├─ validators.py                # Reglas: montos > 0, métodos permitidos, idempotencia
+├─ templates/
+│  └─ payments/
+│     ├─ form.html             # Formulario de alta de pago
+│     ├─ list.html             # (Opcional) Listado global/por fecha
+│     └─ _summary_sale.html    # (Opcional) Resumen de venta y saldo
+└─ static/
+   └─ payments/
+      ├─ payments.css          # Estilos propios
+      └─ payments.js           # UX (confirmaciones, máscara de montos)
+```
+
+### Rol de cada componente
+
+- **`models.py`**: `Pago(venta, metodo, monto, es_propina, referencia, idempotency_key, pagado_en)` con integridad de empresa a través de la venta.
+- **`forms/payment.py`**: valida monto > 0, formato de referencia, opción `es_propina`.
+- **`validators.py`**: chequeos de método permitido (efectivo, tarjeta, MP), unicidad de `idempotency_key` por venta.
+- **`services/payments.py`**: `registrar_pago(venta, datos)` agrega pago, recalcula saldo en `sales`, y si saldo=0 transiciona a `pagado`.
+- **`selectors.py`**: consultas para UI y reportes (pagos por venta, por rango, por método).
+- **`views.py`**: orquesta formularios, confirma y redirige a la venta.
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /ventas/<uuid:venta_id>/pagos/nuevo/` → Form de alta de pago.
+- `POST /ventas/<uuid:venta_id>/pagos/nuevo/` → Registrar pago.
+- `GET  /pagos/` → (Opcional) Listado global con filtros por fecha/método/sucursal.
+
+> El flujo natural parte desde el **detalle de la venta** (módulo `sales`) enlazando a “Agregar pago”.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Registrar Pago
+
+- **Input (POST)**:
+  - `metodo` (str: `efectivo`, `tarjeta`, `mp`, etc.).
+  - `monto` (decimal positivo).
+  - `es_propina` (bool).
+  - `referencia` (str, opcional: id transacción externa, cupón).
+  - `idempotency_key` (str, opcional pero recomendado).
+- **Proceso**:
+  - Validar método y monto.
+  - Enforzar **idempotencia**: si existe un `Pago` con la misma `idempotency_key` para esa venta, **no duplicar**.
+  - Crear `Pago` y **delegar** en `apps.sales` el **recalculo** de `saldo_pendiente`.
+  - Si `saldo_pendiente == 0`, transicionar venta a **`pagado`** (vía `sales.services.lifecycle`).
+- **Output (UI)**:
+  - Redirect a `/ventas/<id>/` con mensaje “Pago registrado”.
+  - En duplicado por idempotencia: mensaje “Este pago ya fue registrado”.
+
+### Revertir Pago (opcional)
+
+- **Input**: `pago_id` y motivo.
+- **Proceso**: marcar reverso y recalcular saldo.
+- **Output**: venta vuelve a estado consistente (podría salir de `pagado` si corresponde).
+
+---
+
+## 4) Integraciones y dependencias
+
+- **Depende de `sales`**: necesita la venta para asociar el pago y actualizar totales/estado.
+- **Usado por `cashbox`**: para cierres por período y por **método** de pago.
+- **Opcional a futuro**: integración con pasarela (MP/Stripe) colocando `referencia` e `idempotency_key`.
+
+---
+
+## 5) Seguridad
+
+- Requiere usuario autenticado y membresía en la **empresa activa**.
+- Validar que la venta **pertenece** a la empresa activa.
+- Restringir revertir/eliminar pagos a rol `admin` (si se habilita esa acción).
+
+---
+
+## 6) Consideraciones funcionales clave
+
+- **Idempotencia**: imprescindible en integraciones para evitar duplicados al reintentar.
+- **Propina**: puede registrarse como pago marcado `es_propina=True`; los cierres de caja deben sumar propinas separadas.
+- **Parcialidades**: permitir múltiples pagos hasta cubrir el total.
+- **Moneda**: consistente con `pricing`; en MVP se asume una moneda por empresa.
+
+---
+
+## 7) Roadmap inmediato
+
+1. Modelo `Pago` + validadores.
+2. Servicio `registrar_pago()` que actualiza saldo/estado de venta.
+3. Form + vistas (GET/POST) y redirección a la venta.
+4. Selectors para listados y reportes básicos.
+5. Enlaces claros desde `/ventas/<id>/` para agregar pagos.
+
+# Módulo 9 — `apps/invoicing` (Comprobantes Simples y Numeración)
+
+> **Objetivo del módulo:** Emitir **comprobantes no fiscales** para ventas pagadas, con **numeración por Sucursal y Tipo**, y generar un **snapshot** (HTML/PDF) de la venta al momento de emisión.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/invoicing/
+├─ __init__.py
+├─ apps.py                      # Config de la app (name="apps.invoicing")
+├─ admin.py                     # Registro de Comprobante y Secuencia en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                    # Modelos: Comprobante, SecuenciaComprobante, ClienteFacturacion
+├─ urls.py                      # Rutas (listado, emitir desde venta, ver/descargar)
+├─ views.py                     # Vistas server-rendered (emisión, listado, detalle)
+├─ forms/
+│  ├─ __init__.py
+│  └─ invoice.py               # Form para datos de facturación (si aplica) y tipo comprobante
+├─ services/
+│  ├─ __init__.py
+│  ├─ numbering.py             # Lógica de numeración transaccional por sucursal/tipo
+│  ├─ emit.py                  # Caso de uso: emitir comprobante (snapshot + guardar PDF/HTML)
+│  └─ renderers.py             # Render del template HTML a PDF/archivo estático
+├─ selectors.py                 # Lecturas: comprobantes por fecha, por venta, por sucursal
+├─ templates/
+│  └─ invoicing/
+│     ├─ list.html             # Listado de comprobantes
+│     ├─ emit.html             # Form (si requiere datos de facturación/tipo)
+│     ├─ detail.html           # Vista detalle con link al archivo
+│     └─ _invoice_print.html   # Template base del comprobante (HTML imprimible)
+├─ static/
+│  └─ invoicing/
+│     ├─ invoicing.css         # Estilos para impresión/PDF
+│     └─ invoicing.js          # (Opcional) helpers UI
+└─ pdf/
+   └─ storage_backend.md       # Notas: dónde se guardan PDFs (filesystem en dev; storage en prod)
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `Comprobante(venta, cliente_facturacion, tipo, punto_venta, numero, total, moneda, pdf_url, emitido_en)`.
+  - `SecuenciaComprobante(sucursal, tipo, proximo_numero, actualizado_en)` (control de numeración).
+  - `ClienteFacturacion(cliente, razon_social, cuit, domicilio, …)` (opcional si se captura info distinta del cliente).
+- **`services/numbering.py`**: incrementa la secuencia **de forma atómica** (bloqueo/transaction).
+- **`services/emit.py`**: valida venta pagada, toma número, construye **snapshot** (líneas, totales), renderiza y persiste `Comprobante`.
+- **`services/renderers.py`**: render HTML → PDF/archivo (en MVP, guardar HTML y/o PDF básico).
+- **`selectors.py`**: listados/consultas por rango y sucursal.
+- **`forms/invoice.py`**: datos mínimos si hace falta capturar/seleccionar perfil de facturación y tipo.
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /comprobantes/` → Listado (filtros por fecha/sucursal/tipo).
+- `GET  /ventas/<uuid:venta_id>/emitir/` → Form/confirmación de emisión (si requiere datos).
+- `POST /ventas/<uuid:venta_id>/emitir/` → **Emitir** comprobante: asigna número y genera snapshot.
+- `GET  /comprobantes/<uuid:id>/` → Detalle de comprobante (metadatos + link `pdf_url`/html).
+- `GET  /comprobantes/<uuid:id>/descargar/` → Descarga del archivo (si se guarda local).
+
+> La entrada al flujo suele estar desde el **detalle de la venta** (cuando está `pagada`).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Emitir Comprobante
+
+- **Input**: `venta_id` (de una venta **pagada**), `tipo` (p.ej. `ticket`), `cliente_facturacion_id` (opcional), `punto_venta` (configurable por sucursal).
+- **Proceso**:
+  1. Validar que la venta pertenece a la **empresa activa** y está en estado **pagado**.
+  2. Obtener **número** de `SecuenciaComprobante(sucursal, tipo)` de forma transaccional.
+  3. Construir **snapshot**: copiar `servicios`, `cantidades`, `precios`, `totales`.
+  4. Renderizar plantilla `/_invoice_print.html` → **HTML/PDF** y guardar archivo (escribir `pdf_url`).
+  5. Persistir `Comprobante` con metadatos.
+- **Output**: registro `Comprobante` creado; redirect a `/comprobantes/<id>/`.
+
+### Ver/Descargar
+
+- **Input**: `id` del comprobante.
+- **Proceso**: cargar registro; servir archivo desde `pdf_url` o storage backend.
+- **Output**: HTML/PDF entregado.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `sales`**: requiere venta `pagada` para emitir.
+- **Depende de `org`**: usa Sucursal (para **secuencia** y punto de venta).
+- **Opcional con `customers`**: `ClienteFacturacion` puede diferir del `Cliente`.
+- **Usado por `notifications`**: link a comprobante en mensaje “vehículo listo” (opcional).
+- **Storage**: en dev, filesystem (`MEDIA_ROOT`); en prod, storage externo (S3/GCS).
+
+---
+
+## 5) Seguridad
+
+- Solo usuarios autenticados con permisos en la **empresa activa**.
+- Emisión disponible **solo si** `Venta.estado == "pagado"`.
+- Numeración protegida con **transacciones**; evitar duplicados.
+
+---
+
+## 6) Consideraciones clave (MVP)
+
+- **Snapshot inmutable**: el comprobante no debe cambiar si luego cambian precios/servicios.
+- **Numeración por sucursal y tipo**: cada combinación mantiene su contador.
+- **Formato**: en MVP, HTML imprimible + opción a PDF simple.
+- **Re-emisión**: no reusar número; si se anula, registrar otro flujo (fuera del MVP).
+
+---
+
+## 7) Roadmap inmediato
+
+1. Modelos `Comprobante`, `SecuenciaComprobante`, `ClienteFacturacion` (opcional).
+2. Servicio `numbering.next_number(sucursal, tipo)` con transacción.
+3. Servicio `emit.emitir(venta_id, datos)` que realiza el snapshot y persiste `Comprobante`.
+4. Template `/_invoice_print.html` y almacenamiento del archivo (HTML/PDF).
+5. Vistas + rutas (listar, emitir, ver/descargar).
+
+# Módulo 10 — `apps/notifications` (Plantillas y Log de Notificaciones)
+
+> **Objetivo del módulo:** Gestionar **plantillas** de mensajes (Email/WhatsApp/SMS — simulado en MVP), **renderizarlas** con datos de la venta/cliente, y **registrar** cada envío en un **log** con su estado. En el MVP no se integra un proveedor real: el “envío” es simulado y auditable.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/notifications/
+├─ __init__.py
+├─ apps.py                         # Config de la app (name="apps.notifications")
+├─ admin.py                        # Registro de PlantillaNotif y LogNotif en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                       # Modelos: PlantillaNotif, LogNotif
+├─ urls.py                         # Rutas propias (listar/editar plantillas, enviar desde venta)
+├─ views.py                        # Vistas server-rendered (CRUD plantillas, acción enviar/preview)
+├─ forms/
+│  ├─ __init__.py
+│  └─ template.py                 # Form de creación/edición de plantilla
+├─ services/
+│  ├─ __init__.py
+│  ├─ renderers.py                # Render de plantilla con contexto (venta, cliente, empresa)
+│  └─ dispatcher.py               # Orquestación de envío simulado + persistencia de LogNotif
+├─ selectors.py                    # Lecturas: listar plantillas activas, logs por venta/fecha
+├─ templates/
+│  └─ notifications/
+│     ├─ templates_list.html      # Listado de plantillas
+│     ├─ template_form.html       # Alta/edición de plantilla
+│     ├─ preview.html             # Vista previa con variables de muestra
+│     └─ send_from_sale.html      # Pantalla para enviar notificación de una venta
+├─ static/
+│  └─ notifications/
+│     ├─ notifications.css        # Estilos propios
+│     └─ notifications.js         # UX: copiar cuerpo, reemplazos en vivo (preview)
+└─ emails/
+   └─ generic_subject.txt         # (Opcional) asunto por defecto si canal=email
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `PlantillaNotif(empresa, clave, canal, cuerpo_tpl, activo)` — ej.: `canal ∈ {email, whatsapp}`.
+  - `LogNotif(venta, canal, destinatario, cuerpo_renderizado, estado, enviado_en)` — traza histórica.
+- **`services/renderers.py`**: compone **contexto** (cliente, vehículo, venta, empresa) y rinde `cuerpo_tpl` → `cuerpo_renderizado`.
+- **`services/dispatcher.py`**: simula el **envío** según `canal` y crea `LogNotif` con `estado ∈ {enviado, error}`.
+- **`selectors.py`**: listados de plantillas activas; logs por venta/fecha/canal.
+- **`views.py`**: CRUD de plantillas y acción **enviar** (desde una venta).
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /notificaciones/plantillas/` → Listado.
+- `GET  /notificaciones/plantillas/nueva/` → Alta plantilla.
+- `POST /notificaciones/plantillas/nueva/` → Crear.
+- `GET  /notificaciones/plantillas/<uuid:id>/editar/` → Edición.
+- `POST /notificaciones/plantillas/<uuid:id>/editar/` → Actualizar.
+- `GET  /ventas/<uuid:venta_id>/notificar/` → Form para elegir **plantilla** y **destinatario** (autocompleta con cliente).
+- `POST /ventas/<uuid:venta_id>/notificar/` → Render + “envío” simulado + creación de `LogNotif`.
+- `GET  /notificaciones/logs/` → (Opcional) Listado de logs con filtros por fecha/venta/canal/estado.
+
+> La UI natural agrega un botón “Notificar” en el **detalle de la venta** cuando está `terminado` o `pagado` (configurable).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Crear/Editar Plantilla
+
+- **Input (POST)**: `clave` (única por empresa), `canal` (`email`/`whatsapp`), `cuerpo_tpl` (texto con `{{variables}}`), `activo`.
+- **Proceso**: persistir plantilla; validar que `clave` no se repita.
+- **Output**: plantilla lista para usar en envíos.
+
+### Enviar Notificación desde una Venta
+
+- **Input (POST)**: `venta_id`, `plantilla_id`, `destinatario` (email o teléfono), **contexto adicional opcional** (`nota_extra`).
+- **Proceso**:
+  1. `renderers.render(plantilla, venta, extras)` → `cuerpo_renderizado`.
+  2. `dispatcher.send(canal, destinatario, cuerpo_renderizado)` (simulado).
+  3. Crear `LogNotif(venta, canal, destinatario, cuerpo_renderizado, estado, enviado_en=now)`.
+- **Output (UI)**: redirect al detalle de la venta o a `/notificaciones/logs/` con mensaje de éxito/error.
+
+### Preview
+
+- **Input (GET/POST)**: `plantilla_id`, `venta_id` (opcional).
+- **Proceso**: render con **datos de ejemplo** o con una venta real.
+- **Output**: `preview.html` mostrando el cuerpo final.
+
+---
+
+## 4) Variables soportadas en plantillas (MVP sugerido)
+
+- `{{cliente.nombre}}`, `{{cliente.apellido}}`, `{{cliente.telefono}}`
+- `{{vehiculo.patente}}`, `{{vehiculo.marca}}`, `{{vehiculo.modelo}}`
+- `{{venta.id}}`, `{{venta.total}}`, `{{venta.estado}}`
+- `{{empresa.nombre}}`, `{{sucursal.nombre}}`
+- `{{nota_extra}}` (dato libre desde el form de envío)
+
+> El **renderer** debe manejar “faltantes” con valores por defecto para no romper el envío.
+
+---
+
+## 5) Dependencias e integraciones
+
+- **Depende de `sales`**: para cargar venta/cliente/vehículo y validar empresa activa.
+- **Usado por `invoicing`** (opcional): incluir `link` a comprobante en el mensaje.
+- **Transversal**: `org` (empresa/sucursal) para contexto.
+
+---
+
+## 6) Seguridad
+
+- Solo usuarios autenticados y con permiso en la **empresa activa**.
+- Validar que la **venta** pertenezca a la empresa.
+- Sanitizar variables en el render para evitar inyección (el MVP usa render de texto plano).
+
+---
+
+## 7) Roadmap inmediato
+
+1. Modelos `PlantillaNotif` y `LogNotif`.
+2. Renderer de variables con contexto de venta y valores por defecto.
+3. Dispatcher simulado + creación de `LogNotif`.
+4. Vistas y templates: CRUD de plantillas, “Enviar desde venta” y “Preview”.
+5. Enlace claro en `/ventas/<id>/` para notificar al cliente.
+
+# Módulo 11 — `apps/cashbox` (Cierres de Caja)
+
+> **Objetivo del módulo:** Permitir el **cierre operativo de caja** por sucursal/usuario en un rango de tiempo (normalmente un turno o día). Consolidar ventas, pagos y propinas en totales por método de pago, registrar notas y garantizar trazabilidad.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/cashbox/
+├─ __init__.py
+├─ apps.py                        # Config de la app (name="apps.cashbox")
+├─ admin.py                       # Registro de CierreCaja y CierreCajaTotal en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                      # Modelos: CierreCaja, CierreCajaTotal
+├─ urls.py                        # Rutas: abrir, cerrar, listar, detalle
+├─ views.py                       # Vistas server-rendered (form de cierre, detalle, listado)
+├─ forms/
+│  ├─ __init__.py
+│  └─ closure.py                 # Formulario: notas, confirmaciones
+├─ services/
+│  ├─ __init__.py
+│  ├─ cashbox.py                 # Casos de uso: abrir_cierre(), cerrar_cierre()
+│  └─ totals.py                  # Calcular totales de pagos por método + propinas
+├─ selectors.py                   # Consultas: cierres por fecha/sucursal, detalle con totales
+├─ templates/
+│  └─ cashbox/
+│     ├─ list.html               # Listado de cierres (fecha, usuario, sucursal)
+│     ├─ form.html               # Form de apertura/cierre
+│     ├─ detail.html             # Detalle de cierre con totales
+│     └─ _totals_table.html      # Partial con desglose de métodos/propinas
+└─ static/
+   └─ cashbox/
+      ├─ cashbox.css             # Estilos propios
+      └─ cashbox.js              # UX: confirmación de cierre, reload de totales
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `CierreCaja(empresa, sucursal, usuario, abierto_en, cerrado_en, notas)`.
+  - `CierreCajaTotal(cierre_caja, metodo, monto, propinas)`.
+- **`services/cashbox.py`**: controla apertura/cierre, evita solapamientos, registra timestamps.
+- **`services/totals.py`**: resume pagos (`apps/payments`) por método y propinas dentro del rango.
+- **`selectors.py`**: consultas para reportes históricos y detalle de un cierre.
+- **`forms/closure.py`**: validación mínima (no cerrar dos veces, notas obligatorias si hay diferencias).
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /caja/` → Listado de cierres por sucursal (filtros por fecha).
+- `GET  /caja/abrir/` → Apertura de caja (marca `abierto_en`).
+- `POST /caja/abrir/` → Crear registro de apertura.
+- `GET  /caja/<uuid:id>/cerrar/` → Form para cierre (totales precargados).
+- `POST /caja/<uuid:id>/cerrar/` → Calcular totales, guardar `cerrado_en`, registrar `CierreCajaTotal`.
+- `GET  /caja/<uuid:id>/` → Detalle del cierre con desglose por método.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Apertura
+
+- **Input (POST)**: sucursal, usuario, notas opcionales.
+- **Proceso**: crear `CierreCaja(abierto_en=now, cerrado_en=null)`.
+- **Output**: redirect a `/caja/<id>/`.
+
+### Cierre
+
+- **Input (POST)**: notas, confirmación.
+- **Proceso**:
+  1. Calcular totales de pagos (`apps/payments`) desde `abierto_en` hasta `now`.
+  2. Guardar `cerrado_en`.
+  3. Crear `CierreCajaTotal` por método (`efectivo`, `tarjeta`, `mp`) + propinas.
+  4. Validar cuadratura (opcional, si hay caja física).
+- **Output**: cierre completado; render de detalle.
+
+### Detalle
+
+- **Input (GET)**: `cierre_id`.
+- **Proceso**: cargar totales.
+- **Output**: HTML con desglose.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `payments`**: obtiene pagos para resumir totales.
+- **Depende de `sales`**: contexto de ventas cerradas en el periodo.
+- **Depende de `org`**: sucursal/empresa.
+- **Usado en reporting**: dashboards financieros simples.
+
+---
+
+## 5) Seguridad
+
+- Autenticación requerida.
+- Validar que el usuario pertenece a la **empresa activa**.
+- Solo rol `admin` o `cajero` puede abrir/cerrar cajas.
+- Evitar múltiples aperturas abiertas en una sucursal.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Modelo `CierreCaja` + `CierreCajaTotal`.
+2. Servicio `abrir_cierre()`.
+3. Servicio `cerrar_cierre()` que calcula totales con `totals.py`.
+4. Templates: listado, form de cierre y detalle con desglose.
+5. Conexión con `payments` para sumar pagos/propinas.
+
+# Módulo 12 — `apps/saas` (Planes y Suscripciones)
+
+> **Objetivo del módulo:** Administrar **planes** del SaaS y **suscripciones** de cada Empresa. Controlar límites (soft) y estado de facturación a nivel MVP sin pasarela de pago.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/saas/
+├─ __init__.py
+├─ apps.py                       # Config de la app (name="apps.saas")
+├─ admin.py                      # Registro de PlanSaaS y SuscripcionSaaS en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                     # Modelos: PlanSaaS, SuscripcionSaaS
+├─ urls.py                       # Rutas propias (planes, suscripciones)
+├─ views.py                      # Vistas server-rendered CRUD y panel simple
+├─ forms/
+│  ├─ __init__.py
+│  ├─ plan.py                   # Form de Plan (límites, precio_mensual, activo)
+│  └─ subscription.py           # Form de Suscripción (empresa, plan, fechas, estado)
+├─ services/
+│  ├─ __init__.py
+│  ├─ plans.py                  # Alta/edición de planes; helpers de límites
+│  └─ subscriptions.py          # Alta/cambio de plan; cálculo de estado (activa/vencida)
+├─ selectors.py                  # Lecturas: planes activos, suscripciones por empresa/estado
+├─ limits.py                     # Funciones para chequear límites del plan (sucursales/usuarios/storage)
+├─ templates/
+│  └─ saas/
+│     ├─ plans_list.html        # Listado de planes (admin interno)
+│     ├─ plan_form.html         # Alta/edición de plan
+│     ├─ subs_list.html         # Suscripciones (admin interno) / o “mi suscripción”
+│     ├─ sub_form.html          # Alta/edición de suscripción
+│     └─ panel.html             # Panel de empresa: muestra plan vigente y límites
+├─ static/
+│  └─ saas/
+│     ├─ saas.css               # Estilos propios
+│     └─ saas.js                # UX mínimo
+└─ policies/
+   └─ gating.md                 # Notas de “gating” por plan (qué features se habilitan)
+```
+
+### Rol de cada componente
+
+- **`models.py`**:
+  - `PlanSaaS(nombre, max_sucursales, max_usuarios, max_storage_mb, precio_mensual, activo)`.
+  - `SuscripcionSaaS(empresa, plan, estado, inicio, fin)` con `estado ∈ {activa, vencida, suspendida}` (MVP: activa/vencida).
+- **`limits.py`**: checkers para límites blandos (ej. `check_max_sucursales(empresa)`).
+- **`services/plans.py`**: CRUD de planes; cambio de atributos.
+- **`services/subscriptions.py`**: crear/renovar/cambiar plan; `compute_estado(sub)` por fechas.
+- **`selectors.py`**: lecturas para paneles y listados.
+- **`views.py`**: UI server-rendered de administración y panel básico para la empresa.
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /saas/planes/` → Listado de planes (admin interno).
+- `GET  /saas/planes/nuevo/` → Alta plan.
+- `POST /saas/planes/nuevo/` → Crear plan.
+- `GET  /saas/planes/<uuid:id>/editar/` → Edición plan.
+- `POST /saas/planes/<uuid:id>/editar/` → Actualizar plan.
+
+- `GET  /saas/suscripciones/` → Listado de suscripciones (admin interno) o “mi suscripción” si filtra por empresa activa.
+- `GET  /saas/suscripciones/nueva/` → Alta suscripción.
+- `POST /saas/suscripciones/nueva/` → Crear suscripción.
+- `GET  /saas/suscripciones/<uuid:id>/editar/` → Edición suscripción (cambio de plan/fechas/estado).
+- `POST /saas/suscripciones/<uuid:id>/editar/` → Actualizar suscripción.
+
+- `GET  /saas/panel/` → Panel de la empresa activa: muestra plan, estado y uso de límites (sucursales/usuarios).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Plan
+
+- **Input (POST)**: `nombre`, `max_sucursales`, `max_usuarios`, `max_storage_mb`, `precio_mensual`, `activo`.
+- **Proceso**: crear/editar plan.
+- **Output**: plan listo para asignar en suscripciones.
+
+### Suscripción
+
+- **Input (POST)**: `empresa_id`, `plan_id`, `inicio`, `fin` (opcional), `estado`.
+- **Proceso**: validar solapamientos; setear `estado` por fechas (`activa` si `hoy ∈ [inicio, fin]` o `fin=NULL`).
+- **Output**: suscripción persistida.
+
+### Panel (empresa)
+
+- **Input (GET)**: empresa activa por sesión.
+- **Proceso**: obtener suscripción vigente; computar uso de límites (contar sucursales/usuarios actuales).
+- **Output**: vista con **plan** + **estado** + **uso** (y avisos si se supera un límite).
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `org`**: para contar sucursales de la empresa.
+- **Depende de `accounts`**: para contar usuarios/membresías.
+- **Transversal**: `limits.py` puede ser invocado por otras apps para “gating” de features (soft block en MVP).
+
+---
+
+## 5) Seguridad
+
+- Administración de **planes/suscripciones** restringida a **admin interno**.
+- `panel` accesible a usuarios con membresía en la **empresa activa**.
+- Validar que la suscripción creada/actualizada corresponde a empresas existentes.
+
+---
+
+## 6) Consideraciones clave (MVP)
+
+- **Sin pasarela** en MVP: solo estado lógico por fechas.
+- **Límites** aplican como **avisos** (no bloqueantes) para no frenar operación inicial.
+- Habilitar hooks sencillos para, en el futuro, **enforce** de cuotas (p. ej. al crear sucursales/usuarios).
+
+---
+
+## 7) Roadmap inmediato
+
+1. Modelos `PlanSaaS` y `SuscripcionSaaS`.
+2. Servicios de alta/edición y cálculo de estado.
+3. Panel de empresa mostrando plan/estado/uso.
+4. Hooks de límites (avisos) en creación de sucursales/usuarios.
+
+# Módulo 13 — `apps/audit` (Auditoría de Cambios y Accesos)
+
+> **Objetivo del módulo:** Registrar eventos de **auditoría** (quién hizo qué y cuándo) sobre modelos y vistas clave del sistema. En el MVP: traza mínima de **accesos a vistas sensibles** y **mutaciones** (create/update/delete) con un **diff** compacto.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/audit/
+├─ __init__.py
+├─ apps.py                      # Config de la app (name="apps.audit")
+├─ admin.py                     # Registro de AuditEvent en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                    # Modelo: AuditEvent
+├─ urls.py                      # Rutas: listado y detalle (opcional en MVP)
+├─ views.py                     # Vistas server-rendered (listado/filtrado de auditoría)
+├─ middleware.py                # Middleware: registra accesos a vistas marcadas como sensibles
+├─ hooks/
+│  ├─ __init__.py
+│  ├─ django_signals.py         # Conexiones a post_save/post_delete para modelos clave
+│  └─ audit_helpers.py          # Helpers para construir diffs y normalizar payloads
+├─ services/
+│  ├─ __init__.py
+│  └─ audit_log.py              # API interna: write_event(actor, action, object_ref, diff, meta)
+├─ selectors.py                  # Lecturas: filtrar eventos por fecha/usuario/modelo/empresa
+├─ templates/
+│  └─ audit/
+│     ├─ list.html              # Listado con filtros
+│     └─ detail.html            # Vista detalle de un evento (payload/diff)
+└─ static/
+   └─ audit/
+      ├─ audit.css              # Estilos (enfatizar campos cambiados)
+      └─ audit.js               # UX (toggle JSON pretty-print, filtros)
+```
+
+### Rol de cada componente
+
+- **`models.py`**: `AuditEvent(empresa, usuario, accion, tabla, fila_pk, diff_json, meta_json, creado_en)`; `accion ∈ {create, update, delete, access}`.
+- **`middleware.py`**: registra `access` para vistas marcadas (por convención: añadir un atributo en la vista o usar path regex).
+- **`hooks/django_signals.py`**: conecta `post_save`/`post_delete` para modelos críticos (Venta, Pago, Comprobante, PrecioServicio, etc.) y construye el **diff** con `audit_helpers`.
+- **`services/audit_log.py`**: punto único de escritura; asegura normalización y control de tamaño de `diff_json`.
+- **`selectors.py`**: consultas para reportes/filtrado.
+- **`templates/audit/*`**: interfaz simple para inspección (opcional en MVP).
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /audit/` → Listado de eventos con filtros: fecha (rango), usuario, modelo, acción, empresa/sucursal.
+- `GET  /audit/<uuid:id>/` → Detalle del evento (muestra `diff_json` y `meta_json`).
+
+> Los endpoints son opcionales en MVP si solo se consulta por admin. Se recomiendan para soporte.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Escritura de evento (API interna)
+
+- **Input**:
+  - `actor`: `request.user` o sistema.
+  - `accion`: `create|update|delete|access`.
+  - `tabla` y `fila_pk`: referencia al objeto (o `None` si es acceso general).
+  - `diff_json`: JSON compacto (`{"campo": ["antes", "despues"], ...}` para update; o snapshot mínimo para create/delete).
+  - `meta_json`: JSON con contexto (IP, path, método, empresa_id, sucursal_id, user_agent).
+- **Proceso**: normaliza y persiste `AuditEvent`.
+- **Output**: id de evento para posible correlación con logs técnicos.
+
+### Acceso a vista sensible (middleware)
+
+- **Input**: `request` a rutas marcadas (p.ej. `/ventas/<id>/`, `/pagos/`, `/comprobantes/`).
+- **Proceso**: si cumple criterios, invoca `audit_log.write_event(accion="access", ...)`.
+- **Output**: evento `access` registrado (no afecta respuesta).
+
+### Mutaciones (signals)
+
+- **Input**: `post_save` (`created=True/False`) y `post_delete` de modelos seleccionados.
+- **Proceso**: construir `diff_json` comparando estado anterior/posterior (para update) o snapshot (create/delete).
+- **Output**: evento `create|update|delete` persistido.
+
+---
+
+## 4) Integraciones y alcance
+
+- **Modelos iniciales a auditar (MVP)**: `Venta`, `Pago`, `Comprobante`, `PrecioServicio`.
+- **Campos sensibles**: montos, estado, referencias; no registrar datos altamente sensibles (en MVP no hay tarjetas).
+- **Relación con `app_log`**: `AuditEvent` es **funcional**; `app_log` es **técnico**. Pueden correlacionarse por timestamps o IDs si se desea.
+
+---
+
+## 5) Seguridad
+
+- Vistas `/audit/` requieren rol `admin` de la **empresa activa**.
+- Sanitizar `meta_json` (no guardar cookies/headers sensibles).
+- Limitar tamaño de `diff_json` para evitar payloads excesivos.
+
+---
+
+## 6) Roadmap inmediato
+
+1. Modelo `AuditEvent` y migración.
+2. Servicio `audit_log.write_event(...)`.
+3. Hooks: conectar `post_save/post_delete` de 3–4 modelos clave.
+4. Middleware de `access` para 1–2 rutas sensibles.
+5. Listado/Detalle básico para inspección rápida en soporte.
+
+# Módulo 14 — `apps/app_log` (Logs Técnicos de Aplicación)
+
+> **Objetivo del módulo:** Registrar eventos **técnicos** (errores, advertencias, info, debug) generados por la aplicación para diagnóstico y soporte. Se diferencia de `audit` porque aquí se almacenan **logs de sistema**, no de negocio.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/app_log/
+├─ __init__.py
+├─ apps.py                       # Config de la app (name="apps.app_log")
+├─ admin.py                      # Registro de AppLog en admin
+├─ migrations/
+│  └─ __init__.py
+├─ models.py                     # Modelo: AppLog
+├─ services/
+│  ├─ __init__.py
+│  └─ logger.py                 # API interna: log_event(nivel, origen, evento, mensaje, meta)
+├─ selectors.py                  # Lecturas: logs por empresa, nivel, fecha
+├─ templates/
+│  └─ app_log/
+│     ├─ list.html               # Listado con filtros básicos (nivel, fecha, empresa)
+│     └─ detail.html             # Vista detalle de un log (mensaje + meta_json)
+└─ static/
+   └─ app_log/
+      ├─ app_log.css             # Estilos básicos
+      └─ app_log.js              # (Opcional) helpers UI (expandir JSON, autorefresh)
+```
+
+### Rol de cada componente
+
+- **`models.py`**: `AppLog(empresa, nivel, origen, evento, mensaje, meta_json, creado_en)` con `nivel ∈ {debug, info, warning, error, critical}`.
+- **`services/logger.py`**: API interna para escribir logs desde cualquier app; encapsula normalización y persistencia.
+- **`selectors.py`**: consultas para filtrar logs en vistas de soporte.
+- **`templates/app_log/*`**: UI mínima para inspección si se desea.
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /logs/` → Listado de logs con filtros (fecha, nivel, origen, empresa).
+- `GET  /logs/<uuid:id>/` → Detalle de un log.
+
+> La interfaz puede ser mínima o incluso quedar en **admin** en MVP.
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Escritura de log (API interna)
+
+- **Input**:
+  - `empresa_id` (opcional, si aplica contexto).
+  - `nivel` (`debug|info|warning|error|critical`).
+  - `origen` (ej. “sales.services”).
+  - `evento` (str corto: “venta_finalizada”, “pago_rechazado”).
+  - `mensaje` (texto breve).
+  - `meta_json` (dict serializado: stacktrace, payload, headers, etc.).
+- **Proceso**: persistir `AppLog`.
+- **Output**: id del log creado (para correlación).
+
+### Lectura de logs
+
+- **Input (GET)**: filtros por nivel, fecha, empresa.
+- **Proceso**: ejecutar query en `selectors.py`.
+- **Output**: listado con metadatos y link a detalle.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Independiente de negocio**: puede ser invocado desde cualquier app (`sales`, `payments`, `invoicing`, etc.).
+- **Complementario de `audit`**: mientras `audit` registra acciones de usuario, `app_log` guarda fallos internos (ej. error al renderizar PDF).
+- **No requiere relaciones fuertes**: `empresa` opcional para logs globales.
+
+---
+
+## 5) Seguridad
+
+- Acceso a vistas `/logs/` restringido a usuarios con rol **admin**.
+- Cuidar no almacenar datos sensibles sin sanitizar en `meta_json` (headers, contraseñas).
+
+---
+
+## 6) Roadmap inmediato
+
+1. Modelo `AppLog`.
+2. Servicio `logger.log_event(...)`.
+3. Integrar con puntos clave de las apps (ej. errores en invoicing/notifications).
+4. UI mínima (listado/detalle) o fallback en admin.
+
+# Núcleo del Proyecto — `lavaderos` (Core, Tenancy, Middleware, Permisos, URLs)
+
+> **Objetivo:** Establecer la **columna vertebral** del proyecto: enrutamiento global, resolución de **empresa activa** (tenancy), **middlewares** transversales y **permisos** base para todas las apps.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+lavaderos/
+├─ __init__.py
+├─ urls.py                 # Enrutamiento global e include de todas las apps
+├─ tenancy.py              # Resolución de empresa activa (sesión/subdominio/header)
+├─ middleware.py           # Middlewares transversales (tenant, security extras, etc.)
+├─ permissions.py          # Helpers de permisos por rol/empresa
+└─ settings/
+   ├─ __init__.py
+   ├─ base.py
+   ├─ development.py
+   ├─ production.py
+   └─ render.py
+```
+
+### Rol de cada componente
+
+- **`urls.py`**: punto único de enrutamiento del proyecto; define **ruta raíz**, includes por app y handlers de errores.
+- **`tenancy.py`**: funciones para **obtener/establecer empresa activa** (por sesión, subdominio o header), y utilidades de scoping de queries.
+- **`middleware.py`**:
+  - `ActiveCompanyMiddleware`: fija `request.empresa` a partir de la sesión (o subdominio/header) y rechaza acceso si no hay contexto válido.
+  - `SecurityHeadersMiddleware` (opcional): cabezales básicos (X-Frame-Options, etc.).
+- **`permissions.py`**: helpers reutilizables:
+  - `user_has_role(user, empresa, roles=('admin','operador'))`
+  - `require_company(view_func)` (decorador) para asegurar empresa activa.
+  - `require_roles(*roles)` (decorador) para restringir por rol.
+- **`settings/*`**: configuración por entorno ya dividida (DEBUG, DB, email, static/media).
+
+---
+
+## 2) Enrutamiento Global (`urls.py`)
+
+**Objetivo:** centralizar includes y declarar páginas base/errores.
+
+**Contenido mínimo sugerido:**
+
+- **Root** (`/`): dashboard muy simple (placeholder) o redirect a una app (p. ej. `/ventas/`).
+- **Includes por app** (orden lógico):
+  - `accounts` → `/` (allauth) y `/cuenta/…`
+  - `org` → `/org/…`
+  - `customers` → `/clientes/…`
+  - `vehicles` → `/vehiculos/…`
+  - `catalog` → `/catalogo/…`
+  - `pricing` → `/precios/…`
+  - `sales` → `/ventas/…`
+  - `payments` → `/pagos/…` (y los “desde venta”)
+  - `invoicing` → `/comprobantes/…`
+  - `notifications` → `/notificaciones/…`
+  - `cashbox` → `/caja/…`
+  - `saas` → `/saas/…`
+  - `audit` → `/audit/…`
+  - `app_log` → `/logs/…`
+- **Handlers de errores**: `handler401`, `handler403`, `handler404`, `handler500` → `templates/errors/*.html`.
+
+**Contratos esperados (conceptual):**
+
+- **Input**: `request` entrante con sesión y/o host del subdominio.
+- **Proceso**: `ActiveCompanyMiddleware` asegura `request.empresa` o redirige al selector `/org/seleccionar/`.
+- **Output**: dispatch a la vista de la app correspondiente con contexto de **empresa activa**.
+
+---
+
+## 3) Tenancy (`tenancy.py`)
+
+**Responsabilidad:** resolver **empresa activa** de forma consistente para todas las apps.
+
+**Funciones/Utilidades mínimas:**
+
+- `get_active_company(request) -> Empresa | None`
+  - Busca en **sesión** (`empresa_id`), fallback a **subdominio** (`foo.midominio.com`) o **header** (`X-Empresa-Id`) para paneles internos.
+- `set_active_company(request, empresa)`
+  - Persiste en **sesión** y opcionalmente en cookie; invalida cachés si aplica.
+- `queryset_for_company(qs, empresa)`
+  - Helper para scoping de QuerySets por `empresa_id`.
+- **Decisiones de MVP**: se prioriza **sesión** (selector en `/org/seleccionar/`). Subdominio/Header quedan listos a futuro.
+
+**Contrato (conceptual):**
+
+- **Input**: `request` (sesión/subdominio/header).
+- **Output**: `empresa` resuelta o `None` → vistas no públicas deben exigir empresa activa.
+
+---
+
+## 4) Middlewares (`middleware.py`)
+
+**`ActiveCompanyMiddleware` (core):**
+
+- **Input**: cada `request` autenticado.
+- **Proceso**: asigna `request.empresa = get_active_company(request)`. Si la vista requiere empresa y no existe, **redirige** a `/org/seleccionar/`.
+- **Output**: continúa cadena con `request.empresa` disponible.
+
+**`SecurityHeadersMiddleware` (opcional):**
+
+- Añade headers comunes (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, etc.).
+
+**Criterios de aceptación:**
+
+- No rompe vistas públicas (login/signup, estáticos, selector).
+- Ajuste fino: usar whitelist de paths que **no** requieren empresa.
+
+---
+
+## 5) Permisos (`permissions.py`)
+
+**Helpers y decoradores:**
+
+- `user_has_role(user, empresa, roles=('admin',)) -> bool`
+- `require_company(view)` → asegura que exista `request.empresa`.
+- `require_roles(*roles)` → valida que el usuario tenga alguno de los roles sobre `request.empresa`; en error: 403.
+
+**Contratos (conceptual):**
+
+- **Input**: `request.user`, `request.empresa`.
+- **Proceso**: chequear membresía/rol.
+- **Output**: acceso concedido o **403**.
+
+---
+
+## 6) Páginas base y errores (templates globales)
+
+- `templates/base.html`: layout general con `navbar`, mensajes y bloques (`content`, `extra_css/js`).
+- `templates/includes/_navbar.html`: muestra **empresa activa** y menú para cambiarla; cambia opciones según `user.is_authenticated`.
+- `templates/errors/{401,403,404,500}.html`: UX clara de errores.
+
+---
+
+## 7) Integraciones y flujo transversal
+
+- **`accounts`**: login/signup; menú “Cuenta”.
+- **`org`**: selector de **empresa** (persistido por `tenancy`).
+- Todas las **apps de dominio** esperan `request.empresa` para scoping de datos.
+- **Decoradores de permisos** usados en vistas con acciones críticas (precios, ventas, pagos, cierres).
+
+---
+
+## 8) Checklist de funcionamiento mínimo
+
+1. `urls.py` incluye **todas** las apps bajo prefijos definidos.
+2. `ActiveCompanyMiddleware` agregado en `settings` (después de `AuthenticationMiddleware`).
+3. `org` provee `/org/seleccionar/` y guarda `empresa_id` en sesión.
+4. Templates de errores vinculados en `urls.py`.
+5. `permissions.py` disponible y utilizado por vistas sensibles.

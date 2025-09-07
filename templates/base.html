@@ -1,0 +1,108 @@
+{% load static %}
+<!doctype html>
+<html lang="es" data-bs-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="IE=edge">
+
+    <!-- Viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Title & SEO -->
+    <title>{% block title %}Lavaderos | Gestión simple y ágil{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}Sistema para lavaderos: turnos, servicios, precios, ventas y notificaciones.{% endblock %}">
+    <meta name="keywords" content="{% block meta_keywords %}lavadero, detailing, servicios, django, gestión, ventas{% endblock %}">
+    <link rel="canonical" href="{% block canonical %}{{ request.build_absolute_uri|default:'' }}{% endblock %}">
+    <meta name="robots" content="{% block meta_robots %}index,follow{% endblock %}">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}Lavaderos | Gestión simple y ágil{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Sistema para lavaderos: turnos, servicios, precios, ventas y notificaciones.{% endblock %}">
+    <meta property="og:url" content="{% block og_url %}{{ request.build_absolute_uri|default:'' }}{% endblock %}">
+    <meta property="og:site_name" content="{% block og_site_name %}Lavaderos{% endblock %}">
+    <meta property="og:image" content="{% block og_image %}{{ STATIC_URL }}img/logo.png{% endblock %}">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="{% block twitter_card %}summary_large_image{% endblock %}">
+    <meta name="twitter:title" content="{% block twitter_title %}Lavaderos | Gestión simple y ágil{% endblock %}">
+    <meta name="twitter:description" content="{% block twitter_description %}Sistema para lavaderos: turnos, servicios, precios, ventas y notificaciones.{% endblock %}">
+    <meta name="twitter:image" content="{% block twitter_image %}{{ STATIC_URL }}img/logo.png{% endblock %}">
+
+    <!-- Favicon -->
+    <link rel="icon" href="{% static 'img/logo.png' %}">
+
+    <!-- CSS -->
+    <link rel="preload" as="style" href="{% static 'css/bootswatch/brite.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/bootswatch/brite.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+
+    <!-- Extra CSS por página -->
+    {% block extra_css %}{% endblock %}
+
+    <!-- Extra <head> (ej. JSON-LD, verificación, etc.) -->
+    {% block head_extra %}{% endblock %}
+  </head>
+
+  <body>
+    <!-- Skip link accesibilidad -->
+    <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 p-2 bg-body border rounded" href="#main">
+      Saltar al contenido
+    </a>
+
+    <!-- Navbar global -->
+    {% block navbar %}
+      {% include "includes/_navbar.html" %}
+    {% endblock %}
+
+    <!-- Contenedor principal -->
+    <main id="main" class="container py-4">
+
+      <!-- Mensajes flash -->
+      {% include "includes/_messages.html" %}
+
+      <!-- Hero / Encabezado de página -->
+      {% block hero %}
+      <section class="bg-body-tertiary rounded-3 p-4 p-md-5 mb-4 border">
+        <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center">
+          <div class="flex-grow-1">
+            <h1 class="display-6 fw-semibold mb-2">Bienvenido a Lavaderos</h1>
+            <p class="lead mb-0 text-body-secondary">
+              Organizá servicios, precios y ventas con una interfaz simple. Listo para crecer con tu negocio.
+            </p>
+          </div>
+          <div class="mt-3 mt-md-0 ms-md-4">
+            {% if user.is_authenticated %}
+              <a href="#" class="btn btn-primary btn-lg">Ir al panel</a>
+            {% else %}
+              <a href="/accounts/signup/" class="btn btn-primary btn-lg me-2">Crear cuenta</a>
+              <a href="/accounts/login/" class="btn btn-outline-secondary btn-lg">Ingresar</a>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+      {% endblock %}
+
+      <!-- Contenido principal -->
+      {% block content %}
+ 
+      {% endblock %}
+
+    </main>
+
+    <!-- Footer global -->
+    {% block footer %}
+      {% include "includes/_footer.html" %}
+    {% endblock %}
+
+    <!-- JS -->
+    <script src="{% static 'js/bootstrap.bundle.min.js' %}"></script>
+    <script src="{% static 'js/app.js' %}"></script>
+
+    <!-- Scripts de página -->
+    {% block extra_js %}{% endblock %}
+
+    <!-- Analytics / Pixel (opcional) -->
+    {% block analytics %}{% endblock %}
+  </body>
+</html>

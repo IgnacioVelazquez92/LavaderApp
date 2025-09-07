@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Seleccionar empresa</h1>
+
+  {% if empresas %}
+    <form method="post" action="{% url 'org_selector' %}">
+      {% csrf_token %}
+      <label for="empresa">Empresa</label>
+      <select name="empresa" id="empresa" required>
+        {% for e in empresas %}
+          <option value="{{ e.id }}">{{ e.nombre }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Activar</button>
+    </form>
+
+    <hr>
+    <h2>O activar con un clic</h2>
+    <ul>
+      {% for e in empresas %}
+        <li>
+          {{ e.nombre }}
+          — <a href="{% url 'org_selector' %}?empresa={{ e.id }}">Activar</a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No tenés empresas asignadas.</p>
+  {% endif %}
+{% endblock %}

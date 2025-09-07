@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 640px;">
+  <h1 class="h3 mb-3">{% trans "Crear cuenta" %}</h1>
+
+  <form method="post" action="{% url 'account_signup' %}" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <div class="row g-3">
+      <div class="col-12">
+        <label for="{{ form.email.id_for_label }}" class="form-label">{% trans "Email" %}</label>
+        {{ form.email }}
+        {% if form.email.errors %}
+          <div class="invalid-feedback d-block">{{ form.email.errors|striptags }}</div>
+        {% endif %}
+      </div>
+
+      <div class="col-md-6">
+        <label for="{{ form.password1.id_for_label }}" class="form-label">{% trans "Contraseña" %}</label>
+        {{ form.password1 }}
+        {% if form.password1.errors %}
+          <div class="invalid-feedback d-block">{{ form.password1.errors|striptags }}</div>
+        {% endif %}
+      </div>
+
+      <div class="col-md-6">
+        <label for="{{ form.password2.id_for_label }}" class="form-label">{% trans "Repetir contraseña" %}</label>
+        {{ form.password2 }}
+        {% if form.password2.errors %}
+          <div class="invalid-feedback d-block">{{ form.password2.errors|striptags }}</div>
+        {% endif %}
+      </div>
+
+      <div class="col-md-6">
+        <label for="{{ form.first_name.id_for_label }}" class="form-label">{% trans "Nombre" %}</label>
+        {{ form.first_name }}
+        {% if form.first_name.errors %}
+          <div class="invalid-feedback d-block">{{ form.first_name.errors|striptags }}</div>
+        {% endif %}
+      </div>
+
+      <div class="col-md-6">
+        <label for="{{ form.last_name.id_for_label }}" class="form-label">{% trans "Apellido" %}</label>
+        {{ form.last_name }}
+        {% if form.last_name.errors %}
+          <div class="invalid-feedback d-block">{{ form.last_name.errors|striptags }}</div>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <button type="submit" class="btn btn-primary w-100 mt-3">{% trans "Registrarme" %}</button>
+
+    <p class="mt-3">
+      <span class="small">{% trans "¿Ya tenés cuenta?" %}</span>
+      <a class="small" href="{% url 'account_login' %}">{% trans "Iniciar sesión" %}</a>
+    </p>
+  </form>
+</div>
+{% endblock %}
