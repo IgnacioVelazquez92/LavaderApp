@@ -1,0 +1,166 @@
+{# templates/org/empresa_form.html #}
+{% extends "base_auth.html" %}
+{% block title %}{% if object %}Editar lavadero — {{ object.nombre }}{% else %}Crear lavadero — Lavaderos{% endif %}{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item"><a href="{% url 'org:empresas' %}">Mi lavadero</a></li>
+          <li class="breadcrumb-item active" aria-current="page">
+            {% if object %}Editar{% else %}Crear{% endif %} lavadero
+          </li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">{% if object %}Editar lavadero{% else %}Crear lavadero{% endif %}</h1>
+      {% if not request.empresa_activa %}
+        <p class="text-body-secondary mb-0">Onboarding: <strong>Paso 1 de 2</strong> — Definí el nombre y subdominio de tu lavadero.</p>
+      {% else %}
+        <p class="text-body-secondary mb-0">Actualizá los datos de tu marca cuando lo necesites.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+
+    <div class="card border mb-3">
+      <div class="card-body">
+        <div class="row g-3">
+
+          {# --- Nombre --- #}
+          <div class="col-md-6">
+            <label for="{{ form.nombre.id_for_label }}" class="form-label">Nombre del lavadero</label>
+            <input
+              type="text"
+              name="{{ form.nombre.html_name }}"
+              id="{{ form.nombre.id_for_label }}"
+              value="{{ form.nombre.value|default_if_none:'' }}"
+              class="form-control{% if form.nombre.errors %} is-invalid{% endif %}"
+              placeholder="Ej: Lavadero El Sol"
+              autocomplete="organization"
+              required
+            >
+            {% if form.nombre.errors %}
+              <div class="invalid-feedback">{{ form.nombre.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">Usá el nombre comercial que ven tus clientes.</div>
+            {% endif %}
+          </div>
+
+          {# --- Subdominio --- #}
+          <div class="col-md-6">
+            <label for="{{ form.subdominio.id_for_label }}" class="form-label">Subdominio</label>
+            <div class="input-group">
+              <span class="input-group-text">https://</span>
+              <input
+                type="text"
+                name="{{ form.subdominio.html_name }}"
+                id="{{ form.subdominio.id_for_label }}"
+                value="{{ form.subdominio.value|default_if_none:'' }}"
+                class="form-control{% if form.subdominio.errors %} is-invalid{% endif %}"
+                placeholder="mi-lavadero"
+                inputmode="latin"
+                pattern="[a-z0-9-]+"
+                aria-describedby="subHelp"
+                required
+              >
+              <span class="input-group-text">.lavaderosapp.com</span>
+            </div>
+            {% if form.subdominio.errors %}
+              <div class="invalid-feedback d-block">{{ form.subdominio.errors|join:", " }}</div>
+            {% else %}
+              <div id="subHelp" class="form-text">Solo minúsculas, números y guiones (ej.: <code>mi-lavadero</code>). Debe ser único.</div>
+            {% endif %}
+          </div>
+
+          {# --- Logo --- #}
+          <div class="col-md-6">
+            <label for="{{ form.logo.id_for_label }}" class="form-label">Logo (opcional)</label>
+            <input
+              type="file"
+              name="{{ form.logo.html_name }}"
+              id="{{ form.logo.id_for_label }}"
+              class="form-control{% if form.logo.errors %} is-invalid{% endif %}"
+              accept="image/*"
+            >
+            {% if form.logo.errors %}
+              <div class="invalid-feedback d-block">{{ form.logo.errors|join:", " }}</div>
+            {% elif object.logo %}
+              <div class="form-text">
+                Actual:
+                <img src="{{ object.logo.url }}" alt="Logo" class="rounded border ms-2" style="height:36px">
+              </div>
+            {% else %}
+              <div class="form-text">PNG o JPG recomendado. Se usa en listados y cabeceras.</div>
+            {% endif %}
+          </div>
+
+          {# --- Activo (oculto al crear para no ensuciar) --- #}
+          <div class="col-md-6 d-flex align-items-end">
+            {% if object %}
+              <div class="form-check form-switch">
+                <input
+                  type="checkbox"
+                  name="{{ form.activo.html_name }}"
+                  id="{{ form.activo.id_for_label }}"
+                  class="form-check-input"
+                  {% if form.activo.value or form.activo.value is None %}checked{% endif %}
+                >
+                <label class="form-check-label" for="{{ form.activo.id_for_label }}">Lavadero activo</label>
+              </div>
+              {% if form.activo.errors %}
+                <div class="invalid-feedback d-block ms-3">{{ form.activo.errors|join:", " }}</div>
+              {% endif %}
+            {% else %}
+              {# Al crear, lo dejamos activo por defecto sin mostrar el switch #}
+              <input type="hidden" name="{{ form.activo.html_name }}" value="on">
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <a href="{% url 'org:empresas' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+      <button type="submit" class="btn btn-primary">
+        {% if object %}
+          <i class="bi bi-save me-1"></i> Guardar cambios
+        {% else %}
+          <i class="bi bi-plus-circle me-1"></i> Crear lavadero
+        {% endif %}
+      </button>
+    </div>
+  </form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const nombre = document.getElementById("{{ form.nombre.id_for_label }}");
+    const sub = document.getElementById("{{ form.subdominio.id_for_label }}");
+    if (!nombre || !sub) return;
+
+    let userEditedSub = false;
+    sub.addEventListener('input', () => { userEditedSub = true; });
+
+    const slugify = (str) =>
+      (str || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '')
+        .substring(0, 50);
+
+    nombre.addEventListener('input', () => {
+      if (userEditedSub) return;
+      sub.value = slugify(nombre.value);
+    });
+  })();
+</script>
+{% endblock %}

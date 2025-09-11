@@ -1,19 +1,29 @@
-from typing import Iterable
+# apps/org/selectors.py
+
+from django.conf import settings
+from typing import List
 from django.contrib.auth import get_user_model
-from .models import Empresa
+from .models import Empresa, Sucursal
+from apps.accounts.models import EmpresaMembership
 
 User = get_user_model()
 
 
-def empresas_para_usuario(user: User) -> Iterable[Empresa]:
+def empresas_para_usuario(user: User) -> List[Empresa]:
     """
-    Devuelve las empresas donde el usuario tiene membresía.
-    Importa EmpresaMembership en tiempo de ejecución para evitar ciclos.
+    Devuelve todas las empresas a las que el usuario tiene membresía.
     """
-    from apps.accounts.models import EmpresaMembership  # import local para evitar import circular
-    empresa_ids = (
-        EmpresaMembership.objects
-        .filter(user=user)
-        .values_list("empresa_id", flat=True)
-    )
-    return Empresa.objects.filter(id__in=empresa_ids, activo=True).order_by("nombre")
+    return Empresa.objects.filter(memberships__user=user)
+
+
+def sucursales_de(empresa: Empresa) -> List[Sucursal]:
+    return empresa.sucursales.all()
+
+
+# apps/org/selectors.py (agregar al final)
+
+
+def puede_crear_mas_empresas(user) -> bool:
+    max_emp = getattr(settings, "SAAS_MAX_EMPRESAS_POR_USUARIO", 1)
+    actuales = EmpresaMembership.objects.filter(user=user).count()
+    return actuales < max_emp

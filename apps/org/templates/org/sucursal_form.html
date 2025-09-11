@@ -1,0 +1,100 @@
+{% extends "base_auth.html" %}
+{% block title %}{% if object %}Editar sucursal — {{ object.nombre }}{% else %}Crear sucursal — Lavaderos{% endif %}{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item"><a href="{% url 'org:sucursales' %}">Sucursales</a></li>
+          <li class="breadcrumb-item active" aria-current="page">
+            {% if object %}Editar{% else %}Crear{% endif %} sucursal
+          </li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">{% if object %}Editar sucursal{% else %}Crear sucursal{% endif %}</h1>
+      <p class="text-body-secondary mb-0">
+        {% if not request.empresa_activa %}
+          Onboarding: <strong>Paso 2 de 2</strong> — Creá tu sucursal principal.
+        {% else %}
+          Definí los datos principales de la sucursal.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {# —— ALERTA DE ERRORES DEL FORM —— #}
+  {% if form.non_field_errors %}
+    <div class="alert alert-danger border">
+      <strong>No pudimos guardar la sucursal.</strong>
+      <ul class="mb-0">
+        {% for err in form.non_field_errors %}
+          <li>{{ err }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="card border mb-3">
+      <div class="card-body">
+        <div class="row g-3">
+
+          <div class="col-md-6">
+            <label for="{{ form.nombre.id_for_label }}" class="form-label">Nombre</label>
+            <input
+              type="text"
+              name="{{ form.nombre.html_name }}"
+              id="{{ form.nombre.id_for_label }}"
+              value="{{ form.nombre.value|default_if_none:'' }}"
+              class="form-control{% if form.nombre.errors %} is-invalid{% endif %}"
+              placeholder="Ej: Sucursal Centro"
+              required
+              autofocus
+            >
+            {% if form.nombre.errors %}
+              <div class="invalid-feedback">{{ form.nombre.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">Ejemplos: Centro, Norte, CABA, Taller 1.</div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-6">
+            <label for="{{ form.direccion.id_for_label }}" class="form-label">Dirección (opcional)</label>
+            <input
+              type="text"
+              name="{{ form.direccion.html_name }}"
+              id="{{ form.direccion.id_for_label }}"
+              value="{{ form.direccion.value|default_if_none:'' }}"
+              class="form-control{% if form.direccion.errors %} is-invalid{% endif %}"
+              placeholder="Calle 123, Barrio, Ciudad"
+              autocomplete="street-address"
+            >
+            {% if form.direccion.errors %}
+              <div class="invalid-feedback d-block">{{ form.direccion.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">Podés completarla más tarde.</div>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <a href="{% url 'org:sucursales' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+      <button type="submit" class="btn btn-primary">
+        {% if object %}
+          <i class="bi bi-save me-1"></i> Guardar cambios
+        {% else %}
+          <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+        {% endif %}
+      </button>
+    </div>
+  </form>
+{% endblock %}

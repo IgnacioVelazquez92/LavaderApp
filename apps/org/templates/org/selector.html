@@ -1,31 +1,125 @@
-{% extends "base.html" %}
+{# templates/org/selector.html #}
+{% extends "base_auth.html" %}
+{% block title %}Seleccionar empresa — Lavaderos{% endblock %}
 
 {% block content %}
-  <h1>Seleccionar empresa</h1>
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item active" aria-current="page">Seleccionar empresa</li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">Seleccionar empresa</h1>
+      <p class="text-body-secondary mb-0">
+        Elegí con qué empresa vas a operar. En el plan estándar se administra <strong>una sola empresa</strong>.
+        Si necesitás más, podés <a href="#" class="link-primary">consultar por planes superiores</a>.
+      </p>
+    </div>
+
+    <div class="mt-3 mt-md-0 text-md-end">
+      {% if puede_crear_empresa %}
+        <a href="{% url 'org:empresa_nueva' %}" class="btn btn-primary">
+          <i class="bi bi-building-add me-1"></i> Crear empresa
+        </a>
+      {% else %}
+        <span class="badge text-bg-secondary align-middle">Plan: 1 empresa</span>
+      {% endif %}
+    </div>
+  </div>
 
   {% if empresas %}
-    <form method="post" action="{% url 'org_selector' %}">
-      {% csrf_token %}
-      <label for="empresa">Empresa</label>
-      <select name="empresa" id="empresa" required>
-        {% for e in empresas %}
-          <option value="{{ e.id }}">{{ e.nombre }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit">Activar</button>
-    </form>
+    <div class="card border mb-3">
+      <div class="card-body">
+        <div class="row g-2 align-items-center">
+          <div class="col-sm-6">
+            <label for="empresaSearch" class="form-label mb-1">Buscar</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input type="search" id="empresaSearch" class="form-control"
+                     placeholder="Nombre o subdominio" autocomplete="off" oninput="filterEmpresas()">
+            </div>
+          </div>
+          <div class="col-sm-6 text-sm-end">
+            {% if request.session.empresa_id %}
+              <span class="badge text-bg-success align-middle">Empresa activa</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <hr>
-    <h2>O activar con un clic</h2>
-    <ul>
+    <div class="row row-cols-1 row-cols-md-2 g-3" id="empresasGrid">
       {% for e in empresas %}
-        <li>
-          {{ e.nombre }}
-          — <a href="{% url 'org_selector' %}?empresa={{ e.id }}">Activar</a>
-        </li>
+        <div class="col empresa-item" data-name="{{ e.nombre|lower }}" data-sub="{{ e.subdominio|lower }}">
+          <div class="card h-100 border">
+            <div class="card-body d-flex">
+              {% if e.logo %}
+                <img src="{{ e.logo.url }}" alt="{{ e.nombre }}" class="rounded border me-3" style="width:64px;height:64px;object-fit:cover;">
+              {% else %}
+                <div class="rounded bg-body-tertiary d-flex align-items-center justify-content-center border me-3"
+                     style="width:64px;height:64px;">
+                  <span class="fw-bold">{{ e.nombre|first|upper }}</span>
+                </div>
+              {% endif %}
+
+              <div class="flex-grow-1">
+                <h2 class="h5 mb-1">{{ e.nombre }}</h2>
+                <div class="small text-body-secondary">Subdominio: <code>{{ e.subdominio }}</code></div>
+                {% if request.session.empresa_id == e.id %}
+                  <span class="badge text-bg-success mt-2">Activa</span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="card-footer d-flex justify-content-between">
+              {# Mostrar "Usar" solo si hay más de una empresa y esta no es la activa #}
+              {% if empresas|length > 1 and request.session.empresa_id != e.id %}
+                <form method="post" action="{% url 'org:selector' %}" class="me-2">
+                  {% csrf_token %}
+                  <input type="hidden" name="empresa" value="{{ e.id }}">
+                  <button type="submit" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-check2-circle me-1"></i> Usar esta
+                  </button>
+                </form>
+              {% endif %}
+              <a href="{% url 'org:empresa_editar' e.id %}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-pencil-square me-1"></i> Editar
+              </a>
+            </div>
+          </div>
+        </div>
       {% endfor %}
-    </ul>
+    </div>
   {% else %}
-    <p>No tenés empresas asignadas.</p>
+    <div class="alert alert-info border d-flex flex-column flex-md-row align-items-md-center justify-content-between">
+      <div class="me-md-3">
+        <strong>No tenés empresas todavía.</strong>
+        {% if puede_crear_empresa %}
+          Creá tu lavadero para comenzar.
+        {% else %}
+          Tu plan actual admite una sola empresa.
+        {% endif %}
+      </div>
+      {% if puede_crear_empresa %}
+        <a href="{% url 'org:empresa_nueva' %}" class="btn btn-primary mt-2 mt-md-0">
+          <i class="bi bi-building-add me-1"></i> Crear empresa
+        </a>
+      {% endif %}
+    </div>
   {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function filterEmpresas() {
+    var q = (document.getElementById('empresaSearch')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('#empresasGrid .empresa-item').forEach(function (it) {
+      var name = it.getAttribute('data-name') || '';
+      var sub = it.getAttribute('data-sub') || '';
+      it.style.display = (!q || name.includes(q) || sub.includes(q)) ? '' : 'none';
+    });
+  }
+</script>
 {% endblock %}

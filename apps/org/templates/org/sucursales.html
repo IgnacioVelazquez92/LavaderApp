@@ -1,0 +1,79 @@
+{# templates/org/sucursales.html #}
+{% extends "base_auth.html" %}
+{% block title %}Sucursales — Lavaderos{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item active" aria-current="page">Sucursales</li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">Sucursales</h1>
+      {% if request.empresa_activa %}
+        <p class="text-body-secondary mb-0">
+          Lavadero: <strong>{{ request.empresa_activa.nombre }}</strong>
+          <span class="ms-2 text-muted">({{ sucursales|length }} total)</span>
+        </p>
+      {% else %}
+        <p class="text-body-secondary mb-0">Primero creá tu lavadero para administrar sucursales.</p>
+      {% endif %}
+    </div>
+    <div class="mt-3 mt-md-0">
+      <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary">
+        <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+      </a>
+    </div>
+  </div>
+
+  {% if not sucursales %}
+    <div class="card border mb-3">
+      <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between">
+        <div class="me-md-3">
+          <h2 class="h6 mb-1">Aún no tenés sucursales</h2>
+          <p class="mb-0 text-body-secondary">Creá tu primera sucursal para empezar a operar.</p>
+        </div>
+        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
+          <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+        </a>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if sucursales %}
+    <div class="card border">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Nombre</th>
+                <th>Dirección</th>
+                <th class="text-nowrap">Código</th>
+                <th class="text-end" style="width: 160px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in sucursales %}
+                <tr>
+                  <td class="fw-medium">{{ s.nombre }}</td>
+                  <td class="text-body-secondary">{{ s.direccion|default:"—" }}</td>
+                  <td><code>{{ s.codigo_interno }}</code></td>
+                  <td class="text-end">
+                    <a href="{% url 'org:sucursal_editar' s.id %}" class="btn btn-outline-secondary btn-sm">
+                      <i class="bi bi-pencil-square"></i> Editar
+                    </a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% include "includes/_pagination.html" with page_obj=page_obj only %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

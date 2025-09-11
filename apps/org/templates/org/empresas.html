@@ -1,0 +1,102 @@
+{# templates/org/empresas.html #}
+{% extends "base_auth.html" %}
+{% block title %}Mi lavadero — Lavaderos{% endblock %}
+{% block meta_description %}Datos de tu lavadero (marca). Podés editarlo y gestionar sus sucursales.{% endblock %}
+{% block og_title %}Mi lavadero{% endblock %}
+{% block og_description %}Gestioná los datos de tu lavadero y accedé a las sucursales.{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item active" aria-current="page">Mi lavadero</li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">Mi lavadero</h1>
+      <p class="text-body-secondary mb-0">Información de tu marca. Desde acá podés editar y administrar sucursales.</p>
+    </div>
+    <div class="mt-3 mt-md-0">
+      {# Si querés permitir crear lavadero cuando no hay ninguno, el CTA aparece abajo en el estado vacío #}
+    </div>
+  </div>
+
+  {% if empresas %}
+    {# En este MVP hay una sola empresa por usuario; mostramos la primera #}
+    {% with e=empresas.0 %}
+    <div class="card border mb-3">
+      <div class="card-body">
+        <div class="d-flex align-items-start">
+          {% if e.logo %}
+            <img src="{{ e.logo.url }}" alt="{{ e.nombre }}" class="rounded border me-3" style="width:72px;height:72px;object-fit:cover;">
+          {% else %}
+            <div class="rounded bg-body-tertiary d-inline-flex align-items-center justify-content-center border me-3"
+                 style="width:72px;height:72px;">
+              <span class="fw-bold fs-4">{{ e.nombre|first|upper }}</span>
+            </div>
+          {% endif %}
+
+          <div class="flex-grow-1">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between">
+              <div class="mb-2 mb-md-0">
+                <h2 class="h5 mb-1">{{ e.nombre }}</h2>
+                <div class="small text-body-secondary">
+                  Subdominio: <code>{{ e.subdominio }}</code>
+                  {% if e.activo %}
+                    <span class="badge text-bg-success ms-2 align-middle">Activa</span>
+                  {% else %}
+                    <span class="badge text-bg-secondary ms-2 align-middle">Inactiva</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="text-nowrap">
+                <a href="{% url 'org:empresa_editar' e.id %}" class="btn btn-outline-secondary btn-sm">
+                  <i class="bi bi-pencil-square me-1"></i> Editar lavadero
+                </a>
+              </div>
+            </div>
+
+            <hr class="my-3">
+
+            <div class="row g-3">
+              <div class="col-12 col-md-8">
+                <div class="small text-body-secondary mb-2">Accesos rápidos</div>
+                <div class="d-flex flex-wrap gap-2">
+                  <a class="btn btn-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
+                    <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+                  </a>
+                  <a class="btn btn-outline-primary btn-sm" href="{% url 'org:sucursales' %}">
+                    <i class="bi bi-list-ul me-1"></i> Ver sucursales
+                  </a>
+                </div>
+              </div>
+              <div class="col-12 col-md-4">
+                <div class="small text-body-secondary mb-2">Resumen</div>
+                <ul class="list-unstyled mb-0">
+                  <li class="d-flex justify-content-between">
+                    <span>Sucursales</span>
+                    <strong>{{ e.sucursales.count }}</strong>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endwith %}
+  {% else %}
+    <div class="alert alert-info border d-flex flex-column flex-md-row align-items-md-center justify-content-between">
+      <div>
+        <strong>Bienvenido 👋</strong> Aún no creaste tu lavadero. Empezá creando tu marca para continuar con el alta de la primera sucursal.
+      </div>
+      <div class="mt-2 mt-md-0">
+        <a href="{% url 'org:empresa_nueva' %}" class="btn btn-primary">
+          <i class="bi bi-building-add me-1"></i> Crear lavadero
+        </a>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

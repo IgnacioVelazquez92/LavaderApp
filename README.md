@@ -916,72 +916,74 @@ flowchart LR
 
 ---
 
-## 17) Próximos pasos (operativos)
+# LavaderosApp — Documentación de **Estructura General**
 
-1. Generar **stubs** por app (`services.py` con firmas y docstrings).
-2. Implementar **tests unitarios** para `resolver_precio`, totales, pagos, emisión, cierre.
-3. Exponer **endpoints DRF** con permisos `IsMemberOfEmpresa` + `HasRole`.
-4. Integrar **admin** para gestión básica (seed de catálogo y precios).
+> **Objetivo**: Establecer la arquitectura de carpetas, los layouts de UI y las convenciones transversales del proyecto.  
+> **Alcance**: Estructura global, _no_ de cada módulo; dejamos listo el terreno para seguir “app por app”.  
+> **Stack**: Django (server-rendered) + Bootstrap 5 (tema Bootswatch local). **Sin DRF**.
 
-# Plan detallado por app (Django) — SaaS Lavaderos (MVP)
+---
 
-> Objetivo: que cada app tenga **responsabilidades claras**, **módulos internos** y **flujos** listos para implementar.
-
-# Estructura General del Proyecto — Preparada para Codear Luego
-
-> **Objetivo**: dejar listas las **carpetas** y **convenciones** globales (templates/estáticos), sin entrar aún en los `.py` de cada app.  
-> En siguientes pasos haremos zoom **app por app**.
+## 1) Árbol del proyecto (actualizado)
 
 ```bash
 lavaderosapp/
 ├── manage.py
-├── .env                     # variables de entorno
+├── .env
 ├── .gitignore
 ├── README.md
 ├── lavaderos/
 │   ├── __init__.py
-│   ├── urls.py                       # enrutamiento global (incluye urls de apps)
-│   ├── tenancy.py                    # utilidades multi-tenant (header/subdominio)
-│   ├── middleware.py                 # middlewares propios (tenant, auditoría, etc.)
-│   ├── permissions.py                # permisos/restricciones transversales
+│   ├── urls.py                      # enrutamiento global (incluye urls de apps)
+│   ├── tenancy.py                   # utilidades multi-tenant (subdominio/header) [opcional]
+│   ├── middleware.py                # TenancyMiddleware: inyecta empresa/sucursal en request
+│   ├── permissions.py               # permisos/roles reutilizables a nivel proyecto
 │   └── settings/
 │       ├── __init__.py
-│       ├── base.py                   # común a todos los entornos
-│       ├── development.py            # dev: DEBUG, sqlite, email consola
-│       ├── production.py             # prod: Postgres, seguridad, email real
-│       └── render.py                 # (si aplica) ajustes para Render
-├── templates/                        # templates globales y overrides de librerías
-│   ├── base.html                     # layout principal del sitio
-│   ├── includes/                     # fragmentos reusables (partials)
-│   │   ├── _navbar.html              # navbar condicional (auth/no-auth)
-│   │   ├── _messages.html            # mensajes flash (Django messages)
-│   │   ├── _footer.html              # pie de página global
-│   │   └── _pagination.html          # paginación reusable
-│   ├── account/                      # overrides HTML de django-allauth
-│   │   ├── login.html                # opcional: personalizar login
-│   │   ├── signup.html               # opcional: personalizar registro
-│   │   └── ...                       # (resto de vistas de allauth si se necesitan)
-│   └── errors/                       # páginas de error (mejor UX)
+│       ├── base.py                  # base común a todos los entornos
+│       ├── development.py           # DEBUG, sqlite, email consola
+│       ├── production.py            # Postgres, seguridad, SMTP real
+│       └── render.py                # ajustes para Render.com (si aplica)
+├── templates/                       # templates globales + overrides de librerías
+│   ├── base.html                    # layout PÚBLICO (landing, marketing, login/signup)
+│   ├── base_auth.html               # layout AUTENTICADO (navbar compacto + sidebar)
+│   ├── home_dashboard.html          # panel contextual para usuarios logueados
+│   ├── includes/
+│   │   ├── _navbar_public.html      # navbar público (CTA de login/signup)
+│   │   ├── _navbar_auth.html        # navbar autenticado (perfil, membresías, salir)
+│   │   ├── _sidebar.html            # menú lateral principal (apps, selector de sucursal)
+│   │   ├── _messages.html           # Django messages (alerts Bootstrap)
+│   │   ├── _footer.html             # pie de página
+│   │   └── _pagination.html         # componente reutilizable de paginación
+│   ├── account/                     # overrides de django-allauth
+│   │   ├── login.html
+│   │   ├── signup.html
+│   │   ├── password_reset.html
+│   │   ├── password_reset_done.html
+│   │   ├── password_reset_from_key.html
+│   │   ├── password_reset_from_key_done.html
+│   │   ├── password_change.html
+│   │   └── password_change_done.html
+│   └── errors/                      # páginas de error personalizadas
 │       ├── 401.html
 │       ├── 403.html
 │       ├── 404.html
 │       └── 500.html
-├── static/                           # assets globales que versionamos (sin CDN)
+├── static/                          # assets globales versionados
 │   ├── css/
-│   │   ├── bootstrap.min.css         # Bootstrap local (descargado)
-│   │   ├── app.css                   # estilos propios globales
+│   │   ├── bootswatch/brite.min.css # tema Bootstrap local
+│   │   └── app.css                  # reservado para estilos propios (mínimos)
 │   ├── js/
-│   │   ├── bootstrap.bundle.min.js   # Bootstrap JS (incluye Popper)
-│   │   └── app.js                    # scripts propios globales
+│   │   ├── bootstrap.bundle.min.js  # Bootstrap + Popper
+│   │   └── app.js                   # scripts globales (inicializaciones)
 │   ├── img/
-│   │   └── logo.png                  # imágenes globales
-│   └── vendor/                       # otras librerías de terceros (opcional)
-│       └── ...                       # ej. bootstrap-icons/ chart.js/ etc.
-├── media/                            # uploads de usuarios (en dev; en prod va a storage)
-├── staticfiles/                      # destino de collectstatic (no tocar a mano)
-└── apps/                             # **todas** las apps de dominio (código por módulos)
-    ├── accounts/
-    ├── org/
+│   │   └── logo.png
+│   └── vendor/                      # librerías opcionales (bootstrap-icons, chart.js, etc.)
+├── media/                           # uploads en desarrollo (en prod: storage externo)
+├── staticfiles/                     # destino de collectstatic (no editar a mano)
+└── apps/                            # **todas** las apps de dominio
+    ├── accounts/                    # auth (allauth), perfil, membresías
+    ├── org/                         # lavadero (Empresa), Sucursal, selector
     ├── customers/
     ├── vehicles/
     ├── catalog/
@@ -991,83 +993,171 @@ lavaderosapp/
     ├── invoicing/
     ├── notifications/
     ├── cashbox/
-    ├── saas/
+    ├── saas/                        # planes/limitaciones (ej. 1 empresa por usuario)
     ├── audit/
     └── app_log/
 ```
 
----
-
-## Convenciones y Propósito de Cada Carpeta (Global)
-
-- **`templates/` (global)**
-
-  - **`base.html`**: layout principal; define bloques (`title`, `navbar`, `content`, `extra_css`, `extra_js`).
-  - **`includes/`**: _partials_ reusables.
-    - `_navbar.html`: navbar único con lógica `user.is_authenticated` (muestra menús distintos para invitados/usuarios).
-    - `_messages.html`: muestra `django.contrib.messages`.
-    - `_footer.html`, `_pagination.html`: utilidades comunes.
-  - **`account/`**: _overrides_ de **django-allauth** (páginas de login/registro/reset).
-  - **`errors/`**: plantillas personalizadas de errores (401/403/404/500).
-  - **Buenas prácticas**: las vistas **de cada app** van en `apps/<app>/templates/<app>/...` para evitar colisiones de nombre.
-
-- **`static/` (global)**
-
-  - **`css/`**: `bootstrap.min.css` local (sin CDN), temas de **Bootswatch** en `/bootswatch/` y `app.css` propio global.
-  - **`js/`**: `bootstrap.bundle.min.js` (con Popper) y `app.js` global.
-  - **`img/`**: imágenes globales (logo, ilustraciones).
-  - **`vendor/`**: librerías externas adicionales (ej. bootstrap-icons).
-  - **En producción**: correr `collectstatic` → Django recopila todo a `staticfiles/` (servido por Nginx/servidor web).
-
-- **`media/`**
-
-  - Subidas de usuario en desarrollo. En producción conviene S3/Cloud Storage (no commitear).
-
-- **`apps/<app>/templates/<app>/`**
-
-  - Templates específicos de cada módulo (ej. `customers/list.html`).
-  - La **convención** `<app>` como namespace evita conflictos entre apps.
-
-- **`apps/<app>/static/<app>/`**
-
-  - Estilos/JS/imágenes propios **de la app**. Se referencian con `{% static 'app/archivo.css' %}`.
-  - Mantiene acotado el alcance de assets por módulo.
-
-- **`lavaderos/tenancy.py`**
-
-  - Utilidades para resolver el **tenant** actual (empresa) vía subdominio o header (`X-Empresa-Id`).
-  - MVP: se puede setear empresa en sesión/header; a futuro, middleware.
-
-- **`lavaderos/middleware.py`**
-
-  - Middlewares propios (multi-tenant, auditoría simple, etc.). Se añaden en `settings` cuando toque.
-
-- **`lavaderos/permissions.py`**
-
-  - Permisos transversales (ej. `IsMemberOfEmpresa`, `HasRole`). Se usan luego en vistas/clases.
-
-- **`lavaderos/settings/*`**
-  - División **limpia por entorno**:
-    - `base.py`: común a todos.
-    - `development.py`: DEBUG, sqlite, email consola, hosts locales.
-    - `production.py`: Postgres, seguridad, email real, allowed hosts por env.
-    - `render.py`: específico para Render.com (si lo usás), típicamente con `DATABASE_URL`.
+> **Regla de oro**: los templates de cada app viven en `apps/<app>/templates/<app>/**`. Así evitamos colisiones de nombres y mantenemos aislamiento por dominio.
 
 ---
 
-## Reglas de Herencia de Templates (resumen pro)
+## 2) Layouts y herencia de templates
 
-- **`base.html`** es la raíz. Todas las vistas extienden de ahí.
-- Navbar se **incluye** con un parcial (`includes/_navbar.html`) y **decide** su contenido con `user.is_authenticated`.
-- Si una página necesita un navbar distinto, **sobrescribe** el bloque `{% block navbar %}` en su template.
-- **Allauth**: cualquier template en `templates/account/` con nombre coincidente **sobrescribe** el default (login, signup, etc.).
+### 2.1 `templates/base.html` (público)
+
+- **Uso**: landing/marketing, login/signup y páginas no autenticadas.
+- **Bloques clave**: `title`, `meta_description`, `navbar`, `hero`, `content`, `extra_css`, `extra_js`, `footer`.
+- **Navbar**: incluye `includes/_navbar_public.html` (sobrescribir `block navbar` si se desea otra cabecera).
+- **Hero**: bloque opcional; se puede anular con `{% block hero %}{% endblock %}`.
+
+### 2.2 `templates/base_auth.html` (autenticado)
+
+- **Uso**: toda página tras login.
+- **Composición**:
+  - Navbar compacto: `includes/_navbar_auth.html` (perfil, membresías, logout).
+  - **Layout con sidebar**:
+    - Columna fija con `includes/_sidebar.html` (menú acordeón y **selector de sucursal**).
+    - Contenedor principal para `{% block content %}`.
+- **Mensajes**: `_messages.html` integrado antes del contenido.
+
+### 2.3 `templates/home_dashboard.html`
+
+- **Uso**: panel contextual tras login.
+- **Lógica de presentación** (sin entrar al código):
+  - Sin lavadero → CTA “Crear lavadero”.
+  - Con lavadero pero sin sucursales → CTA “Crear primera sucursal”.
+  - “Listo para operar” (≥ 1 sucursal) → accesos rápidos y widgets placeholder (KPIs).
 
 ---
 
-# Plan de Trabajo por Aplicación (MVP) — Guía Operativa
+## 3) Partials globales (includes)
 
-> **Meta**: documentar, app por app, **propósito**, **alcance MVP**, **páginas/URLs**, **flujos**, **dependencias** y **contratos de entrada/salida** a nivel conceptual (sin código).  
-> Así, cuando empecemos a programar, cada módulo tendrá claro qué hace y cómo se integra.
+- **`_navbar_public.html`**: marca + CTAs “Ingresar” / “Crear cuenta”. Sin enlaces de operación.
+- **`_navbar_auth.html`**: avatar/nombre, accesos a **Perfil**, **Membresías**, **Cambiar contraseña** y **Salir**. Navegación funcional se deriva al **sidebar**.
+- **`_sidebar.html`**:
+  - Encabezado: **Lavadero actual** (empresa activa).
+  - **Selector de Sucursal** (`<select>` con `onchange=submit`) que hace **POST** a una ruta de selector (centraliza la fijación en sesión).
+  - Acordeones: Organización, Operación, Maestros, Reportes, Administración (links preparados; algunos módulos aún en desarrollo).
+- **`_messages.html`**: renderiza `django.contrib.messages` a Bootstrap alerts.
+- **`_pagination.html`**: tabla/listados con paginación consistente.
+- **`_footer.html`**: pie común (legal/links).
+
+> **Convención**: cualquier página autenticada que necesite navegación de negocio **debe** extender `base_auth.html` para heredar sidebar y mensajes.
+
+---
+
+## 4) Estáticos (static/) y assets
+
+- **Bootstrap**: tema **Bootswatch “brite”** local (`static/css/bootswatch/brite.min.css`).  
+  No dependemos de CDNs.
+- **JS**: `bootstrap.bundle.min.js` + `app.js` para inicializaciones (por ejemplo, tooltips).
+- **Imágenes**: `static/img/` (logo, íconos básicos).
+- **Vendor**: espacio para librerías de terceros sin NPM (p. ej., `bootstrap-icons/`).
+- **Producción**: ejecutar `collectstatic` → servir `staticfiles/` (Nginx u otro).
+
+---
+
+## 5) Settings y middleware (resumen de integración)
+
+- `INSTALLED_APPS` (clave):
+  - `django.contrib.sites`, `allauth`, `allauth.account`
+  - Apps propias (`apps.org`, `apps.accounts`, …)
+  - `SITE_ID = 1`
+- `MIDDLEWARE`:
+  - **`lavaderos.middleware.TenancyMiddleware`** (inyecta `request.empresa_activa` y `request.sucursal_activa` desde sesión; si falta, intenta fijar por defecto la primera empresa del usuario).
+- `TEMPLATES`:
+  - `DIRS = [BASE_DIR / "templates"]`
+  - `context_processors.request` **habilitado** (requerido por allauth y varios templates).
+- Allauth (email-only recomendado en MVP):
+  - `ACCOUNT_AUTHENTICATION_METHOD="email"`
+  - `ACCOUNT_EMAIL_REQUIRED=True`
+  - `ACCOUNT_EMAIL_VERIFICATION="none"` (en prod real: `"mandatory"`)
+  - `ACCOUNT_USERNAME_REQUIRED=False`
+  - `ACCOUNT_LOGOUT_ON_GET=True`
+  - `LOGIN_REDIRECT_URL="/"`, `LOGOUT_REDIRECT_URL="/"`
+
+---
+
+## 6) Convenciones por app (estructura recomendada)
+
+Cada módulo en `apps/<app>/` sigue este patrón (MVP):
+
+```bash
+apps/<app>/
+├── __init__.py
+├── apps.py
+├── admin.py
+├── migrations/
+│   └── __init__.py
+├── models.py
+├── urls.py
+├── views.py                     # CBVs; delgadas; usan services/selectors
+├── forms/
+│   ├── __init__.py
+│   └── <app>.py
+├── services/
+│   ├── __init__.py
+│   └── casos_de_uso.py          # lógica de dominio (crear/editar, etc.)
+├── selectors.py                 # lecturas/queries para vistas
+├── permissions.py               # reglas de acceso/roles específicas del app
+├── templates/<app>/             # templates namespaced de la app
+│   └── ...
+└── static/<app>/                # assets propios del módulo
+    └── ...
+```
+
+**Principios**:
+
+- **Separation of concerns**: vistas delgadas; mutaciones en `services/`, lecturas en `selectors.py`.
+- **Templates con Bootstrap** directo (solo clases en HTML; sin CSS custom salvo casos puntuales).
+- **Nombres namespaced** (`templates/<app>/**`) para evitar choques entre apps.
+
+---
+
+## 7) Ruteo global y convenciones de URL
+
+- `lavaderos/urls.py` incluye:
+  - `/accounts/` (django-allauth)
+  - Rutas de **accounts** propias (perfil, membresías), p. ej.: `/cuenta/perfil/`, `/cuenta/membresias/`
+  - Rutas por **app** con prefijos claros (`/org/...`, `/clientes/...`, etc.).
+- **Nombrado**: `app_namespace:view_name` (p. ej., `org:sucursales`), para usar con `{% url %}` sin ambigüedad.
+
+---
+
+## 8) Tenancy (multi-tenant simplificado)
+
+- **Plan estándar**: 1 empresa por usuario (controlado desde `apps/saas/` o settings).
+- **Sesión**:
+  - `empresa_id`: lavadero activo
+  - `sucursal_id`: sucursal activa dentro del lavadero
+- **TenancyMiddleware**:
+  - Carga `request.empresa_activa` / `request.sucursal_activa`.
+  - Si `empresa_id` no existe y el usuario tiene empresas, fija la **primera** por defecto.
+  - Si `sucursal_id` no pertenece a la empresa activa, se limpia.
+- **Selector centralizado**: un único endpoint que recibe `POST` con `sucursal` (y, en planes superiores, `empresa`) para actualizar la sesión.
+
+> Esto permite que **cualquier** vista pueda suponer un contexto consistente (`request.empresa_activa`, `request.sucursal_activa`) sin duplicar lógica.
+
+---
+
+## 9) Accesibilidad, SEO y calidad
+
+- **A11y**: skip link, labels, `autocomplete` en formularios, colores y contrastes por Bootstrap.
+- **SEO meta** en `base.html`: `title`, `description`, Open Graph y Twitter Cards con valores por defecto y bloques sobrescribibles.
+- **Mensajería** clara: usar `django.contrib.messages` para éxitos y errores de validación/flujo.
+- **Errores**: páginas personalizadas en `templates/errors/` (401/403/404/500).
+
+---
+
+## 10) Cómo agregar una página nueva (checklist)
+
+1. Elegí layout: **público** (`base.html`) o **autenticado** (`base_auth.html`).
+2. Creá el template en `apps/<app>/templates/<app>/mi_pagina.html` y extendé el layout correspondiente.
+3. Agregá la **CBV** en `views.py` y la ruta en `urls.py` del app (namespace).
+4. Si la página necesita navegación del sistema, usa **`base_auth.html`** para heredar sidebar.
+5. Mostrá feedback con `messages` y, si es un form, **errores de campo y `non_field_errors`**.
+6. (Opcional) Añadí assets específicos en `apps/<app>/static/<app>/` y referencialos con `{% static %}`.
 
 ---
 
@@ -1254,111 +1344,313 @@ ACCOUNT_FORMS = {
 
 > **Decisión registrada:** estilos centralizados en **forms**; overrides de templates en `templates/account/`; vistas delgadas con lógica en services/selectors. La selección de empresa vive en `org` y se invoca desde “Membresías”.
 
-# Módulo 2 — `apps/org` (Organización, Sucursales y Configuración)
+# Módulo 2 — `apps/org` (Lavadero/Empresa, Sucursales y Contexto de Operación)
 
-> **Objetivo:** Definir y administrar las **Empresas** (tenants), sus **Sucursales** y la **configuración extensible** de cada una. Este módulo también provee la lógica para seleccionar y fijar la **empresa activa** en sesión (lo que habilita el multi-tenant).
+> **Objetivo:** Modelar el **Lavadero (Empresa)** y sus **Sucursales**, proveer el **onboarding** (crear lavadero → crear sucursal), y mantener el **contexto activo** (empresa/sucursal) en sesión para el resto del sistema.  
+> **Alcance:** Django server-rendered (sin DRF), vistas basadas en clases (CBV), Bootstrap 5 en templates.
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura del módulo (actualizada)
 
 ```
 apps/org/
 ├─ __init__.py
-├─ apps.py                 # Config de la app (name="apps.org")
-├─ admin.py                # Registro de Empresa y Sucursal en el admin
+├─ apps.py                   # Config de la app (name="apps.org")
+├─ admin.py                  # Registro de Empresa y Sucursal en admin
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py               # Modelos: Empresa, EmpresaConfig, Sucursal
-├─ urls.py                 # Rutas propias (empresas, sucursales, selector)
-├─ views.py                # Vistas server-rendered (listados, formularios, selector)
+├─ models.py                 # Empresa, EmpresaConfig (opcional), Sucursal
+├─ urls.py                   # Rutas namespaced: /org/...
+├─ views.py                  # CBVs: listas, formularios, selector empresa/sucursal
 ├─ forms/
 │  ├─ __init__.py
-│  └─ org.py               # Formularios de alta/edición de Empresa/Sucursal
+│  └─ org.py                 # EmpresaForm, SucursalForm (Bootstrap desde HTML)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ empresa.py           # Casos de uso: crear/editar Empresa, config
-│  └─ sucursal.py          # Casos de uso: CRUD de Sucursales
-├─ selectors.py            # Lecturas: empresas de un user, sucursales activas, config
-├─ permissions.py          # Checks de rol sobre Empresa/Sucursal
+│  ├─ empresa.py             # (opcional) casos de uso de Empresa
+│  └─ sucursal.py            # (opcional) casos de uso de Sucursal
+├─ selectors.py              # Lecturas: empresas del usuario, sucursales de empresa
+├─ permissions.py            # Helpers de rol sobre Empresa/Sucursal
 ├─ templates/
 │  └─ org/
-│     ├─ empresas.html     # Listado de empresas
-│     ├─ empresa_form.html # Form de alta/edición de empresa
-│     ├─ sucursales.html   # Listado de sucursales
-│     ├─ sucursal_form.html# Form de alta/edición de sucursal
-│     └─ selector.html     # Selector de empresa activa
+│     ├─ empresas.html       # “Mi Lavadero” (ficha + accesos rápidos)
+│     ├─ empresa_form.html   # Crear/editar lavadero
+│     ├─ sucursales.html     # Listado de sucursales
+│     ├─ sucursal_form.html  # Crear/editar sucursal
+│     └─ selector.html       # (planes >1 empresa) escoger empresa; selector sucursal via POST
 ├─ static/
 │  └─ org/
-│     ├─ org.css           # Estilos de pantallas de organización
-│     └─ org.js            # Scripts para formularios/UX
+│     ├─ org.js              # helpers mínimos (ej. slugify subdominio)
+│     └─ org.css             # (reservado; no requerido en esta etapa)
 └─ emails/
-   └─ empresa_created.txt  # Notificación (opcional) cuando se crea una empresa
+   └─ empresa_created.txt    # (opcional) notificación al crear lavadero
 ```
 
-### Rol de cada componente
+**Notas clave de diseño**
 
-- **`models.py`**:
-  - `Empresa`: tenant raíz (nombre, subdominio, logo, activo).
-  - `Sucursal`: locales físicos de la empresa.
-  - `EmpresaConfig`: pares clave/valor (json) por empresa.
-- **`forms/org.py`**: validación y normalización de formularios.
-- **`services/empresa.py`**: crear empresa con defaults, actualizar configuración.
-- **`services/sucursal.py`**: CRUD de sucursales.
-- **`selectors.py`**: consultas de lectura (`empresas_para_usuario(user)`, `sucursales_de(empresa)`).
-- **`views.py`**: orquestan GET/POST para listados, formularios y selector de empresa activa.
-- **`templates/org/*`**: vistas HTML que extienden de `base.html`.
+- **CBVs** (CreateView/UpdateView/ListView) con redirecciones **explícitas** (no dependemos de `get_absolute_url`).
+- **Bootstrap** se aplica **en los templates** (clases en inputs). Los `forms` existen pero no inyectan CSS automáticamente.
+- **Onboarding guiado**: Crear lavadero → Crear primera sucursal → Panel.
+- **Plan estándar**: 1 empresa por usuario (configurable). Selector de **sucursal** visible; selector de **empresa** oculto salvo planes superiores.
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Modelos (resumen funcional)
 
-- `/org/empresas/` → Listado de empresas (solo admin interno).
-- `/org/empresas/nueva/` → Alta de empresa.
-- `/org/empresas/<id>/editar/` → Edición de empresa.
-- `/org/sucursales/` → Listado de sucursales de la empresa activa.
-- `/org/sucursales/nueva/` → Alta de sucursal.
-- `/org/sucursales/<id>/editar/` → Edición de sucursal.
-- `/org/seleccionar/` → Selector de empresa activa (fija `empresa_id` en sesión).
+### `Empresa`
 
----
+- **Campos**: `nombre`, `subdominio` (único, slug), `logo` (opcional `ImageField`), `activo` (bool), `creado/actualizado` (timestamps).
+- **Relaciones**: `memberships` (One-to-Many con `accounts.EmpresaMembership`), `sucursales` (One-to-Many con `Sucursal`), `configs` (opcional).
+- **Restricciones**: `subdominio` único.
+- **Uso**: representa el **lavadero**. Se fija en sesión como `empresa_id`.
 
-## 3) Contratos de entrada/salida
+### `Sucursal`
 
-### Empresas
+- **Campos**: `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado**).
+- **Generación de `codigo_interno`**: se autocalcula si está vacío (p. ej. `S001`, `CABA1`). El campo **no** se pide en el form.
+- **Uso**: ubicación física para operar. Se fija en sesión como `sucursal_id`.
 
-- **Input:** nombre, subdominio único, logo opcional.
-- **Proceso:** crear empresa; asociar al usuario actual como `admin`.
-- **Output:** empresa creada, redirect a listado.
+### `EmpresaConfig` (opcional/extendible)
 
-### Sucursales
-
-- **Input:** nombre, dirección opcional, código interno.
-- **Proceso:** crear sucursal vinculada a empresa activa.
-- **Output:** sucursal visible en listados de ventas/pagos.
-
-### Selector de empresa
-
-- **Input:** `empresa_id` (via GET o POST).
-- **Proceso:** verificar membresía del usuario; setear en `request.session["empresa_id"]`.
-- **Output:** redirect al dashboard de la empresa seleccionada.
+- **Campos**: `empresa` (FK), `data` (JSONField), timestamps.
+- **Uso**: banderas/ajustes extensibles por lavadero.
 
 ---
 
-## 4) Dependencias e integraciones
+## 3) Formularios (`forms/org.py`)
 
-- Depende de **`accounts`** para validar usuario y rol en cada empresa.
-- Expone a todo el sistema el **`empresa_id` en sesión**, usado por `tenancy.py`.
-- Plantillas globales (`_navbar.html`) muestran un switcher para cambiar de empresa.
+- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en **alta**, `activo` se fuerza `True` por UX).  
+  Subdominio con ayuda JS (slugify desde nombre).
+- `SucursalForm`: `nombre`, `direccion`. **No** incluye `codigo_interno` (autogenerado en modelo).
+
+> Las clases Bootstrap se ponen **en el template** (`form-control`, `is-invalid`, etc.), no mediante `Form.__init__`.
+
+---
+
+## 4) Vistas (CBVs) y comportamiento
+
+- **`EmpresaListView`** (`/org/empresas/`)  
+  Muestra “Mi Lavadero”: logo/nombre/subdominio/estado + accesos rápidos (Nueva sucursal, Ver sucursales, Editar lavadero).
+
+- **`EmpresaCreateView`** (`/org/empresas/nueva/`)
+
+  - Guarda empresa, crea `EmpresaMembership` (rol `admin`) para el usuario.
+  - Fija `empresa_id` en sesión.
+  - **Redirect** → `/org/sucursales/nueva/` (onboarding paso 2).
+  - Mensajes de éxito/validación (Django messages).
+  - **No** usa `get_absolute_url`; redirige explícitamente.
+
+- **`EmpresaUpdateView`** (`/org/empresas/<id>/editar/`)
+
+  - Edita datos; `success_url` → `/org/empresas/`.
+  - Mensaje de “Cambios guardados”.
+
+- **`SucursalListView`** (`/org/sucursales/`)
+
+  - Lista sucursales de la **empresa activa** (de la sesión).
+  - CTA “Nueva sucursal”. Paginación mediante include.
+
+- **`SucursalCreateView`** (`/org/sucursales/nueva/`)
+
+  - Usa `empresa_id` en sesión (si no está, intenta fijar la **primera** del usuario).
+  - Guarda sucursal. Si es la **primera**, **redirect** → Panel (`/`) con mensaje “¡Listo para operar!”. Si no, **redirect** → `/org/sucursales/`.
+  - `form_invalid` muestra `non_field_errors` y marca campos con error.
+  - `success_url` definido para evitar `ImproperlyConfigured`.
+
+- **`SucursalUpdateView`** (`/org/sucursales/<id>/editar/`)
+
+  - Edita `nombre`/`direccion`. `success_url` → `/org/sucursales/`.
+
+- **`SelectorEmpresaView`** (`/org/seleccionar/`)
+  - **GET**: si no hay `empresa_id` en sesión, fija por defecto la **primera** empresa del usuario (si existe). Renderiza listado solo si hay múltiples (planes superiores).
+  - **POST (sucursal)**: recibe `sucursal=<id>`, valida que pertenezca a la **empresa activa**, fija `sucursal_id` y redirige (por defecto al Panel).
+  - **POST (empresa)**: recibe `empresa=<id>`, valida membresía, fija `empresa_id` y limpia `sucursal_id` si corresponde.
+  - Fallback: si no se envía nada, activa la **primera** empresa del usuario.
 
 ---
 
-## 5) Seguridad
+## 5) URLs (namespace `org`)
 
-- Solo usuarios con rol **admin** en la empresa pueden editar datos y sucursales.
-- El selector valida que el usuario tenga membresía antes de fijar empresa activa.
+```
+/org/empresas/                    name="org:empresas"
+/org/empresas/nueva/              name="org:empresa_nueva"
+/org/empresas/<int:pk>/editar/    name="org:empresa_editar"
+
+/org/sucursales/                  name="org:sucursales"
+/org/sucursales/nueva/            name="org:sucursal_nueva"
+/org/sucursales/<int:pk>/editar/  name="org:sucursal_editar"
+
+/org/seleccionar/                 name="org:selector"    # POST sucursal / empresa
+```
+
+> El include en `lavaderos/urls.py` debe montar estas rutas bajo el prefijo `/org/` para que coincidan con el sidebar.
 
 ---
+
+## 6) Templates (UI/UX)
+
+- `org/empresas.html`  
+  Vista resumen del lavadero. Muestra badge “Activa” acorde a la sesión, subdominio en `<code>`, acciones claras.
+- `org/empresa_form.html`  
+  Formulario con ayuda de slug para subdominio (JS), `logo` opcional, switch de activo (oculto en alta). Navegación con breadcrumb y CTA coherentes.
+- `org/sucursales.html`  
+  Tabla responsiva: nombre, dirección (o “—”), código interno en `<code>`, acciones (editar). Alert informativa si no hay sucursales.
+- `org/sucursal_form.html`  
+  Form sin código interno, con mensajes de error globales (`non_field_errors`) y `is-invalid` por campo. Sugerencias/ayuda en placeholders.
+- `org/selector.html`  
+  En plan estándar (1 empresa) casi no se usa; en planes con múltiples, permite activar empresa. **El selector de sucursal** está en el **sidebar** global.
+
+**Integración con layouts**
+
+- Todas extienden `base_auth.html` (sidebar, mensajes).
+- Breadcrumbs y títulos consistentes con Bootstrap.
+
+---
+
+## 7) Sidebar y selector de sucursal (parcial global)
+
+- En `templates/includes/_sidebar.html`:
+  - **Encabezado Lavadero**: nombre de `request.empresa_activa`.
+  - **Selector de Sucursal**: `<select name="sucursal" onchange="this.form.submit()">` que hace **POST** a `org:selector`.
+  - Si no hay sucursales, alerta con link a “Crear sucursal”.
+- El **sidebar** es la **navegación principal** estando autenticado (navbar queda minimalista).
+
+---
+
+## 8) Sesión y Middleware (Tenancy)
+
+- **Claves de sesión**:
+  - `empresa_id`: lavadero activo.
+  - `sucursal_id`: sucursal activa de ese lavadero.
+- **`TenancyMiddleware`** (`lavaderos/middleware.py`):
+  - Inyecta `request.empresa_activa` y `request.sucursal_activa` en **todas** las vistas autenticadas.
+  - Si falta `empresa_id` y el usuario tiene empresas, fija la **primera** automáticamente.
+  - Limpia `sucursal_id` si no pertenece a la empresa activa.
+- **Uso transversal**: plantillas y vistas pueden asumir que `request.empresa_activa`/`request.sucursal_activa` existen (o son `None` sin romper).
+
+---
+
+## 9) Contratos de entrada/salida (actualizados)
+
+### Crear Empresa
+
+- **Input**: `nombre` (str), `subdominio` (slug único), `logo` (opcional).  
+  Subdominio se sugiere con JS a partir del nombre.
+- **Proceso**:
+  1. `Empresa` + `EmpresaMembership(user, rol=admin)`
+  2. `empresa_id` a sesión.
+- **Output**: redirect → `/org/sucursales/nueva/` + mensaje de éxito.
+
+### Crear Sucursal
+
+- **Input**: `nombre` (str), `direccion` (opcional). **No** se pide `codigo_interno`.
+- **Proceso**: `empresa_id` desde sesión; `codigo_interno` se autogenera si falta.
+- **Output**:
+  - **Primera** sucursal: redirect → Panel `/` (“¡Listo para operar!”).
+  - Otras: redirect → `/org/sucursales/` (“Sucursal creada con éxito”).
+
+### Selector (empresa/sucursal)
+
+- **Input (POST)**: `sucursal=<id>` **o** `empresa=<id>`.
+- **Proceso**: valida pertenencia; setea en sesión (`sucursal_id`/`empresa_id`).
+- **Output**: redirect → `next` o Panel `/` con mensaje de confirmación.
+
+---
+
+## 10) Seguridad y permisos
+
+- **Membresía** (`apps.accounts.EmpresaMembership`): relación `User ↔ Empresa` con `rol` (`admin`, `operador`, `auditor`).
+- **Reglas**:
+  - Solo miembros pueden activar/usar una empresa.
+  - Solo `admin` puede crear/editar Empresa y Sucursales (en UI se muestran acciones acorde).
+- **Validaciones**:
+  - El selector de sucursal verifica que la sucursal pertenezca a la `empresa_id` activa.
+  - El middleware evita inconsistencias limpiando `sucursal_id` inválidos.
+
+---
+
+## 11) Onboarding (secuencia)
+
+```mermaid
+sequenceDiagram
+  participant U as Usuario
+  participant WEB as Vistas Django
+  participant DB as DB
+
+  U->>WEB: /accounts/signup -> login
+  WEB-->>U: redirect / (Panel)
+
+  alt sin lavadero
+    U->>WEB: POST /org/empresas/nueva/
+    WEB->>DB: create Empresa + EmpresaMembership(admin)
+    DB-->>WEB: Empresa {id}
+    note over WEB,U: session.empresa_id = id
+    WEB-->>U: redirect /org/sucursales/nueva/
+  end
+
+  U->>WEB: POST /org/sucursales/nueva/
+  WEB->>DB: create Sucursal(empresa_id = session.empresa_id)
+  DB-->>WEB: Sucursal {id}
+
+  alt primera sucursal
+    WEB-->>U: redirect /(Panel) + success Listo para operar
+  else mas sucursales
+    WEB-->>U: redirect /org/sucursales/ + success
+  end
+
+  U->>WEB: Sidebar -> POST sucursal=[id] a /org/seleccionar/
+  WEB->>DB: validar sucursal pertenece a empresa_activa
+  DB-->>WEB: OK
+  note over WEB,U: session.sucursal_id = id
+  WEB-->>U: success seleccion de sucursal
+```
+
+---
+
+## 12) Configuración de plan (límite de empresas)
+
+- **`SAAS_MAX_EMPRESAS_POR_USUARIO`** (en settings): por defecto `1`.
+  - En **plan estándar**: oculta opción de crear más empresas y autoactiva la primera.
+  - En **plan superior**: permite múltiples y hace útil `selector.html` para cambiar empresa.
+
+---
+
+## 13) Admin
+
+- `admin.py` registra **Empresa** y **Sucursal** con list_display y filtros básicos (empresa, activo).
+- Útil para soporte: activar/desactivar, revisar subdominios, ver sucursales.
+
+---
+
+## 14) Errores comunes (y cómo se evitaron)
+
+- **`ImproperlyConfigured: No URL to redirect to`**:  
+  Solucionado usando **`success_url`** o **`redirect(...)`** en `form_valid` (no dependemos de `get_absolute_url`).
+
+- **Form “no pasa nada”** al enviar:  
+  Templates muestran **`non_field_errors`**, marcan `is-invalid` por campo y se emiten mensajes (`messages.error`).
+
+- **404 en `/org/...`**:  
+  Asegurar que `lavaderos/urls.py` incluya `apps.org.urls` bajo el **prefijo `/org/`**.
+
+---
+
+## 15) Extensiones previstas
+
+- Configuración ampliada por `EmpresaConfig` (horarios, formatos de comprobantes, etc.).
+- Estados y aforos por sucursal.
+- Webhooks/Notificaciones al crear lavadero/sucursal.
+- Lógica SaaS (trial/billing) en `apps/saas` integrada con el onboarding.
+
+---
+
+### Resumen ejecutivo
+
+- **Empresa** y **Sucursal** modeladas con mínimos sensatos (subdominio, logo, código interno autogenerado).
+- **Onboarding** en 2 pasos, mensajes claros y redirecciones consistentes.
+- **Contexto activo** (empresa/sucursal) centralizado en sesión + middleware, y **selector de sucursal** en el sidebar.
+- **CBVs** con redirects explícitos; templates con **Bootstrap** puro; vistas delgadas listas para crecer con `services/selectors`.
 
 # Módulo 3 — `apps/customers` (Clientes)
 
@@ -2724,154 +3016,3 @@ apps/app_log/
 2. Servicio `logger.log_event(...)`.
 3. Integrar con puntos clave de las apps (ej. errores en invoicing/notifications).
 4. UI mínima (listado/detalle) o fallback en admin.
-
-# Núcleo del Proyecto — `lavaderos` (Core, Tenancy, Middleware, Permisos, URLs)
-
-> **Objetivo:** Establecer la **columna vertebral** del proyecto: enrutamiento global, resolución de **empresa activa** (tenancy), **middlewares** transversales y **permisos** base para todas las apps.
-
----
-
-## 1) Estructura de carpetas/archivos
-
-```
-lavaderos/
-├─ __init__.py
-├─ urls.py                 # Enrutamiento global e include de todas las apps
-├─ tenancy.py              # Resolución de empresa activa (sesión/subdominio/header)
-├─ middleware.py           # Middlewares transversales (tenant, security extras, etc.)
-├─ permissions.py          # Helpers de permisos por rol/empresa
-└─ settings/
-   ├─ __init__.py
-   ├─ base.py
-   ├─ development.py
-   ├─ production.py
-   └─ render.py
-```
-
-### Rol de cada componente
-
-- **`urls.py`**: punto único de enrutamiento del proyecto; define **ruta raíz**, includes por app y handlers de errores.
-- **`tenancy.py`**: funciones para **obtener/establecer empresa activa** (por sesión, subdominio o header), y utilidades de scoping de queries.
-- **`middleware.py`**:
-  - `ActiveCompanyMiddleware`: fija `request.empresa` a partir de la sesión (o subdominio/header) y rechaza acceso si no hay contexto válido.
-  - `SecurityHeadersMiddleware` (opcional): cabezales básicos (X-Frame-Options, etc.).
-- **`permissions.py`**: helpers reutilizables:
-  - `user_has_role(user, empresa, roles=('admin','operador'))`
-  - `require_company(view_func)` (decorador) para asegurar empresa activa.
-  - `require_roles(*roles)` (decorador) para restringir por rol.
-- **`settings/*`**: configuración por entorno ya dividida (DEBUG, DB, email, static/media).
-
----
-
-## 2) Enrutamiento Global (`urls.py`)
-
-**Objetivo:** centralizar includes y declarar páginas base/errores.
-
-**Contenido mínimo sugerido:**
-
-- **Root** (`/`): dashboard muy simple (placeholder) o redirect a una app (p. ej. `/ventas/`).
-- **Includes por app** (orden lógico):
-  - `accounts` → `/` (allauth) y `/cuenta/…`
-  - `org` → `/org/…`
-  - `customers` → `/clientes/…`
-  - `vehicles` → `/vehiculos/…`
-  - `catalog` → `/catalogo/…`
-  - `pricing` → `/precios/…`
-  - `sales` → `/ventas/…`
-  - `payments` → `/pagos/…` (y los “desde venta”)
-  - `invoicing` → `/comprobantes/…`
-  - `notifications` → `/notificaciones/…`
-  - `cashbox` → `/caja/…`
-  - `saas` → `/saas/…`
-  - `audit` → `/audit/…`
-  - `app_log` → `/logs/…`
-- **Handlers de errores**: `handler401`, `handler403`, `handler404`, `handler500` → `templates/errors/*.html`.
-
-**Contratos esperados (conceptual):**
-
-- **Input**: `request` entrante con sesión y/o host del subdominio.
-- **Proceso**: `ActiveCompanyMiddleware` asegura `request.empresa` o redirige al selector `/org/seleccionar/`.
-- **Output**: dispatch a la vista de la app correspondiente con contexto de **empresa activa**.
-
----
-
-## 3) Tenancy (`tenancy.py`)
-
-**Responsabilidad:** resolver **empresa activa** de forma consistente para todas las apps.
-
-**Funciones/Utilidades mínimas:**
-
-- `get_active_company(request) -> Empresa | None`
-  - Busca en **sesión** (`empresa_id`), fallback a **subdominio** (`foo.midominio.com`) o **header** (`X-Empresa-Id`) para paneles internos.
-- `set_active_company(request, empresa)`
-  - Persiste en **sesión** y opcionalmente en cookie; invalida cachés si aplica.
-- `queryset_for_company(qs, empresa)`
-  - Helper para scoping de QuerySets por `empresa_id`.
-- **Decisiones de MVP**: se prioriza **sesión** (selector en `/org/seleccionar/`). Subdominio/Header quedan listos a futuro.
-
-**Contrato (conceptual):**
-
-- **Input**: `request` (sesión/subdominio/header).
-- **Output**: `empresa` resuelta o `None` → vistas no públicas deben exigir empresa activa.
-
----
-
-## 4) Middlewares (`middleware.py`)
-
-**`ActiveCompanyMiddleware` (core):**
-
-- **Input**: cada `request` autenticado.
-- **Proceso**: asigna `request.empresa = get_active_company(request)`. Si la vista requiere empresa y no existe, **redirige** a `/org/seleccionar/`.
-- **Output**: continúa cadena con `request.empresa` disponible.
-
-**`SecurityHeadersMiddleware` (opcional):**
-
-- Añade headers comunes (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, etc.).
-
-**Criterios de aceptación:**
-
-- No rompe vistas públicas (login/signup, estáticos, selector).
-- Ajuste fino: usar whitelist de paths que **no** requieren empresa.
-
----
-
-## 5) Permisos (`permissions.py`)
-
-**Helpers y decoradores:**
-
-- `user_has_role(user, empresa, roles=('admin',)) -> bool`
-- `require_company(view)` → asegura que exista `request.empresa`.
-- `require_roles(*roles)` → valida que el usuario tenga alguno de los roles sobre `request.empresa`; en error: 403.
-
-**Contratos (conceptual):**
-
-- **Input**: `request.user`, `request.empresa`.
-- **Proceso**: chequear membresía/rol.
-- **Output**: acceso concedido o **403**.
-
----
-
-## 6) Páginas base y errores (templates globales)
-
-- `templates/base.html`: layout general con `navbar`, mensajes y bloques (`content`, `extra_css/js`).
-- `templates/includes/_navbar.html`: muestra **empresa activa** y menú para cambiarla; cambia opciones según `user.is_authenticated`.
-- `templates/errors/{401,403,404,500}.html`: UX clara de errores.
-
----
-
-## 7) Integraciones y flujo transversal
-
-- **`accounts`**: login/signup; menú “Cuenta”.
-- **`org`**: selector de **empresa** (persistido por `tenancy`).
-- Todas las **apps de dominio** esperan `request.empresa` para scoping de datos.
-- **Decoradores de permisos** usados en vistas con acciones críticas (precios, ventas, pagos, cierres).
-
----
-
-## 8) Checklist de funcionamiento mínimo
-
-1. `urls.py` incluye **todas** las apps bajo prefijos definidos.
-2. `ActiveCompanyMiddleware` agregado en `settings` (después de `AuthenticationMiddleware`).
-3. `org` provee `/org/seleccionar/` y guarda `empresa_id` en sesión.
-4. Templates de errores vinculados en `urls.py`.
-5. `permissions.py` disponible y utilizado por vistas sensibles.

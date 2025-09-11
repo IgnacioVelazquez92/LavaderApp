@@ -47,6 +47,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "allauth.account.middleware.AccountMiddleware",
+    "lavaderos.middleware.TenancyMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -91,7 +92,7 @@ ACCOUNT_EMAIL_VERIFICATION = "none"
 ACCOUNT_USERNAME_REQUIRED = False
 
 # Rutas de post-login/logout
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/post-login/"
 LOGOUT_REDIRECT_URL = "/"
 
 # Permitir cerrar sesión con GET (sin página de confirmación)
@@ -177,3 +178,5 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+SAAS_MAX_EMPRESAS_POR_USUARIO = 1
