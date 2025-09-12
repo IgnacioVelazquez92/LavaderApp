@@ -1,0 +1,76 @@
+{% if form.non_field_errors %}
+<div class="alert alert-danger">
+  {% for e in form.non_field_errors %}<div>{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+
+  <div class="col-md-4">
+    <label class="form-label" for="{{ form.tipo_persona.id_for_label }}">{{ form.tipo_persona.label }}</label>
+    <select name="{{ form.tipo_persona.html_name }}" id="{{ form.tipo_persona.id_for_label }}"
+            class="form-select{% if form.tipo_persona.errors %} is-invalid{% endif %}">
+      {% for opt in form.tipo_persona.field.choices %}
+        <option value="{{ opt.0 }}" {% if form.tipo_persona.value == opt.0 %}selected{% endif %}>{{ opt.1 }}</option>
+      {% endfor %}
+    </select>
+    {% if form.tipo_persona.errors %}
+      <div class="invalid-feedback">
+        {% for e in form.tipo_persona.errors %}<div>{{ e }}</div>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  {% for field in form %}
+    {% if field.name not in 'tipo_persona activo' %}
+      <div class="{% if field.name in 'direccion localidad provincia cp notas razon_social' %}col-md-6{% elif field.name in 'nombre apellido document email tel_wpp fecha_nac' %}col-md-4{% else %}col-md-6{% endif %}">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+
+        {% if field.field.widget.input_type == 'textarea' %}
+          <textarea name="{{ field.html_name }}" id="{{ field.id_for_label }}"
+                    class="form-control{% if field.errors %} is-invalid{% endif %}"
+                    {% for k,v in field.field.widget.attrs.items %} {{k}}="{{v}}"{% endfor %}>{{ field.value|default_if_none:"" }}</textarea>
+
+        {% else %}
+          {# >>> FIX: si es fecha, formatear el value como YYYY-MM-DD <<< #}
+          {% if field.field.widget.input_type == 'date' or field.name == 'fecha_nac' %}
+            <input type="date"
+                   name="{{ field.html_name }}"
+                   id="{{ field.id_for_label }}"
+                   value="{% if field.value %}{{ field.value|date:'Y-m-d' }}{% endif %}"
+                   class="form-control{% if field.errors %} is-invalid{% endif %}"
+                   {% for k,v in field.field.widget.attrs.items %} {{k}}="{{v}}"{% endfor %}>
+          {% else %}
+            <input type="{{ field.field.widget.input_type|default:'text' }}"
+                   name="{{ field.html_name }}" id="{{ field.id_for_label }}"
+                   value="{{ field.value|default_if_none:'' }}"
+                   class="form-control{% if field.errors %} is-invalid{% endif %}"
+                   {% for k,v in field.field.widget.attrs.items %} {{k}}="{{v}}"{% endfor %}>
+          {% endif %}
+        {% endif %}
+
+        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        {% if field.errors %}
+          <div class="invalid-feedback">
+            {% for e in field.errors %}<div>{{ e }}</div>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endfor %}
+
+  <div class="col-12">
+    <div class="form-check">
+      <input type="checkbox" name="{{ form.activo.html_name }}" id="{{ form.activo.id_for_label }}"
+             class="form-check-input{% if form.activo.errors %} is-invalid{% endif %}"
+             {% if form.activo.value %}checked{% endif %}>
+      <label class="form-check-label" for="{{ form.activo.id_for_label }}">{{ form.activo.label }}</label>
+      {% if form.activo.errors %}
+        <div class="invalid-feedback">
+          {% for e in form.activo.errors %}<div>{{ e }}</div>{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>

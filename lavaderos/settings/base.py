@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     # Apps del proyecto
     "apps.org",
     "apps.accounts",
+    "apps.customers",
 ]
 
 SITE_ID = 1  # requerido por allauth

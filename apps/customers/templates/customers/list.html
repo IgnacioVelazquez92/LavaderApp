@@ -1,0 +1,70 @@
+{% extends "base_auth.html" %}
+{% block title %}Clientes{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h4 mb-0">Clientes</h1>
+  <a href="{% url 'customers:create' %}" class="btn btn-primary">Nuevo cliente</a>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-md-4">
+    <input type="search" name="q" value="{{ q }}" class="form-control"
+           placeholder="Buscar por nombre, documento, email o teléfono...">
+  </div>
+  <div class="col-md-3">
+    <select name="estado" class="form-select">
+      <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
+      <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+      <option value="todos" {% if estado == "todos" %}selected{% endif %}>Todos</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Buscar</button>
+  </div>
+</form>
+
+
+<div class="table-responsive">
+  <table class="table table-hover table-sm align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Nombre</th>
+        <th>Documento</th>
+        <th>Email</th>
+        <th>Teléfono</th>
+        <th class="text-center">Estado</th>
+        <th class="text-end">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in items %}
+      <tr>
+        <td><a href="{% url 'customers:detail' c.pk %}">{{ c.display_name }}</a></td>
+        <td>{{ c.documento|default:"—" }}</td>
+        <td>{{ c.email|default:"—" }}</td>
+        <td>{{ c.tel_wpp|default:"—" }}</td>
+        <td class="text-center">
+          {% if c.activo %}
+            <span class="badge bg-success">Activo</span>
+          {% else %}
+            <span class="badge bg-secondary">Inactivo</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <a href="{% url 'customers:update' c.pk %}" class="btn btn-sm btn-outline-secondary">Editar</a>
+        </td>
+      </tr>
+    {% empty %}
+      <tr>
+        <td colspan="6" class="text-center text-muted py-4">
+          No se encontraron clientes.
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% include "includes/_pagination.html" with page_obj=page_obj %}
+{% endblock %}

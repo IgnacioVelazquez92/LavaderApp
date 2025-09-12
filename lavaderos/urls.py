@@ -11,6 +11,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("", include("apps.accounts.urls")),
     path("org/", include("apps.org.urls")),
+    path("clientes/", include("apps.customers.urls", namespace="customers")),
     path("", login_required(TemplateView.as_view(
         template_name="home_dashboard.html")), name="home"),
     path("", TemplateView.as_view(template_name="marketing/home.html"), name="home"),

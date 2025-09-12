@@ -1654,7 +1654,7 @@ sequenceDiagram
 
 # Módulo 3 — `apps/customers` (Clientes)
 
-> **Objetivo del módulo:** Administrar los datos de los clientes (contacto, cumpleaños, facturación). Este módulo provee la información base para asociar clientes a vehículos, ventas y notificaciones.
+> **Objetivo del módulo:** Administrar los datos de los clientes (contacto, cumpleaños, notas internas). Este módulo provee la información base para asociar clientes a vehículos, ventas y notificaciones.
 
 ---
 
@@ -1667,97 +1667,130 @@ apps/customers/
 ├─ admin.py                  # Registro de Cliente en admin
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                 # Modelo Cliente (+ ClienteFacturacion opcional)
+├─ models.py                 # Modelo Cliente
 ├─ urls.py                   # Rutas propias (listado, alta, edición, detalle)
 ├─ views.py                  # Vistas server-rendered CRUD de clientes
 ├─ forms/
 │  ├─ __init__.py
-│  └─ customer.py           # Formularios de alta/edición (validaciones mínimas)
+│  └─ customer.py            # Formulario CustomerForm (validaciones + normalizaciones)
 ├─ services/
 │  ├─ __init__.py
-│  └─ customers.py          # Casos de uso: crear/editar cliente, manejar facturación
+│  └─ customers.py           # Casos de uso: crear/editar cliente
 ├─ selectors.py              # Lecturas: buscar cliente por nombre/teléfono/email
-├─ normalizers.py            # Normalización de datos (ej. limpiar WhatsApp, capitalizar nombres)
+├─ normalizers.py            # Normalización de datos (email, documento, teléfono, capitalización)
 ├─ templates/
 │  └─ customers/
 │     ├─ list.html           # Listado de clientes + búsqueda
 │     ├─ form.html           # Alta/edición de cliente
-│     ├─ detail.html         # (Opcional MVP) detalle con datos y vehículos
+│     ├─ detail.html         # Detalle con datos del cliente (extensible a vehículos/ventas)
 │     └─ _form_fields.html   # Partial con los campos (incluible en alta/edición)
 ├─ static/
 │  └─ customers/
-│     ├─ customers.css       # Estilos propios para listados/formularios
-│     └─ customers.js        # Mejoras UX (búsqueda instantánea, validación simple)
+│     ├─ customers.css       # Estilos propios (mínimos)
+│     └─ customers.js        # Mejoras UX (placeholder para búsqueda/validaciones simples)
 └─ emails/
-   └─ birthday.txt           # (Opcional) plantilla para felicitación de cumpleaños
+   └─ birthday.txt           # (Opcional) plantilla de felicitación de cumpleaños
 ```
 
 ### Rol de cada componente
 
-- **`models.py`**: define `Cliente` (nombre, apellido, email, tel, fecha_nac, json extra) y opcional `ClienteFacturacion`.
-- **`forms/customer.py`**: encapsula validación (ej. email único, teléfono limpio).
-- **`services/customers.py`**: mutaciones (crear cliente, editar datos, asignar facturación).
+- **`models.py`**: define `Cliente` (nombre, apellido, email, teléfono WhatsApp, fecha_nac, dirección, etc.) y campos auxiliares (`tags`, `notas`, `activo`).
+- **`forms/customer.py`**: `CustomerForm` con:
+  - inyección de clases Bootstrap,
+  - normalización de email, documento, teléfono,
+  - guardado con empresa activa y usuario creador,
+  - conversión de `tags` a lista.
+- **`services/customers.py`**: mutaciones de dominio (crear/editar cliente).
 - **`selectors.py`**: consultas de lectura (`buscar_cliente(q)`).
-- **`normalizers.py`**: helpers para normalizar input (whatsapp → formato internacional).
-- **`views.py`**: CRUD con forms y render a templates.
-- **`templates/customers/*`**: interfaz UI (list, form, detail).
+- **`normalizers.py`**: helpers para normalizar input (email, documento, teléfono a E.164, capitalizar textos).
+- **`views.py`**: CRUD basado en `ListView`, `CreateView`, `UpdateView`, `DetailView`. Incluye vistas para activar/desactivar cliente.
+- **`templates/customers/*`**: interfaz UI (listado, formulario, detalle). `_form_fields.html` maneja validación y muestra correctamente `fecha_nac`.
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Endpoints implementados
 
-- `/clientes/` → Listado + búsqueda.
-- `/clientes/nuevo/` → Alta cliente.
-- `/clientes/<id>/editar/` → Edición cliente.
-- `/clientes/<id>/detalle/` → Detalle (opcional MVP).
+- `/clientes/` → Listado + búsqueda de clientes.
+- `/clientes/nuevo/` → Alta de cliente.
+- `/clientes/<id>/editar/` → Edición de cliente.
+- `/clientes/<id>/detalle/` → Detalle de cliente (con notas y estado activo/inactivo).
+- `/clientes/<id>/desactivar/` → POST para desactivar cliente.
+- `/clientes/<id>/activar/` → POST para reactivar cliente.
+- `/clientes/<id>/eliminar/` → (opcional, solo admin, con confirmación).
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 3) Contratos de entrada/salida
 
 ### Alta Cliente
 
-- **Input (POST)**: nombre, apellido, email, tel_wpp, fecha_nac.
-- **Proceso**: validar campos, normalizar teléfono, persistir.
-- **Output**: cliente creado, redirect a listado.
+- **Input (POST)**: nombre, apellido, email, tel_wpp, fecha_nac, dirección, notas, activo.
+- **Proceso**:
+  - validación de campos obligatorios,
+  - normalización de email/documento/teléfono,
+  - asignación de empresa activa y usuario creador.
+- **Output**: cliente creado, redirect a listado con mensaje de éxito.
 
 ### Edición Cliente
 
 - **Input (POST)**: mismos campos.
-- **Proceso**: validar cambios, actualizar registro.
+- **Proceso**: validar cambios, conservar fecha_nac guardada si no se modifica, actualizar registro.
 - **Output**: redirect con mensaje “Cliente actualizado”.
 
 ### Búsqueda Cliente
 
 - **Input (GET)**: `q` (cadena).
-- **Proceso**: selectors buscan en nombre, email o tel.
+- **Proceso**: selectors buscan en nombre, apellido, email, tel.
 - **Output**: listado filtrado.
+
+### Activar / Desactivar Cliente
+
+- **Input (POST)**: acción sobre un cliente existente.
+- **Proceso**: cambia flag `activo`.
+- **Output**: redirect con mensaje de confirmación.
 
 ---
 
 ## 4) Dependencias e integraciones
 
-- **Depende de `org`**: todos los clientes están ligados a una empresa.
-- **Relaciona con `vehicles`**: un cliente puede tener uno o varios vehículos.
-- **Relaciona con `sales`**: las ventas requieren un cliente asociado.
-- **Relaciona con `notifications`**: notificaciones opcionales (ej. cumpleaños).
+- **Depende de `org`**: todos los clientes pertenecen a la empresa activa.
+- **Integración futura con `vehicles`**: un cliente puede tener uno o varios vehículos.
+- **Integración futura con `sales`**: las ventas requieren un cliente asociado.
+- **Integración futura con `notifications`**: notificación de cumpleaños o segmentación por etiquetas.
 
 ---
 
 ## 5) Seguridad
 
 - Todas las vistas requieren usuario autenticado.
-- Validar que el cliente pertenece a la empresa activa (tenant).
+- Validación multi-tenant:
+  - Solo se listan/gestionan clientes de la empresa activa (`request.empresa_activa`).
+- Acciones de activar/desactivar o eliminar restringidas a roles `admin` / `operador`.
 
 ---
 
-## 6) Roadmap inmediato
+## 6) Estado actual del módulo
 
-1. Definir modelos (`Cliente`, opcional `ClienteFacturacion`).
-2. Crear `forms` y `normalizers`.
-3. Implementar CRUD básico en vistas.
-4. Templates: list + form funcional.
-5. Integrar selector de empresa activa (filtrar clientes por empresa).
+- Modelo `Cliente` completo y migrado.
+- `CustomerForm` con validaciones y normalización.
+- Normalización de teléfono para Argentina → formato E.164 (+549…).
+- Templates list, form, detail con `_form_fields.html` que muestran errores y mantienen valores (incluida fecha de nacimiento).
+- Vistas CRUD + activar/desactivar implementadas.
+- Admin: listado de clientes y filtros básicos.
+- UX: mensajes de feedback (`django.contrib.messages`) integrados con Bootstrap.
+
+---
+
+## 7) Extensiones previstas
+
+- Exportar/Importar clientes (CSV/Excel).
+- Segmentación avanzada con `tags` o categorías predefinidas.
+- Asociar clientes a vehículos (`apps.vehicles`).
+- Mostrar historial de ventas en el `detail`.
+- Hook de cumpleaños en `notifications`.
+- Acciones masivas (activar/inactivar, exportar) en listado.
+
+---
 
 # Módulo 4 — `apps/vehicles` (Vehículos)
 
@@ -3016,3 +3049,281 @@ apps/app_log/
 2. Servicio `logger.log_event(...)`.
 3. Integrar con puntos clave de las apps (ej. errores en invoicing/notifications).
 4. UI mínima (listado/detalle) o fallback en admin.
+
+# Integración `apps/saas` ↔ `apps/org` — Pasos para sincronizar planes/suscripciones con Lavadero y Sucursales (sin código)
+
+> **Objetivo**: dejar documentado **qué** hay que hacer (y **dónde**) para que el módulo **SaaS** gobierne límites y estados del **módulo Org** (Lavadero/Empresa y Sucursales), incluido el **trial automático** y el eventual tope de **más de una empresa** para ciertos clientes.  
+> **Importante**: esto es una **guía de implementación**; no incluye código. Queda lista para ejecutarla luego, en una rama dedicada al Módulo 12.
+
+---
+
+## 0) Mapa de integración (qué se relaciona con qué)
+
+| Dominio         | Objeto                                                | ¿Quién lo crea?      | ¿Quién lo usa?   | Sincronía SaaS                                              |
+| --------------- | ----------------------------------------------------- | -------------------- | ---------------- | ----------------------------------------------------------- |
+| Org             | **Empresa** (Lavadero)                                | Usuario (onboarding) | Toda la app      | Al crear **Empresa** → crear **Suscripción** (trial)        |
+| Org             | **Sucursal**                                          | Usuario              | Operación        | Al crear **Sucursal** → verificar **límite** del plan       |
+| SaaS            | **PlanSaaS**                                          | Admin interno        | SaaS/Org         | Define límites y features (p.ej. `max_sucursales`)          |
+| SaaS            | **SuscripcionSaaS**                                   | Hook de Org + Admin  | Middleware/Views | Determina estado (activa/vencida), trial, y límites reales  |
+| SaaS (opcional) | **User entitlement** (límite de empresas por usuario) | Admin                | Org              | Controla **cuántas Empresas** puede crear/operar un usuario |
+
+> Nota: en tu diseño actual, **Suscripción** es por **Empresa**. Si querés **limitar cuántas Empresas** puede tener un **Usuario**, definí además un **entitlement por usuario** en SaaS (ver paso 6).
+
+---
+
+## 1) Definir planes y estados (SaaS) — Semillas y reglas
+
+**Qué hacer:**
+
+1. En **SaaS/PlanSaaS**, definir al menos:
+   - **Trial** (por ejemplo, `max_sucursales = 1`, duración X días).
+   - **Standard** / **Pro** (con límites distintos).
+2. En **SaaS/SuscripcionSaaS**, acordar la **máquina de estados** (MVP: `activa`/`vencida`/`suspendida`), y la regla de **vigencia** por fechas (`hoy ∈ [inicio, fin]` o `fin = NULL`).
+3. Marcar **un plan por defecto para trial** (p.ej., flag `por_defecto_trial`), para no depender de `settings`.
+4. Dejar documentado: **duración exacta del trial** (días).
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Lista de planes con sus **límites** (`max_sucursales`, y futuros `max_usuarios`, etc.).
+- **Duración** del trial (en días).
+- ¿El trial bloquea al vencer o solo avisa? (política MVP).
+
+---
+
+## 2) Hook al crear Empresa (Org) — Trial automático
+
+**Qué hacer (sin código):**
+
+1. En el **punto de éxito** de creación de Empresa (onboarding paso 1), invocar servicio SaaS para:
+   - Crear **SuscripcionSaaS** de **trial** para esa Empresa.
+   - Setear `inicio = now()`, `fin = now() + duración_trial`.
+   - `estado = activa` de entrada.
+2. Registrar **evento/auditoría** (opcional): “Empresa creada → Trial activado”.
+3. **Mensajes UI**: en el redirect al paso 2 (Crear Sucursal), incluir un flash tipo:
+   - “Trial activado. Tenés **N días** para probar todas las funciones del plan **Trial**”.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Texto de **mensajes** (idioma, tono).
+- Si querés **enviar email** de bienvenida/trial (asunto, plantilla).
+
+---
+
+## 3) Verificación de límites al crear Sucursal (Org) — Soft/hard gate
+
+**Qué hacer:**
+
+1. Antes de guardar una **Sucursal**, llamar a un **checker** de SaaS (p.ej., `limits.check_max_sucursales(empresa)`).
+2. Definir **política MVP**:
+   - **Soft gate**: permitir crear pero mostrar **warning** si superó el límite.
+   - **Hard gate**: **bloquear** creación y pedir **upgrade** (botón enlaza a panel SaaS).
+3. Agregar **contadores/uso** en el listado de Sucursales: “**X de Y** sucursales usadas”.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- ¿Soft o hard gate\*\* para `max_sucursales`?
+- Mensajes concretos (warning/error) y **CTA de upgrade** (URL destino).
+
+---
+
+## 4) Middleware/Contexto — Exponer plan/suscripción vigente
+
+**Qué hacer:**
+
+1. Extender (o añadir) middleware para **inyectar** en el request de autenticados:
+   - `request.empresa_activa` (ya existe),
+   - `request.suscripcion_vigente` y/o `request.plan_vigente` (derivados de SaaS),
+   - y opcionalmente `request.trial_days_left`.
+2. Esto permite que **templates** (sidebar, dashboard, org/\*) muestren **badge** de plan y **días restantes**.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Diseño textual de la **badge** (“Trial”, “Pro”, etc.) y formato “Días restantes”.
+
+---
+
+## 5) UI/UX — Señales visibles de plan y uso
+
+**Qué hacer:**
+
+1. **Sidebar**: debajo de “Empresa actual”, mostrar **Plan** y, si aplica, **días de trial restantes**.
+2. **Dashboard** (home autenticado):
+   - Si **sin Empresa**: CTA “Crear Lavadero” (igual que hoy).
+   - Si **con Empresa y sin sucursales**: CTA “Crear Sucursal” (igual que hoy).
+   - Si **trial**: alerta informativa: “Te quedan **N días**. **Mejorar plan**”.
+3. **Pantallas de Org**:
+   - En `org/sucursales.html`, mostrar **uso**: “**X/Y** sucursales”.
+   - Donde corresponda, mostrar **botón Upgrade** si chocó el límite.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Copys exactos de banners/alertas y **links** de upgrade/pago (aunque sea placeholder).
+
+---
+
+## 6) (Opcional, pero recomendado) Tope de **Empresas por Usuario**
+
+> Como tu **Suscripción es por Empresa**, para limitar **cuántas Empresas** puede tener un **Usuario**, definimos un **entitlement por usuario** dentro de SaaS (sin usar `settings`).
+
+**Qué hacer:**
+
+1. Crear una entidad simple en SaaS (p.ej., “UserLimit” o “SubscriptionUser”), con `max_empresas` y relación 1–1 al usuario.
+2. Añadir un **helper** central (SaaS) que devuelva el **límite efectivo** de Empresas para ese usuario (si no hay override → `1`).
+3. En **Org/EmpresaCreateView**, antes de permitir alta, consultar ese helper.
+4. En **selector/empresas.html**, usar ese helper para **mostrar/ocultar CTA** “Nueva empresa”.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- ¿Quién gestiona este valor? (Admin interno via Django Admin).
+- **Valores por defecto** (1) y **excepciones** (2 o más).
+
+---
+
+## 7) Panel SaaS (empresa) — Visión de plan/uso/estado
+
+**Qué hacer:**
+
+1. Implementar una vista **/saas/panel/** que, con **empresa activa**, muestre:
+   - Plan y estado (trial/activa/vencida),
+   - Fechas (inicio/fin), **días restantes**,
+   - Uso de **sucursales** y otros límites (usuarios, storage, cuando existan),
+   - CTA de **Upgrade** / **Renovar**.
+2. Enlazar este panel desde el **sidebar** (sección “Administración” → “Suscripción”).
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Contenido/estructura de ese panel y navegación deseada.
+- Políticas al **vencer** (bloqueo o solo aviso).
+
+---
+
+## 8) Backfill y utilidades
+
+**Qué hacer:**
+
+1. **Comando de gestión** para generar **Suscripciones** trial retroactivas a las Empresas ya existentes (si faltan).
+2. **Tareas programadas** (opcional) para:
+   - Marcar suscripciones como **vencidas** al llegar a `fin`,
+   - Enviar **recordatorios** (7 días antes, mismo día).
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Cron/periodicidad para recordatorios,
+- Emails/plantillas si corresponde.
+
+---
+
+## 9) Admin y gobernanza
+
+**Qué hacer:**
+
+1. Admin de **PlanSaaS**: inline de atributos (límite de sucursales, precio, flags de trial/defecto).
+2. Admin de **SuscripcionSaaS**: filtros por estado/plan, acciones masivas (suspender/activar).
+3. Admin de **User entitlements** (si aplicamos límite de empresas por usuario).
+4. **Permisos**: restringir esta administración a **staff** interno.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Quiénes serán **staff** y cómo segmentar permisos.
+
+---
+
+## 10) Mensajería y errores (UX consistente)
+
+**Qué hacer:**
+
+1. Reutilizar `django.contrib.messages` para:
+   - Trial activado,
+   - Trial por vencer (N días),
+   - Límite alcanzado de sucursales (warning/error),
+   - Upgrade necesario.
+2. En formularios (crear sucursal), mostrar **non_field_errors** si se bloquea por límite.
+
+**Información que me tenés que pasar cuando implementemos:**
+
+- Los **textos** (casts) finales de esos mensajes y su gravedad (info/warning/danger).
+
+---
+
+## 11) Pruebas (qué cubrir)
+
+**Qué probar (sin código):**
+
+- **EmpresaCreate → Trial**: se crea suscripción trial, estado activo, fin a N días.
+- **SucursalCreate**: con `max_sucursales=1` y 1 existente:
+  - **Soft gate**: crea y lanza warning.
+  - **Hard gate**: no crea, muestra error y CTA upgrade.
+- **Panel/Sidebar**: muestra plan y días restantes en trial.
+- **Entitlement usuario** (si lo aplicamos): usuario con tope **1** no puede crear 2ª empresa; usuario con tope **2** sí puede.
+- **Backfill**: empresas antiguas quedan con suscripción creada.
+
+---
+
+## 12) Circuito de sincronización (Mermaid)
+
+```mermaid
+sequenceDiagram
+  participant U as Usuario
+  participant ORG as Org (Views/Services)
+  participant SAAS as SaaS (Services/Selectors)
+  participant DB as DB
+
+  U->>ORG: Crear Empresa (onboarding paso 1)
+  ORG->>SAAS: Crear Suscripción trial para Empresa
+  SAAS->>DB: Insert SuscripcionSaaS (inicio, fin, estado=activa, plan=trial)
+  DB-->>SAAS: OK
+  SAAS-->>ORG: OK (trial activo)
+  ORG-->>U: Mensaje "Trial activado (N días)" → Redirige a "Crear Sucursal"
+
+  U->>ORG: Crear Sucursal (onboarding paso 2)
+  ORG->>SAAS: check_max_sucursales(Empresa)
+  alt Dentro del límite
+    SAAS-->>ORG: OK
+    ORG->>DB: Insert Sucursal
+    DB-->>ORG: OK
+    ORG-->>U: Éxito (si 1ª → Panel, si no → Listado)
+  else Límite superado
+    SAAS-->>ORG: LIMIT_EXCEEDED (policy)
+    ORG-->>U: Warning/Error + CTA Upgrade (según soft/hard gate)
+  end
+```
+
+---
+
+## 13) Recordatorio de piezas clave de **Org** (lo que te tengo que pedir cuando codeemos SaaS)
+
+Para conectar correctamente desde SaaS, acordate de pasarme (o tener presente) esto de **Org**:
+
+- **Claves de sesión**: `empresa_id`, `sucursal_id`.
+- **Objetos en request** (por middleware): `request.empresa_activa`, `request.sucursal_activa`.
+- **CBVs y flujos**:
+  - `EmpresaCreateView`: punto exacto donde se **confirma** la creación (hook para trial).
+  - `SucursalCreateView`: punto exacto antes de guardar (hook para **check de límite**).
+- **Selectors** disponibles o a crear**:**
+  - `empresas_para_usuario(user)`,
+  - `sucursales_de(empresa)` y **conteo**,
+  - `primera_empresa_de(user)` (si no existe, lo creamos para fallback).
+- **Templates** a tocar para UI SaaS**:** `home_dashboard.html`, `includes/_sidebar.html`, `org/sucursales.html`, `org/empresas.html`.
+- **Mensajes/Redirecciones** esperadas tras alta/edición.
+
+---
+
+## 14) Checklist de implementación (orden sugerido)
+
+1. **Planes**: definir y cargar Trial/Standard/Pro (Admin).
+2. **Selector SaaS**: helpers `suscripcion_vigente(empresa)` y `plan_vigente(empresa)`.
+3. **Hook EmpresaCreate** → crear trial automático.
+4. **Checker SucursalCreate** → policy soft/hard gate definida.
+5. **Middleware contexto** → exponer plan y días restantes.
+6. **UI/UX**: badges, contadores de uso y banners trial/upgrade.
+7. **Entitlement usuario** (si se limita **n° de Empresas por usuario**).
+8. **Backfill** suscripciones para Empresas existentes.
+9. **Tests** de flujos críticos y mensajes.
+10. **Documentación** de políticas y procesos (este documento + README del módulo).
+
+---
+
+### Cierre
+
+Con estos pasos, el **Módulo 12 (SaaS)** queda preparado para **gobernar** el onboarding y la operación del **Módulo 2 (Org)**: trial al crear Lavadero, límites por plan al crear Sucursales, visibilidad de plan/uso en UI y, si lo necesitás, tope de **Empresas por Usuario** sin depender de `settings`.  
+Cuando estemos listos para implementarlo, traé la **lista de planes**, la **duración** de trial, las **políticas** (soft/hard gate) y los **textos** de mensajes/CTAs para cerrar el circuito.

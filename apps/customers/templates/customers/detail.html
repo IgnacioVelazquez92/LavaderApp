@@ -1,0 +1,79 @@
+{% extends "base_auth.html" %}
+{% block title %}{{ obj.display_name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h4 mb-0">{{ obj.display_name }}</h1>
+  <a href="{% url 'customers:update' obj.pk %}" class="btn btn-outline-secondary">Editar</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">Datos básicos</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Tipo</dt>
+          <dd class="col-sm-8">{{ obj.get_tipo_persona_display }}</dd>
+
+          <dt class="col-sm-4">Documento</dt>
+          <dd class="col-sm-8">{{ obj.documento|default:"—" }}</dd>
+
+          <dt class="col-sm-4">Email</dt>
+          <dd class="col-sm-8">{{ obj.email|default:"—" }}</dd>
+
+          <dt class="col-sm-4">Teléfono</dt>
+          <dd class="col-sm-8">{{ obj.tel_wpp|default:"—" }}</dd>
+
+          <dt class="col-sm-4">Fecha nac.</dt>
+          <dd class="col-sm-8">
+            {% if obj.fecha_nac %}
+              {{ obj.fecha_nac }} ({{ obj.edad }} años)
+            {% else %}
+              —
+            {% endif %}
+          </dd>
+
+          <dt class="col-sm-4">Estado</dt>
+          <dd class="col-sm-8">{{ obj.activo|yesno:"Activo,Inactivo" }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">Ubicación</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Dirección</dt>
+          <dd class="col-sm-8">{{ obj.direccion|default:"—" }}</dd>
+          <dt class="col-sm-4">Localidad</dt>
+          <dd class="col-sm-8">{{ obj.localidad|default:"—" }}</dd>
+          <dt class="col-sm-4">Provincia</dt>
+          <dd class="col-sm-8">{{ obj.provincia|default:"—" }}</dd>
+          <dt class="col-sm-4">CP</dt>
+          <dd class="col-sm-8">{{ obj.cp|default:"—" }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if obj.notas %}
+<div class="card mt-3">
+  <div class="card-header">Notas</div>
+  <div class="card-body">
+    <p class="mb-0">{{ obj.notas }}</p>
+  </div>
+</div>
+{% endif %}
+
+{# Placeholder: vehículos asociados (futuro módulo vehicles) #}
+<div class="card mt-3">
+  <div class="card-header">Vehículos</div>
+  <div class="card-body text-muted">
+    <em>Integración pendiente con módulo vehicles.</em>
+  </div>
+</div>
+{% endblock %}
