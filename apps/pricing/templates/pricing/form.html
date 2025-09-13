@@ -1,0 +1,61 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Precios — {{ view.object|default_if_none:"Nuevo" }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h1 class="h4 mb-0">
+        {% if view.object %}Editar precio{% else %}Nuevo precio{% endif %}
+      </h1>
+      <div class="text-muted">Definí vigencias sin solapamientos, por Sucursal × Servicio × Tipo.</div>
+    </div>
+    <div>
+      {# Botón Volver: respeta ?next si viene en la URL #}
+      {% if request.GET.next %}
+        <a class="btn btn-outline-secondary" href="{{ request.GET.next }}">Volver</a>
+      {% else %}
+        <a class="btn btn-outline-secondary" href="{% url 'pricing:list' %}">Volver</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Mensajes globales #}
+  {% include "includes/_messages.html" %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {# Mantener el retorno para BackUrlMixin #}
+    {% if request.GET.next %}
+      <input type="hidden" name="next" value="{{ request.GET.next }}">
+    {% elif request.POST.next %}
+      <input type="hidden" name="next" value="{{ request.POST.next }}">
+    {% endif %}
+
+    {# Errores no asociados a campos #}
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger">
+        <ul class="mb-0">
+          {% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% include "pricing/_form_fields.html" %}
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary">
+        {% if view.object %}Guardar cambios{% else %}Crear precio{% endif %}
+      </button>
+
+      {% if request.GET.next %}
+        <a class="btn btn-outline-secondary" href="{{ request.GET.next }}">Cancelar</a>
+      {% else %}
+        <a class="btn btn-outline-secondary" href="{% url 'pricing:list' %}">Cancelar</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

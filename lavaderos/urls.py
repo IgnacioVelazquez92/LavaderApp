@@ -14,6 +14,7 @@ urlpatterns = [
     path("clientes/", include("apps.customers.urls", namespace="customers")),
     path("vehiculos/", include("apps.vehicles.urls", namespace="vehicles")),
     path("catalog/", include("apps.catalog.urls", namespace="catalog")),
+    path("precios/", include("apps.pricing.urls", namespace="pricing")),
     path("", login_required(TemplateView.as_view(
         template_name="home_dashboard.html")), name="home"),
     path("", TemplateView.as_view(template_name="marketing/home.html"), name="home"),

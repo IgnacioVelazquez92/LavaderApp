@@ -1,0 +1,140 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Precios — Listado{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h1 class="h4 mb-0">Precios</h1>
+      <div class="text-muted">Filtrá por Sucursal, Servicio, Tipo y Vigencia</div>
+    </div>
+    <div>
+      <a class="btn btn-primary" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">
+        Nuevo precio
+      </a>
+    </div>
+  </div>
+
+  <!-- Filtros (GET) -->
+  <form method="get" class="row g-3 mb-3">
+    <div class="col-12 col-md-3">
+      <label for="fSucursal" class="form-label">Sucursal</label>
+      <select id="fSucursal" name="sucursal" class="form-select">
+        <option value="">Todas</option>
+        {% for s in sucursales %}
+          <option value="{{ s.id }}" {% if filters.sucursal|default_if_none:"" == s.id|stringformat:"s" %}selected{% endif %}>
+            {{ s.nombre }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label for="fServicio" class="form-label">Servicio</label>
+      <select id="fServicio" name="servicio" class="form-select">
+        <option value="">Todos</option>
+        {% for sv in servicios %}
+          <option value="{{ sv.id }}" {% if filters.servicio|default_if_none:"" == sv.id|stringformat:"s" %}selected{% endif %}>
+            {{ sv.nombre }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label for="fTipo" class="form-label">Tipo de vehículo</label>
+      <select id="fTipo" name="tipo" class="form-select">
+        <option value="">Todos</option>
+        {% for tp in tipos %}
+          <option value="{{ tp.id }}" {% if filters.tipo|default_if_none:"" == tp.id|stringformat:"s" %}selected{% endif %}>
+            {{ tp.nombre }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label for="fVigentes" class="form-label">Vigentes en</label>
+      <input type="date" id="fVigentes" name="vigentes_en" class="form-control"
+             value="{{ filters.vigentes_en }}">
+      <div class="form-text">YYYY-MM-DD</div>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label for="fActivos" class="form-label">Estado</label>
+      {% with fa=filters.activos|default_if_none:""|lower %}
+      <select id="fActivos" name="activos" class="form-select">
+        <option value="" {% if not fa %}selected{% endif %}>Todos</option>
+        <option value="1" {% if fa == "1" or fa == "true" or fa == "si" or fa == "sí" %}selected{% endif %}>Sólo activos</option>
+        <option value="0" {% if fa == "0" or fa == "false" or fa == "no" %}selected{% endif %}>Sólo inactivos</option>
+      </select>
+      {% endwith %}
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button type="submit" class="btn btn-outline-primary">Aplicar filtros</button>
+      <a class="btn btn-outline-secondary" href="{% url 'pricing:list' %}">Limpiar</a>
+    </div>
+  </form>
+
+  <!-- Tabla -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Sucursal</th>
+          <th>Servicio</th>
+          <th>Tipo</th>
+          <th class="text-end">Precio</th>
+          <th>Moneda</th>
+          <th>Vigencia</th>
+          <th>Estado</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in precios %}
+          <tr>
+            <td>{{ p.sucursal.nombre }}</td>
+            <td>{{ p.servicio.nombre }}</td>
+            <td>{{ p.tipo_vehiculo.nombre }}</td>
+            <td class="text-end">{{ p.precio }}</td>
+            <td><code>{{ p.moneda }}</code></td>
+            <td>
+              <span title="{{ p.vigencia_inicio|date:'Y-m-d' }} → {{ p.vigencia_fin|default:'abierto' }}">
+                {{ p.vigencia_inicio|date:"Y-m-d" }} → {{ p.vigencia_fin|date:"Y-m-d"|default:"abierto" }}
+              </span>
+            </td>
+            <td>
+              {% if p.activo %}
+                <span class="badge text-bg-success">Activo</span>
+              {% else %}
+                <span class="badge text-bg-secondary">Inactivo</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary"
+                 href="{% url 'pricing:edit' p.pk %}?next={{ request.get_full_path|urlencode }}">
+                Editar
+              </a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8">
+              <div class="alert alert-info mb-0">
+                No hay precios para los filtros seleccionados.
+                <a class="alert-link" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">Crear el primero</a>.
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

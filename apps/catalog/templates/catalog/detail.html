@@ -1,4 +1,3 @@
-{# apps/catalog/templates/catalog/detail.html #}
 {% extends "base_auth.html" %}
 
 {% block title %}Servicio: {{ object.nombre }}{% endblock %}
@@ -96,7 +95,11 @@
         <div class="card-body small text-body-secondary">
           <p class="mb-2">Este servicio se vincula con:</p>
           <ul class="mb-0">
-            <li>Listas de precios por sucursal y tipo de vehículo (<em>pricing</em>).</li>
+            <li>
+              <a href="{% url 'pricing:list' %}?servicio={{ object.id }}" class="link-primary">
+                Listas de precios por sucursal y tipo de vehículo
+              </a>
+            </li>
             <li>Ítems de venta (<em>sales</em>).</li>
           </ul>
         </div>

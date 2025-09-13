@@ -2209,57 +2209,63 @@ apps/pricing/
 ├─ admin.py                   # Registro de modelos en admin
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                  # Modelos: PrecioServicio (con vigencias)
+├─ models.py                  # Modelo PrecioServicio (con vigencias)
 ├─ urls.py                    # Rutas propias (listado, alta, edición)
-├─ views.py                   # Vistas server-rendered para CRUD y consulta
+├─ views.py                   # Vistas server-rendered CRUD y consulta
 ├─ forms/
 │  ├─ __init__.py
-│  └─ price.py               # Form de alta/edición (validaciones de rango y unicidad lógica)
+│  └─ price.py                # Form de alta/edición (validaciones + widgets tipo date)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ pricing.py             # Comandos: crear/actualizar precio; cerrar vigencias
-│  └─ resolver.py            # Resolución: obtener precio vigente dado (srv, tipo, suc)
-├─ selectors.py               # Lecturas: listar precios por combinaciones/estado
-├─ validators.py              # Reglas: solapamiento de vigencias, moneda válida, monto > 0
+│  ├─ pricing.py              # Comandos: crear/actualizar precio; cerrar vigencias
+│  └─ resolver.py             # Resolver: obtener precio vigente dado (srv, tipo, suc)
+├─ selectors.py               # Lecturas: listar precios por filtros/estado
+├─ validators.py              # Reglas: solapamiento de vigencias, monto > 0, moneda válida
 ├─ templates/
 │  └─ pricing/
-│     ├─ list.html            # Listado con filtros (sucursal, servicio, tipo, vigencia)
+│     ├─ list.html            # Listado con filtros y tabla responsive
 │     ├─ form.html            # Alta/edición de precio
-│     └─ _form_fields.html    # Partial del formulario
+│     └─ _form_fields.html    # Partial del formulario (Bootstrap)
 └─ static/
    └─ pricing/
       ├─ pricing.css          # Estilos propios
-      └─ pricing.js           # UX: filtros dinámicos, pequeñas validaciones
+      └─ pricing.js           # UX: filtros dinámicos, validaciones simples
 ```
 
 ### Rol de cada componente
 
 - **`models.py`**: `PrecioServicio(empresa, sucursal, servicio, tipo_vehiculo, precio, moneda, vigencia_inicio, vigencia_fin, activo)`.
-- **`forms/price.py`**: valida montos, moneda y evita rangos inválidos.
-- **`validators.py`**: chequea **solapamientos** de vigencias por misma combinación (srv×tipo×suc).
-- **`services/pricing.py`**: alta/edición “segura”: cierra vigencia anterior si corresponde, crea nueva tarifa.
-- **`services/resolver.py`**: **API interna** para ventas: `get_precio_vigente(empresa, sucursal, servicio, tipo, fecha=None)`.
-- **`selectors.py`**: listados/filtros (por sucursal, servicio, estado, fecha).
+- **`forms/price.py`**:
+  - valida montos y fechas,
+  - fuerza `vigencia_inicio` y `vigencia_fin` como `<input type="date">` (calendario HTML5),
+  - integra Bootstrap (`form-control`, `form-select`).
+- **`validators.py`**: chequea **solapamientos** de vigencias para la misma combinación (srv×tipo×suc).
+- **`services/pricing.py`**: mutaciones seguras (cierre automático de vigencias previas y alta del nuevo precio).
+- **`services/resolver.py`**: API interna para ventas: `get_precio_vigente(empresa, sucursal, servicio, tipo, fecha=None)`.
+- **`selectors.py`**: consultas para listados y filtros (por sucursal, servicio, estado, fecha).
+- **`templates/*`**: interfaz Bootstrap 5:
+  - `list.html`: filtros amigables con `<select>` en vez de IDs,
+  - `form.html` + `_form_fields.html`: alta/edición con selects dinámicos y calendarios.
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Endpoints implementados
 
 - `GET /precios/` → listado con filtros (sucursal, servicio, tipo, estado, vigencia).
 - `GET /precios/nuevo/` → alta de precio.
 - `POST /precios/nuevo/` → crear precio (cierra/ajusta vigencias previas si aplica).
-- `GET /precios/<id>/editar/` → edición.
+- `GET /precios/<id>/editar/` → edición de precio.
 - `POST /precios/<id>/editar/` → actualizar precio (opcional: finalizar vigencia).
 
 > Nota: el **resolver** de precios **no expone vista**; es consumido por `sales` vía `services.resolver`.
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 3) Contratos de entrada/salida
 
 ### Alta/Edición de Precio
 
-- **Input (POST)**: `sucursal_id`, `servicio_id`, `tipo_vehiculo_id`, `precio` (decimal), `moneda` (str), `vigencia_inicio` (date), `vigencia_fin` (opcional).
+- **Input (POST)**: `sucursal`, `servicio`, `tipo_vehiculo` (elegidos desde `<select>` con nombres claros), `precio` (decimal), `moneda` (str), `vigencia_inicio` (date con calendario), `vigencia_fin` (opcional).
 - **Proceso**:
   - Validar que **no haya solapamiento** de vigencias para la misma combinación.
   - Si existe un precio vigente que choca, **cerrar** su `vigencia_fin` al día anterior.
@@ -2269,7 +2275,7 @@ apps/pricing/
 ### Resolución de Precio (uso interno)
 
 - **Input**: `empresa`, `sucursal`, `servicio`, `tipo_vehiculo`, `fecha` (default: hoy).
-- **Proceso**: buscar registro con `vigencia_inicio <= fecha <= vigencia_fin (o NULL)` y `activo=True` con mayor prioridad por fecha de inicio más reciente.
+- **Proceso**: buscar registro con `vigencia_inicio <= fecha <= vigencia_fin (o NULL)` y `activo=True`, priorizando la fecha de inicio más reciente.
 - **Output**: objeto `PrecioServicio` o excepción `PrecioNoDisponibleError`.
 
 ---
@@ -2285,19 +2291,82 @@ apps/pricing/
 
 ## 5) Seguridad
 
-- Solo usuarios autenticados con rol **`admin`** en la empresa pueden **crear/editar** precios.
+- Todas las vistas requieren autenticación.
+- Solo usuarios con rol **`admin`** en la empresa pueden **crear/editar** precios.
 - Usuarios **`operador`** pueden **listar/consultar**.
-- Validar pertenencia a la **empresa activa** en todas las operaciones.
+- Validación multi-tenant: solo se listan/gestionan precios de la empresa activa (`request.empresa_activa`).
 
 ---
 
-## 6) Roadmap inmediato
+## 6) Estado actual del módulo
 
-1. Modelo `PrecioServicio` + migraciones.
-2. Validadores → no solapar vigencias; monto/moneda válidos.
-3. Servicio `pricing.create_or_replace(...)` para alta segura.
-4. Servicio `resolver.get_precio_vigente(...)` consumible por `sales`.
-5. Vistas + templates (list/form) y filtros básicos.
+- Modelo `PrecioServicio` migrado y en uso.
+- Formularios con selects dinámicos (no IDs manuales) y `<input type="date">` para vigencias.
+- Validaciones de solapamiento y de pertenencia a empresa activa funcionando.
+- Vistas CRUD limpias con CBVs y redirecciones controladas (`?next`).
+- Templates Bootstrap 5: UX consistente con sidebar y otros módulos.
+- Admin: registro de `PrecioServicio` con filtros por empresa, servicio, sucursal y vigencia.
+
+---
+
+## 7) Roadmap próximo
+
+1. Mejorar filtros en `list.html` con selects dependientes (sucursal → servicios de esa sucursal).
+2. Integrar el resolver directamente en `sales` para precargar precio unitario en línea de venta.
+3. Exportar precios (CSV/Excel) con filtros aplicados.
+4. Agregar historial de cambios (auditoría).
+5. Integración de notificaciones cuando se actualicen precios.
+
+---
+
+## 8) Diagrama de relaciones
+
+```mermaid
+erDiagram
+    Empresa ||--o{ Sucursal : contiene
+    Empresa ||--o{ Servicio : ofrece
+    Empresa ||--o{ TipoVehiculo : define
+    Sucursal ||--o{ PrecioServicio : tiene
+    Servicio ||--o{ PrecioServicio : tiene
+    TipoVehiculo ||--o{ PrecioServicio : condiciona
+
+    Empresa {
+        int id
+        varchar nombre
+    }
+
+    Sucursal {
+        int id
+        varchar nombre
+        int empresa_id
+    }
+
+    Servicio {
+        int id
+        varchar nombre
+        text descripcion
+        int empresa_id
+    }
+
+    TipoVehiculo {
+        int id
+        varchar nombre
+        int empresa_id
+    }
+
+    PrecioServicio {
+        int id
+        int sucursal_id
+        int servicio_id
+        int tipo_vehiculo_id
+        decimal precio
+        varchar moneda
+        date vigencia_inicio
+        date vigencia_fin
+        bool activo
+        int empresa_id
+    }
+```
 
 # Módulo 7 — `apps/sales` (Ventas / Órdenes de Servicio)
 

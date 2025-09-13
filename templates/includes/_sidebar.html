@@ -60,7 +60,7 @@
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
           <a class="nav-link px-3 py-2 {% if ns == 'sales' %}active{% endif %}" href="/ventas/">Ventas</a>
-          <a class="nav-link px-3 py-2 {% if ns == 'pricing' %}active{% endif %}" href="/precios/">Precios</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'pricing' %}active{% endif %}" href="{% url 'pricing:list' %}">Precios</a>
           <a class="nav-link px-3 py-2 {% if ns == 'cashbox' %}active{% endif %}" href="/caja/">Caja</a>
         </nav>
       </div>
