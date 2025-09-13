@@ -1,0 +1,84 @@
+
+{% if form.non_field_errors %}
+  <div class="alert alert-danger" role="alert">
+    {% for e in form.non_field_errors %}<div>{{ e }}</div>{% endfor %}
+  </div>
+{% endif %}
+
+<div class="row g-3">
+  <!-- Cliente -->
+  <div class="col-12 col-md-6">
+    <label for="{{ form.cliente.id_for_label }}" class="form-label">Cliente <span class="text-danger">*</span></label>
+    {{ form.cliente }}
+    {% if form.cliente.errors %}<div class="invalid-feedback d-block">{% for e in form.cliente.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+    <div class="form-text">Solo clientes activos de tu empresa.</div>
+  </div>
+
+  <!-- Tipo de vehículo -->
+  <div class="col-12 col-md-6">
+    <label for="{{ form.tipo.id_for_label }}" class="form-label">Tipo</label>
+    <div class="d-flex gap-2">
+      <div class="flex-grow-1">
+        {{ form.tipo }}
+      </div>
+      <a href="{% url 'vehicles:types_new' %}?next={{ request.get_full_path|urlencode }}" class="btn btn-outline-secondary" title="Crear tipo">
+        <i class="bi bi-plus-lg"></i>
+      </a>
+    </div>
+    {% if form.tipo.errors %}<div class="invalid-feedback d-block">{% for e in form.tipo.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+    <div class="form-text">Ej.: Auto, Moto, Camioneta, Utilitario…</div>
+  </div>
+
+  <!-- Marca -->
+  <div class="col-12 col-md-6">
+    <label for="{{ form.marca.id_for_label }}" class="form-label">Marca</label>
+    {{ form.marca }}
+    {% if form.marca.errors %}<div class="invalid-feedback d-block">{% for e in form.marca.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+
+  <!-- Modelo -->
+  <div class="col-12 col-md-6">
+    <label for="{{ form.modelo.id_for_label }}" class="form-label">Modelo</label>
+    {{ form.modelo }}
+    {% if form.modelo.errors %}<div class="invalid-feedback d-block">{% for e in form.modelo.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+
+  <!-- Año -->
+  <div class="col-6 col-md-3">
+    <label for="{{ form.anio.id_for_label }}" class="form-label">Año</label>
+    {{ form.anio }}
+    {% if form.anio.errors %}<div class="invalid-feedback d-block">{% for e in form.anio.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+    <div class="form-text">{{ form.fields.anio.help_text }}</div>
+  </div>
+
+  <!-- Color -->
+  <div class="col-6 col-md-3">
+    <label for="{{ form.color.id_for_label }}" class="form-label">Color</label>
+    {{ form.color }}
+    {% if form.color.errors %}<div class="invalid-feedback d-block">{% for e in form.color.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+
+  <!-- Patente -->
+  <div class="col-12 col-md-6">
+    <label for="{{ form.patente.id_for_label }}" class="form-label">Patente <span class="text-danger">*</span></label>
+    {{ form.patente }}
+    {% if form.patente.errors %}<div class="invalid-feedback d-block">{% for e in form.patente.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+    <div class="form-text">Ej.: <code>ABC123</code> o <code>AB123CD</code>. Los guiones/espacios se ignoran.</div>
+  </div>
+
+  <!-- Notas -->
+  <div class="col-12">
+    <label for="{{ form.notas.id_for_label }}" class="form-label">Notas</label>
+    {{ form.notas }}
+    {% if form.notas.errors %}<div class="invalid-feedback d-block">{% for e in form.notas.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+
+  <!-- Activo -->
+  <div class="col-12">
+    <div class="form-check">
+      {{ form.activo }}
+      <label class="form-check-label" for="{{ form.activo.id_for_label }}">Activo</label>
+    </div>
+    {% if form.activo.errors %}<div class="invalid-feedback d-block">{% for e in form.activo.errors %}{{ e }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+</div>

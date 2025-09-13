@@ -1,19 +1,20 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
 from django.http import Http404
 from django.urls import reverse_lazy
 from django.utils.functional import cached_property
 from django.views.generic import ListView, CreateView, UpdateView, DetailView
 
 from .models import Cliente
+from apps.vehicles.models import Vehiculo
 from .forms import CustomerForm
-
-
+from apps.vehicles import selectors as vehicle_selectors
+from django.db.models import Prefetch, Q, Count
 # =============================================================================
 # Mixins
 # =============================================================================
+
 
 class TenancyMixin:
     """
@@ -73,6 +74,7 @@ class RoleRequiredMixin(UserPassesTestMixin):
 # =============================================================================
 # Vistas
 # =============================================================================
+
 
 class CustomerListView(LoginRequiredMixin, TenancyMixin, ListView):
     """
@@ -179,20 +181,36 @@ class CustomerUpdateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, Up
         return resp
 
 
-class CustomerDetailView(LoginRequiredMixin, TenancyMixin, DetailView):
-    """
-    Detalle de cliente (solo lectura). Permite a 'auditor' visualizar.
-    """
-    template_name = "customers/detail.html"
+class CustomerDetailView(LoginRequiredMixin, DetailView):
     model = Cliente
+    template_name = "customers/detail.html"
     context_object_name = "obj"
 
-    # Dejamos el control de acceso en el template/URL (solo login requerido).
-    # Si quisieras restringir por rol, podés heredar de RoleRequiredMixin con allowed_roles
-    # = ("admin", "operador", "auditor") y validar la membresía.
+    def get_queryset(self):
+        empresa = self.request.empresa_activa
+        qs = super().get_queryset().filter(empresa=empresa)
 
-    def get_object(self, queryset=None):
-        obj = super().get_object(queryset)
-        if obj.empresa_id != self.empresa.id:
-            raise Http404("Cliente no encontrado en esta empresa.")
-        return obj
+        # Filtros que ya tengas (q, estado, etc.)…
+
+        # Prefetch de vehículos activos (para mostrar en listado)
+        vehiculos_activos_qs = Vehiculo.objects.filter(empresa=empresa, activo=True).only(
+            "id", "patente", "marca", "modelo", "tipo_id"
+        ).select_related("tipo")
+        qs = qs.prefetch_related(
+            Prefetch("vehiculos", queryset=vehiculos_activos_qs,
+                     to_attr="vehiculos_activos")
+        ).annotate(
+            vehiculos_activos_count=Count(
+                "vehiculos", filter=Q(vehiculos__activo=True))
+        )
+
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        empresa = self.request.empresa_activa
+        cliente = self.object
+        ctx["vehiculos"] = vehicle_selectors.vehiculos_de_cliente(
+            empresa=empresa, cliente=cliente, solo_activos=False
+        )
+        return ctx

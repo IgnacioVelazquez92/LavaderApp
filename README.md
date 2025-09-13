@@ -1809,25 +1809,27 @@ apps/vehicles/
 │  └─ __init__.py
 ├─ models.py                 # Modelos: Vehiculo, TipoVehiculo
 ├─ urls.py                   # Rutas propias (listado, alta, edición, detalle)
-├─ views.py                  # Vistas server-rendered CRUD de vehículos
+├─ views.py                  # Vistas server-rendered CRUD de vehículos y tipos
 ├─ forms/
 │  ├─ __init__.py
-│  └─ vehicle.py            # Formularios de alta/edición de vehículo
+│  └─ vehicle.py             # Formularios de alta/edición de vehículo
 ├─ services/
 │  ├─ __init__.py
-│  ├─ vehicles.py           # Casos de uso: crear/editar vehículo
-│  └─ types.py              # Casos de uso: CRUD de TipoVehiculo
+│  ├─ vehicles.py            # Casos de uso: crear/editar vehículo
+│  └─ types.py               # Casos de uso: CRUD de TipoVehiculo
 ├─ selectors.py              # Lecturas: buscar por patente, por cliente, listar tipos
 ├─ validators.py             # Validaciones específicas (ej. patente única por empresa)
 ├─ templates/
 │  └─ vehicles/
 │     ├─ list.html           # Listado de vehículos
 │     ├─ form.html           # Alta/edición de vehículo
-│     ├─ detail.html         # (Opcional) detalle de vehículo
-│     └─ _form_fields.html   # Partial de formulario
+│     ├─ detail.html         # Detalle de vehículo
+│     ├─ type_form.html      # Alta/edición de tipos
+│     ├─ types_list.html     # Listado de tipos
+│     └─ _form_fields.html   # Partial de formulario de vehículo
 ├─ static/
 │  └─ vehicles/
-│     ├─ vehicles.css        # Estilos propios
+│     ├─ vehicles.css        # Estilos propios (mínimos)
 │     └─ vehicles.js         # Scripts UX (validaciones cliente-side, búsqueda rápida)
 └─ emails/
    └─ vehicle_added.txt      # (Opcional) notificación al cliente al registrar vehículo
@@ -1836,73 +1838,169 @@ apps/vehicles/
 ### Rol de cada componente
 
 - **`models.py`**:
-  - `TipoVehiculo` (auto, moto, camioneta, etc.).
-  - `Vehiculo` (marca, modelo, patente, relación a cliente y tipo).
-- **`forms/vehicle.py`**: validación y presentación de campos.
-- **`services/vehicles.py`**: comandos para crear/editar vehículos.
-- **`services/types.py`**: comandos para crear/editar tipos de vehículo.
-- **`selectors.py`**: consultas rápidas (`vehiculos_de(cliente)`, `buscar_por_patente(pat)`).
-- **`validators.py`**: helpers para validar unicidad de patente dentro de empresa.
-- **`templates/vehicles/*`**: pantallas de CRUD.
+  - `TipoVehiculo`: catálogo de tipos de vehículos (auto, moto, camioneta, etc.).
+  - `Vehiculo`: datos principales (cliente, tipo, marca, modelo, año, color, patente única por empresa, activo/inactivo).
+- **`forms/vehicle.py`**: `VehicleForm` con validaciones y compatibilidad Bootstrap.
+- **`services/vehicles.py`**: mutaciones de dominio (`crear_vehiculo`, `editar_vehiculo`, `activar_vehiculo`, `desactivar_vehiculo`).
+- **`services/types.py`**: mutaciones de dominio sobre tipos de vehículo.
+- **`selectors.py`**: consultas de lectura (`vehiculos_de(cliente)`, `buscar_por_patente`, `tipos_activos`).
+- **`validators.py`**: helper de validación para patente única dentro de la empresa.
+- **`views.py`**: CRUD con CBVs (`ListView`, `CreateView`, `UpdateView`, `DetailView`) tanto de vehículos como de tipos. Incluye mixin `BackUrlMixin` para soportar botón **Volver** en todas las vistas.
+- **`templates/vehicles/*`**: interfaz UI con Bootstrap 5, hereda de `base_auth.html`.
+  - `list.html`: tabla de vehículos con filtros.
+  - `form.html`: alta/edición con `_form_fields.html`.
+  - `detail.html`: ficha de vehículo.
+  - `types_list.html` y `type_form.html`: gestión de tipos.
+- **`static/vehicles/*`**: assets opcionales de mejora UX.
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Endpoints implementados
 
-- `/vehiculos/` → Listado de vehículos (con filtro por cliente).
-- `/vehiculos/nuevo/` → Alta de vehículo.
-- `/vehiculos/<id>/editar/` → Edición.
-- `/vehiculos/<id>/detalle/` → Detalle (opcional MVP).
-- `/tipos-vehiculo/` → Listado y alta de tipos de vehículo (admin empresa).
+- `/vehiculos/` → Listado de vehículos (con búsqueda y filtro por cliente).
+- `/vehiculos/nuevo/` → Alta de vehículo (soporta `?cliente=<id>` para preseleccionar).
+- `/vehiculos/<id>/editar/` → Edición de vehículo.
+- `/vehiculos/<id>/detalle/` → Detalle de vehículo.
+- `/vehiculos/<id>/activar/` → Reactivar vehículo.
+- `/vehiculos/<id>/desactivar/` → Desactivar vehículo.
+- `/vehiculos/tipos-vehiculo/` → Listado de tipos de vehículo.
+- `/vehiculos/tipos-vehiculo/nuevo/` → Alta de tipo.
+- `/vehiculos/tipos-vehiculo/<id>/editar/` → Edición de tipo.
+- `/vehiculos/tipos-vehiculo/<id>/activar/` → Activar tipo.
+- `/vehiculos/tipos-vehiculo/<id>/desactivar/` → Desactivar tipo.
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 3) Contratos de entrada/salida
 
 ### Alta Vehículo
 
-- **Input (POST)**: cliente, tipo_vehiculo, marca, modelo, patente.
-- **Proceso**: validar unicidad de patente en empresa; persistir.
-- **Output**: vehículo creado, redirect a listado o al detalle del cliente.
+- **Input (POST)**: cliente, tipo_vehiculo, marca, modelo, año, color, patente, notas, activo.
+- **Proceso**:
+  - Validación de unicidad de patente por empresa (en `validators.py`).
+  - Persistencia vía `services.crear_vehiculo`.
+  - Mensaje de éxito con `django.contrib.messages`.
+- **Output**: redirect a:
+  - `next` (si estaba en query/POST, p. ej. volver a edición de cliente),
+  - o al listado de vehículos.
 
 ### Edición Vehículo
 
 - **Input (POST)**: mismos campos.
-- **Proceso**: validar cambios; actualizar registro.
-- **Output**: redirect con mensaje “Vehículo actualizado”.
+- **Proceso**: validación de cambios, persistencia en `services.editar_vehiculo`.
+- **Output**: redirect a `next` o al listado con mensaje de éxito.
 
-### Búsqueda por patente
+### Activar/Desactivar Vehículo
 
-- **Input (GET)**: `q` (string).
-- **Proceso**: buscar coincidencias de patente en empresa activa.
-- **Output**: listado filtrado.
+- **Input (POST)**: ID de vehículo.
+- **Proceso**: cambia flag `activo`.
+- **Output**: redirect a `next` o listado.
+
+### Alta/Edición TipoVehículo
+
+- **Input (POST)**: nombre, slug, activo.
+- **Proceso**: validación de slug único por empresa. Persistencia en `services/types.py`.
+- **Output**: redirect a `next` (si existía, p. ej. volver a form de vehículo) o listado de tipos.
 
 ---
 
 ## 4) Dependencias e integraciones
 
-- **Depende de `customers`**: todo vehículo debe estar asociado a un cliente.
-- **Depende de `org`**: el vehículo pertenece a la empresa activa.
-- **Se integra con `sales`**: al crear ventas, se selecciona un vehículo de un cliente.
-- **Se integra con `pricing`**: el tipo de vehículo determina el precio del servicio.
+- **Depende de `customers`**: cada vehículo requiere un cliente asociado.
+- **Depende de `org`**: el vehículo y el tipo pertenecen a la empresa activa (`request.empresa_activa`).
+- **Integración con `customers.detail.html`**: muestra todos los vehículos asociados a un cliente, con CTA “Agregar vehículo” si no tiene ninguno.
+- **Integración futura con `sales`**: al crear una venta se seleccionará un vehículo de un cliente.
+- **Integración futura con `pricing`**: el tipo de vehículo determina el precio base del servicio.
 
 ---
 
 ## 5) Seguridad
 
 - Todas las vistas requieren usuario autenticado.
-- Validar que el vehículo pertenece a la empresa activa.
-- Validar que el usuario tenga rol habilitado para CRUD de vehículos.
+- Validación multi-tenant:
+  - Solo se listan/gestionan vehículos de la empresa activa.
+  - Las vistas de edición comprueban que el objeto pertenezca a la empresa activa.
+- Acciones de alta/edición/activación restringidas a roles habilitados (`admin` / `operador`).
 
 ---
 
-## 6) Roadmap inmediato
+## 6) UX / UI
 
-1. Definir modelos (`TipoVehiculo`, `Vehiculo`).
-2. Crear formularios y validadores (unicidad de patente).
-3. Implementar vistas CRUD.
-4. Templates básicos de listado y form.
-5. Integrar selector de empresa activa (filtrar vehículos por empresa).
+- Formularios con `crispy` Bootstrap manual (clases aplicadas en `_form_fields.html`).
+- Botones **Volver** y **Cancelar**:
+  - Implementados con `BackUrlMixin`.
+  - Prioridad: `?next` > `HTTP_REFERER` > fallback (`list` o `types_list`).
+- Listado de clientes muestra un resumen de sus vehículos (hasta 3 patentes, badge “+N” si hay más).
+- Si el cliente no tiene vehículos → botón directo **Agregar vehículo** (lleva al form con `?cliente=<id>&next=<listado>`).
+- En el form de vehículo, botón “+ Crear tipo” abre el alta de tipo con `next` apuntando al form actual → al guardar vuelve a la edición/alta del vehículo.
+
+---
+
+## 7) Estado actual
+
+- Modelos y migraciones completas (`Vehiculo`, `TipoVehiculo`).
+- Formularios con validaciones (patente única por empresa).
+- Services y Selectors implementados (mutaciones y lecturas).
+- CBVs CRUD funcionales, integradas con `BackUrlMixin`.
+- Templates `list`, `form`, `detail`, `types_list`, `type_form` listos y probados.
+- Integración con `customers.detail.html` y `customers.list.html`.
+- Sidebar actualizado: enlace directo a **Vehículos** en sección **Maestros**.
+
+---
+
+## 8) Extensiones previstas
+
+- Exportar vehículos (CSV/Excel).
+- Historial de lavados por vehículo (integración con `sales`).
+- Notificación al cliente cuando el vehículo esté listo (`apps.notifications`).
+- Filtros avanzados en listado (por tipo, año, color).
+- Soporte para adjuntar fotos/documentos del vehículo.
+
+---
+
+## 9) Diagrama de relaciones
+
+```mermaid
+erDiagram
+    Empresa ||--o{ Cliente : tiene
+    Empresa ||--o{ TipoVehiculo : define
+    Cliente ||--o{ Vehiculo : posee
+    TipoVehiculo ||--o{ Vehiculo : clasifica
+
+    Empresa {
+        int id
+        varchar nombre
+    }
+
+    Cliente {
+        int id
+        varchar nombre
+        varchar apellido
+        varchar email
+        int empresa_id
+    }
+
+    TipoVehiculo {
+        int id
+        varchar nombre
+        varchar slug
+        bool activo
+        int empresa_id
+    }
+
+    Vehiculo {
+        int id
+        varchar marca
+        varchar modelo
+        int anio
+        varchar color
+        varchar patente
+        bool activo
+        int cliente_id
+        int tipo_id
+        int empresa_id
+    }
+```
 
 # Módulo 5 — `apps/catalog` (Catálogo de Servicios)
 
