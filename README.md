@@ -2018,19 +2018,20 @@ apps/catalog/
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                 # Modelo Servicio
-├─ urls.py                   # Rutas propias (listado, alta, edición)
+├─ urls.py                   # Rutas propias (listado, alta, edición, detalle)
 ├─ views.py                  # Vistas server-rendered CRUD de servicios
 ├─ forms/
 │  ├─ __init__.py
-│  └─ service.py            # Formulario de alta/edición de servicio
+│  └─ service.py             # Formulario de alta/edición de servicio
 ├─ services/
 │  ├─ __init__.py
-│  └─ services.py           # Casos de uso: crear, editar, desactivar servicio
-├─ selectors.py              # Lecturas: listar activos, buscar por nombre
+│  └─ services.py            # Casos de uso: crear, editar, desactivar servicio
+├─ selectors.py              # Lecturas: listar activos, buscar por nombre, get por ID
 ├─ templates/
 │  └─ catalog/
 │     ├─ list.html           # Listado de servicios
 │     ├─ form.html           # Alta/edición
+│     ├─ detail.html         # Detalle de servicio
 │     └─ _form_fields.html   # Partial de formulario
 ├─ static/
 │  └─ catalog/
@@ -2042,66 +2043,156 @@ apps/catalog/
 
 ### Rol de cada componente
 
-- **`models.py`**: define `Servicio` (nombre, descripción, activo, timestamps).
-- **`forms/service.py`**: validación de nombre único en empresa, activo por defecto.
-- **`services/services.py`**: mutaciones (crear, editar, archivar servicio).
-- **`selectors.py`**: consultas (`servicios_activos(empresa)`).
-- **`views.py`**: CRUD básico sobre el modelo.
-- **`templates/catalog/*`**: interfaz de listado y formulario.
+- **`models.py`**: define `Servicio` (nombre, descripción, slug, activo, timestamps, empresa FK).
+- **`forms/service.py`**:
+  - valida nombre único en empresa,
+  - inyecta clases Bootstrap,
+  - gestiona campo `activo` (oculto en creación, editable en edición).
+- **`services/services.py`**: mutaciones de dominio (`crear_servicio`, `editar_servicio`, `activar_servicio`, `desactivar_servicio`).
+- **`selectors.py`**: consultas (`servicios_activos(empresa)`, `buscar_por_nombre`, `get_servicio_por_id`).
+- **`views.py`**:
+  - CBVs para List, Create, Update, Detail,
+  - acciones POST para activar/desactivar,
+  - soporte `?next` para redirecciones.
+- **`templates/catalog/*`**: interfaz UI:
+  - `list.html` listado con búsqueda, badges de estado, acciones,
+  - `form.html` con `_form_fields.html`,
+  - `detail.html` ficha completa con info, acciones y recordatorio de integraciones (pricing, sales).
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Endpoints implementados
 
-- `/catalogo/servicios/` → Listado de servicios.
-- `/catalogo/servicios/nuevo/` → Alta servicio.
-- `/catalogo/servicios/<id>/editar/` → Edición servicio.
+- `/catalogo/servicios/` → Listado de servicios (`ServiceListView`).
+- `/catalogo/servicios/nuevo/` → Alta servicio (`ServiceCreateView`).
+- `/catalogo/servicios/<id>/editar/` → Edición servicio (`ServiceUpdateView`).
+- `/catalogo/servicios/<id>/detalle/` → Detalle de servicio (`ServiceDetailView`).
+- `/catalogo/servicios/<id>/activar/` → Activar servicio (`ServiceActivateView`).
+- `/catalogo/servicios/<id>/desactivar/` → Desactivar servicio (`ServiceDeactivateView`).
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 3) Contratos de entrada/salida
 
 ### Alta Servicio
 
 - **Input (POST)**: nombre, descripción opcional.
-- **Proceso**: validar unicidad, crear servicio.
-- **Output**: servicio activo, redirect a listado.
+- **Proceso**:
+  - validación de unicidad por empresa,
+  - creación de `Servicio`,
+  - asignación a empresa activa.
+- **Output**: servicio creado, redirect a listado (o a `next` si existe), mensaje de éxito.
 
 ### Edición Servicio
 
-- **Input (POST)**: nombre, descripción, activo (bool).
-- **Proceso**: actualizar registro.
-- **Output**: redirect con mensaje “Servicio actualizado”.
+- **Input (POST)**: nombre, descripción, activo.
+- **Proceso**: validaciones y actualización.
+- **Output**: redirect a listado (o `next`), mensaje “Servicio actualizado”.
+
+### Detalle Servicio
+
+- **Input (GET)**: id.
+- **Proceso**: obtener servicio de empresa activa, validar permisos.
+- **Output**: render `detail.html` con info completa y acciones.
 
 ### Listado Servicios
 
 - **Input (GET)**: opcional `q` (búsqueda por nombre).
-- **Proceso**: obtener servicios activos de la empresa.
-- **Output**: render de `list.html`.
+- **Proceso**: filtrar servicios de empresa activa, paginar.
+- **Output**: render `list.html`.
+
+### Activar/Desactivar Servicio
+
+- **Input (POST)**: id + `csrf_token`.
+- **Proceso**: cambiar flag `activo`.
+- **Output**: redirect a listado (o `next`), mensaje confirmación.
 
 ---
 
 ## 4) Dependencias e integraciones
 
-- **Depende de `org`**: cada servicio pertenece a una empresa.
-- **Relaciona con `pricing`**: para asociar precios por sucursal y tipo de vehículo.
-- **Relaciona con `sales`**: los ítems de venta hacen referencia a un servicio.
+- **Depende de `org`**: cada servicio pertenece a la empresa activa.
+- **Integración con `pricing`**: los precios se definen por combinación (`servicio` + `tipo_vehículo` + `sucursal`).
+- **Integración con `sales`**: las ventas referencian un servicio del catálogo.
+- **Integración UI**: sidebar actualizado con link directo a Catálogo de Servicios.
 
 ---
 
 ## 5) Seguridad
 
-- Solo usuarios autenticados y con rol `admin` o `operador` en la empresa pueden administrar servicios.
-- Lecturas accesibles a cualquier usuario con membresía en la empresa activa.
+- Todas las vistas requieren usuario autenticado.
+- Validación multi-tenant: solo se listan/gestionan servicios de la empresa activa (`request.empresa_activa`).
+- Acciones de alta/edición/activación restringidas a roles `admin` / `operador`.
 
 ---
 
-## 6) Roadmap inmediato
+## 6) Estado actual
 
-1. Definir modelo `Servicio`.
-2. Crear formulario y vistas CRUD.
-3. Templates: listado y form simples.
-4. Integrar con `pricing` (precios referencian servicios).
+- Modelo `Servicio` implementado con unicidad por empresa y slug autogenerado.
+- Formularios estilizados con Bootstrap (`form-control`, `is-invalid`, `form-check-input`).
+- Vistas CRUD y de activación/desactivación funcionando.
+- Templates `list`, `form`, `detail` completos y responsivos.
+- Sidebar con link a “Catálogo de servicios”.
+- Mensajes de éxito/error integrados con `django.contrib.messages`.
+
+---
+
+## 7) Extensiones previstas
+
+- Exportar/Importar servicios (CSV/Excel).
+- Historial de cambios en servicios (auditoría).
+- Hooks de notificación (`service_updated.txt`).
+- Integración más profunda con `pricing` para gestionar precios desde el detalle de servicio.
+- Posibilidad de categorizar servicios por grupos (ej. básicos, premium).
+
+---
+
+## 8) Diagrama de relaciones (actual + integración futura con precios)
+
+```mermaid
+erDiagram
+    Empresa ||--o{ Servicio : ofrece
+    Servicio ||--o{ ServicePrice : tiene
+    TipoVehiculo ||--o{ ServicePrice : condiciona
+    Sucursal ||--o{ ServicePrice : aplica_en
+
+    Empresa {
+        int id
+        varchar nombre
+    }
+
+    Servicio {
+        int id
+        varchar nombre
+        text descripcion
+        varchar slug
+        bool activo
+        int empresa_id
+    }
+
+    TipoVehiculo {
+        int id
+        varchar nombre
+        bool activo
+        int empresa_id
+    }
+
+    Sucursal {
+        int id
+        varchar nombre
+        int empresa_id
+    }
+
+    ServicePrice {
+        int id
+        int servicio_id
+        int tipo_vehiculo_id
+        int sucursal_id
+        decimal precio
+        date vigente_desde
+        date vigente_hasta
+    }
+```
 
 # Módulo 6 — `apps/pricing` (Precios por Sucursal y Tipo de Vehículo)
 

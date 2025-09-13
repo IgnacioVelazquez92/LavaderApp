@@ -1,0 +1,42 @@
+{# apps/catalog/templates/catalog/_form_fields.html #}
+{% load i18n %}
+
+<div class="mb-3">
+  <label for="{{ form.nombre.id_for_label }}" class="form-label">Nombre</label>
+  {{ form.nombre }}
+  {% if form.nombre.errors %}
+    <div class="invalid-feedback">
+      {{ form.nombre.errors|striptags }}
+    </div>
+  {% else %}
+    <div class="form-text">Nombre visible del servicio (ej. Lavado exterior).</div>
+  {% endif %}
+</div>
+
+<div class="mb-3">
+  <label for="{{ form.descripcion.id_for_label }}" class="form-label">Descripción</label>
+  {{ form.descripcion }}
+  {% if form.descripcion.errors %}
+    <div class="invalid-feedback">
+      {{ form.descripcion.errors|striptags }}
+    </div>
+  {% else %}
+    <div class="form-text">Detalles opcionales del servicio.</div>
+  {% endif %}
+</div>
+
+{# Campo slug oculto (ya viene HiddenInput desde el form) #}
+{{ form.slug }}
+
+{# Campo activo: en creación está disabled, en edición se muestra como switch #}
+{% if form.fields.activo and not form.fields.activo.disabled %}
+  <div class="form-check form-switch mb-3">
+    {{ form.activo }}
+    <label class="form-check-label" for="{{ form.activo.id_for_label }}">Activo</label>
+    {% if form.activo.errors %}
+      <div class="invalid-feedback d-block">
+        {{ form.activo.errors|striptags }}
+      </div>
+    {% endif %}
+  </div>
+{% endif %}

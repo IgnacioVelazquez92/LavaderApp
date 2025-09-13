@@ -1,0 +1,52 @@
+{# apps/catalog/templates/catalog/form.html #}
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block title %}{% if form.instance.pk %}Editar servicio{% else %}Nuevo servicio{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <!-- Encabezado -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-1">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Panel</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'catalog:services' %}">Servicios</a></li>
+      <li class="breadcrumb-item active" aria-current="page">
+        {% if form.instance.pk %}Editar{% else %}Nuevo{% endif %}
+      </li>
+    </ol>
+  </nav>
+
+  <h1 class="h4 mb-3">
+    {% if form.instance.pk %}Editar servicio{% else %}Nuevo servicio{% endif %}
+  </h1>
+
+  <!-- Formulario -->
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% if request.GET.next %}
+      <input type="hidden" name="next" value="{{ request.GET.next }}">
+    {% endif %}
+    
+    {% include "catalog/_form_fields.html" %}
+
+    <!-- Botones -->
+    <div class="d-flex justify-content-between mt-4">
+      {% with back=request.GET.next|default:request.META.HTTP_REFERER %}
+        <a href="{% if back %}{{ back }}{% else %}{% url 'catalog:services' %}{% endif %}"
+          class="btn btn-outline-secondary">
+          Cancelar
+        </a>
+      {% endwith %}
+      <button type="submit" class="btn btn-primary">
+        {% if form.instance.pk %}
+          <i class="bi bi-save"></i> Guardar cambios
+        {% else %}
+          <i class="bi bi-check-lg"></i> Crear servicio
+        {% endif %}
+      </button>
+    </div>
+
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{# apps/catalog/templates/catalog/detail.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}Servicio: {{ object.nombre }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-1">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Panel</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'catalog:services' %}">Servicios</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{{ object.nombre }}</li>
+    </ol>
+  </nav>
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap align-items-start justify-content-between mb-3">
+    <div class="me-3">
+      <h1 class="h4 mb-1">{{ object.nombre }}</h1>
+      <div class="small text-body-secondary">
+        {% if object.slug %}<span class="me-2">Slug: <code>{{ object.slug }}</code></span>{% endif %}
+        <span class="me-2">Creado: {{ object.creado|date:"d/m/Y H:i" }}</span>
+        <span>Actualizado: {{ object.actualizado|date:"d/m/Y H:i" }}</span>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      {% if object.activo %}
+        <span class="badge text-bg-success">Activo</span>
+      {% else %}
+        <span class="badge text-bg-secondary">Inactivo</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="row g-3">
+    <div class="col-12 col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <strong>Descripción</strong>
+        </div>
+        <div class="card-body">
+          {% if object.descripcion %}
+            <p class="mb-0">{{ object.descripcion|linebreaksbr }}</p>
+          {% else %}
+            <p class="text-body-secondary mb-0"><em>Sin descripción.</em></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <strong>Acciones</strong>
+        </div>
+        <div class="card-body">
+          <div class="d-grid gap-2">
+            <a class="btn btn-outline-primary"
+               href="{% url 'catalog:service_edit' object.pk %}?next={{ request.get_full_path|urlencode }}">
+              <i class="bi bi-pencil-square"></i> Editar
+            </a>
+
+            {% if object.activo %}
+              <form method="post" action="{% url 'catalog:service_deactivate' object.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                <button type="submit" class="btn btn-outline-warning"
+                        onclick="return confirm('¿Desactivar el servicio {{ object.nombre }}?');">
+                  <i class="bi bi-slash-circle"></i> Desactivar
+                </button>
+              </form>
+            {% else %}
+              <form method="post" action="{% url 'catalog:service_activate' object.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                <button type="submit" class="btn btn-outline-success">
+                  <i class="bi bi-check-circle"></i> Activar
+                </button>
+              </form>
+            {% endif %}
+
+            <a class="btn btn-secondary"
+               href="{{ request.GET.next|default:request.META.HTTP_REFERER|default:'' }}">
+              Volver
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-header">
+          <strong>Integraciones</strong>
+        </div>
+        <div class="card-body small text-body-secondary">
+          <p class="mb-2">Este servicio se vincula con:</p>
+          <ul class="mb-0">
+            <li>Listas de precios por sucursal y tipo de vehículo (<em>pricing</em>).</li>
+            <li>Ítems de venta (<em>sales</em>).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

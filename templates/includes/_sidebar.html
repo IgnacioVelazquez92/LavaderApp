@@ -1,138 +1,19 @@
-{% comment %} <!-- Encabezado corto del sidebar -->
-  <div class="p-3 border-bottom">
-    {% if request.empresa_activa %}
-      <div class="small text-muted">Lavadero</div>
-      <div class="fw-semibold mb-2">{{ request.empresa_activa.nombre }}</div>
+{# templates/includes/_sidebar.html (fragmento completo) #}
+{% load static %}
 
-      {% if request.empresa_activa.sucursales.exists %}
-        <label for="sidebarSucursal" class="form-label small text-muted mb-1">Sucursal</label>
-        <form method="post" action="{% url 'org:selector' %}">
-          {% csrf_token %}
-          <select name="sucursal" id="sidebarSucursal" class="form-select form-select-sm" onchange="this.form.submit()">
-            {% for s in request.empresa_activa.sucursales.all %}
-              <option value="{{ s.id }}" {% if request.session.sucursal_id == s.id %}selected{% endif %}>
-                {{ s.nombre }}
-              </option>
-            {% endfor %}
-          </select>
-        </form>
-      {% else %}
-        <div class="alert alert-warning small mt-2 mb-0">
-          No hay sucursales. <a href="{% url 'org:sucursal_nueva' %}" class="alert-link">Crear sucursal</a>.
-        </div>
-      {% endif %}
-    {% else %}
-      <a href="{% url 'org:empresa_nueva' %}" class="btn btn-sm btn-warning w-100 mt-2">Crear lavadero</a>
-    {% endif %}
-  </div>
-  
-  <div class="accordion accordion-flush" id="sidebarAccordion">
-    <!-- Organización -->
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="acc-org-h">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-org-b">
-          Organización
-        </button>
-      </h2>
-      <div id="acc-org-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
-        <div class="accordion-body p-0">
-          <nav class="nav flex-column">
-            <a class="nav-link px-3 py-2" href="/org/empresas/">Empresas</a>
-            <a class="nav-link px-3 py-2" href="/org/sucursales/">Sucursales</a>
-            <!-- Ej: Configuración futura -->
-            <!-- <a class="nav-link px-3 py-2" href="/org/config/">Configuración</a> -->
-          </nav>
-        </div>
-      </div>
-    </div>
-  
-    <!-- Operación -->
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="acc-op-h">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-op-b">
-          Operación
-        </button>
-      </h2>
-      <div id="acc-op-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
-        <div class="accordion-body p-0">
-          <nav class="nav flex-column">
-            <a class="nav-link px-3 py-2" href="/ventas/">Ventas</a>
-            <a class="nav-link px-3 py-2" href="/precios/">Precios</a>
-            <a class="nav-link px-3 py-2" href="/caja/">Caja</a>
-          </nav>
-        </div>
-      </div>
-    </div>
-  
-    <!-- Maestros -->
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="acc-master-h">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-master-b">
-          Maestros
-        </button>
-      </h2>
-      <div id="acc-master-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
-        <div class="accordion-body p-0">
-          <nav class="nav flex-column">
-            <a class="nav-link px-3 py-2" href="{% url 'customers:list' %}">Clientes</a>
-            <a class="nav-link px-3 py-2" href="/vehiculos/">Vehículos</a>
-            <a class="nav-link px-3 py-2" href="/catalog/">Catálogo</a>
-          </nav>
-        </div>
-      </div>
-    </div>
-  
-    <!-- Reportes -->
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="acc-rep-h">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-rep-b">
-          Reportes
-        </button>
-      </h2>
-      <div id="acc-rep-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
-        <div class="accordion-body p-0">
-          <nav class="nav flex-column">
-            <a class="nav-link px-3 py-2" href="/reportes/ventas/">Ventas</a>
-            <a class="nav-link px-3 py-2" href="/reportes/clientes/">Clientes</a>
-            <a class="nav-link px-3 py-2" href="/reportes/caja/">Caja</a>
-          </nav>
-        </div>
-      </div>
-    </div>
-  
-    <!-- Administración -->
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="acc-admin-h">
-        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-admin-b">
-          Administración
-        </button>
-      </h2>
-      <div id="acc-admin-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
-        <div class="accordion-body p-0">
-          <nav class="nav flex-column">
-            <a class="nav-link px-3 py-2" href="/cuenta/membresias/">Membresías</a>
-            <a class="nav-link px-3 py-2" href="/admin/">Django Admin</a>
-          </nav>
-        </div>
-      </div>
-    </div>
-</div>
-   {% endcomment %}
-
-
-   <!-- Encabezado corto del sidebar -->
+<!-- Encabezado corto del sidebar -->
 <div class="p-3 border-bottom">
   {% if request.empresa_activa %}
     <div class="small text-muted">Lavadero</div>
     <div class="fw-semibold mb-2">{{ request.empresa_activa.nombre }}</div>
 
-    {% if request.empresa_activa.sucursales.exists %}
+    {% if request.empresa_activa.sucursales.all %}
       <label for="sidebarSucursal" class="form-label small text-muted mb-1">Sucursal</label>
       <form method="post" action="{% url 'org:selector' %}">
         {% csrf_token %}
         <select name="sucursal" id="sidebarSucursal" class="form-select form-select-sm" onchange="this.form.submit()">
           {% for s in request.empresa_activa.sucursales.all %}
-            <option value="{{ s.id }}" {% if request.session.sucursal_id == s.id %}selected{% endif %}>
+            <option value="{{ s.id }}" {% if request.sucursal_activa and request.sucursal_activa.id == s.id %}selected{% endif %}>
               {{ s.nombre }}
             </option>
           {% endfor %}
@@ -149,6 +30,7 @@
   {% endif %}
 </div>
 
+{% with rm=request.resolver_match ns=rm.namespace %}
 <div class="accordion accordion-flush" id="sidebarAccordion">
   <!-- Organización -->
   <div class="accordion-item">
@@ -160,8 +42,8 @@
     <div id="acc-org-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
-          <a class="nav-link px-3 py-2" href="{% url 'org:empresas' %}">Empresas</a>
-          <a class="nav-link px-3 py-2" href="{% url 'org:sucursales' %}">Sucursales</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'org' %}active{% endif %}" href="{% url 'org:empresas' %}">Empresas</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'org' %}active{% endif %}" href="{% url 'org:sucursales' %}">Sucursales</a>
         </nav>
       </div>
     </div>
@@ -177,9 +59,9 @@
     <div id="acc-op-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
-          <a class="nav-link px-3 py-2" href="/ventas/">Ventas</a>
-          <a class="nav-link px-3 py-2" href="/precios/">Precios</a>
-          <a class="nav-link px-3 py-2" href="/caja/">Caja</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'sales' %}active{% endif %}" href="/ventas/">Ventas</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'pricing' %}active{% endif %}" href="/precios/">Precios</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'cashbox' %}active{% endif %}" href="/caja/">Caja</a>
         </nav>
       </div>
     </div>
@@ -195,9 +77,9 @@
     <div id="acc-master-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
-          <a class="nav-link px-3 py-2" href="{% url 'customers:list' %}">Clientes</a>
-          <a class="nav-link px-3 py-2" href="{% url 'vehicles:list' %}">Vehículos</a>
-          <a class="nav-link px-3 py-2" href="/catalog/">Catálogo</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'customers' %}active{% endif %}" href="{% url 'customers:list' %}">Clientes</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'vehicles' %}active{% endif %}" href="{% url 'vehicles:list' %}">Vehículos</a>
+          <a class="nav-link px-3 py-2 {% if ns == 'catalog' %}active{% endif %}" href="{% url 'catalog:services' %}">Catálogo de servicios</a>
         </nav>
       </div>
     </div>
@@ -238,3 +120,4 @@
     </div>
   </div>
 </div>
+{% endwith %}

@@ -1,0 +1,171 @@
+{# apps/catalog/templates/catalog/list.html #}
+{% extends "base_auth.html" %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}Catálogo de servicios{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <!-- Encabezado + CTA -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-1">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Panel</a></li>
+          <li class="breadcrumb-item active" aria-current="page">Servicios</li>
+        </ol>
+      </nav>
+      <h1 class="h4 mb-0">Servicios</h1>
+      <small class="text-body-secondary">Catálogo central de servicios de {{ request.empresa_activa.nombre }}</small>
+    </div>
+    <div>
+      <a class="btn btn-primary" href="{% url 'catalog:service_new' %}?next={{ request.get_full_path|urlencode }}">
+        <i class="bi bi-plus-lg"></i> Nuevo servicio
+      </a>
+    </div>
+  </div>
+
+  <!-- Buscador -->
+  <form method="get" class="row g-2 align-items-center mb-3" role="search" aria-label="Buscar servicios">
+    <div class="col-12 col-md-6 col-lg-5">
+      <label for="id_q" class="visually-hidden">Buscar</label>
+      <div class="input-group">
+        <span class="input-group-text" id="search-addon"><i class="bi bi-search"></i></span>
+        <input
+          type="search"
+          name="q"
+          id="id_q"
+          class="form-control"
+          placeholder="Buscar por nombre…"
+          value="{{ q }}"
+          aria-describedby="search-addon"
+        >
+        {% if q %}
+          <a class="btn btn-outline-secondary" href="{% url 'catalog:services' %}" title="Limpiar">Limpiar</a>
+        {% endif %}
+        <button class="btn btn-primary" type="submit">Buscar</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Resumen -->
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="small text-body-secondary">
+      {% if q %}
+        Mostrando resultados para <strong>“{{ q }}”</strong>
+      {% else %}
+        Listado de todos los servicios
+      {% endif %}
+    </div>
+    <div class="small text-body-secondary">
+      {% if is_paginated %}
+        Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Nombre</th>
+          <th scope="col" class="d-none d-md-table-cell">Descripción</th>
+          <th scope="col" class="text-center">Estado</th>
+          <th scope="col" class="d-none d-lg-table-cell">Actualizado</th>
+          <th scope="col" class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if servicios %}
+          {% for s in servicios %}
+            <tr>
+              <td>
+                <div class="fw-medium">
+                  <a href="{% url 'catalog:service_detail' s.pk %}?next={{ request.get_full_path|urlencode }}"
+                     class="link-body-emphasis text-decoration-none">
+                    {{ s.nombre }}
+                  </a>
+                </div>
+                <div class="d-lg-none small text-body-secondary">
+                  {% if s.descripcion %}{{ s.descripcion|truncatechars:80 }}{% else %}<em>Sin descripción</em>{% endif %}
+                </div>
+              </td>
+              <td class="d-none d-md-table-cell text-body-secondary">
+                {% if s.descripcion %}{{ s.descripcion|truncatechars:120 }}{% else %}<em>Sin descripción</em>{% endif %}
+              </td>
+              <td class="text-center">
+                {% if s.activo %}
+                  <span class="badge text-bg-success">Activo</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">Inactivo</span>
+                {% endif %}
+              </td>
+              <td class="d-none d-lg-table-cell text-body-secondary">
+                {{ s.actualizado|date:"d/m/Y H:i" }}
+              </td>
+              <td class="text-end">
+                <div class="btn-group" role="group" aria-label="Acciones">
+                  <a
+                    class="btn btn-sm btn-outline-secondary"
+                    href="{% url 'catalog:service_detail' s.pk %}?next={{ request.get_full_path|urlencode }}"
+                    title="Ver detalle"
+                  >
+                    <i class="bi bi-eye"></i><span class="d-none d-md-inline"> Ver</span>
+                  </a>
+
+                  <a
+                    class="btn btn-sm btn-outline-primary"
+                    href="{% url 'catalog:service_edit' s.pk %}?next={{ request.get_full_path|urlencode }}"
+                    title="Editar"
+                  >
+                    <i class="bi bi-pencil-square"></i><span class="d-none d-md-inline"> Editar</span>
+                  </a>
+
+                  {% if s.activo %}
+                    <form method="post" action="{% url 'catalog:service_deactivate' s.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                      <button type="submit" class="btn btn-sm btn-outline-warning" title="Desactivar"
+                              onclick="return confirm('¿Desactivar el servicio {{ s.nombre }}?');">
+                        <i class="bi bi-slash-circle"></i><span class="d-none d-md-inline"> Desactivar</span>
+                      </button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="{% url 'catalog:service_activate' s.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                      <button type="submit" class="btn btn-sm btn-outline-success" title="Activar">
+                        <i class="bi bi-check-circle"></i><span class="d-none d-md-inline"> Activar</span>
+                      </button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="5" class="text-center py-5">
+              <div class="text-body-secondary">
+                No hay servicios cargados{% if q %} para “{{ q }}”{% endif %}.
+              </div>
+              <div class="mt-3">
+                <a class="btn btn-primary" href="{% url 'catalog:service_new' %}?next={{ request.get_full_path|urlencode }}">
+                  <i class="bi bi-plus-lg"></i> Crear el primero
+                </a>
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginación -->
+  {% if is_paginated %}
+    {% include "includes/_pagination.html" with page_obj=page_obj %}
+  {% endif %}
+</div>
+{% endblock %}
