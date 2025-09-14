@@ -1,0 +1,24 @@
+{% load i18n %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <h2 class="h6">{% trans "Resumen de la venta" %}</h2>
+    <ul class="list-group list-group-flush small">
+      <li class="list-group-item d-flex justify-content-between">
+        <span>{% trans "Cliente" %}</span>
+        <span>{{ venta.cliente }}</span>
+      </li>
+      <li class="list-group-item d-flex justify-content-between">
+        <span>{% trans "Vehículo" %}</span>
+        <span>{{ venta.vehiculo }}</span>
+      </li>
+      <li class="list-group-item d-flex justify-content-between">
+        <span>{% trans "Total" %}</span>
+        <span>${{ venta.total }}</span>
+      </li>
+      <li class="list-group-item d-flex justify-content-between fw-bold">
+        <span>{% trans "Saldo pendiente" %}</span>
+        <span>${{ venta.saldo_pendiente }}</span>
+      </li>
+    </ul>
+  </div>
+</div>

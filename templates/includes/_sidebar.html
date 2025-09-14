@@ -104,6 +104,7 @@
   </div>
 
   <!-- Administración -->
+  <!-- Administración -->
   <div class="accordion-item">
     <h2 class="accordion-header" id="acc-admin-h">
       <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-admin-b">
@@ -113,11 +114,14 @@
     <div id="acc-admin-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
+          <a class="nav-link px-3 py-2 {% if ns == 'payments' %}active{% endif %}" href="{% url 'payments:medios_list' %}">
+            Medios de pago
+          </a>
           <a class="nav-link px-3 py-2" href="/cuenta/membresias/">Membresías</a>
           <a class="nav-link px-3 py-2" href="/admin/">Django Admin</a>
         </nav>
       </div>
     </div>
   </div>
-</div>
+
 {% endwith %}

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 from django.utils import timezone
-
+from django.db.models import Q
 from ..models import PrecioServicio
 
 
@@ -23,31 +23,35 @@ class PrecioResult:
     vigente_hasta: Optional[str]
 
 
-def get_precio_vigente(*, empresa, sucursal, servicio, tipo_vehiculo, fecha=None) -> PrecioServicio:
+def get_precio_vigente(empresa, sucursal, servicio, tipo_vehiculo, fecha: date | None = None):
     """
-    Devuelve el objeto PrecioServicio vigente (activo) para la combinación dada en 'fecha' (hoy por defecto).
-
-    Selección:
-      - Dentro del rango de vigencia.
-      - Activo=True.
-      - Si hay múltiples candidatos, el de 'vigencia_inicio' más reciente.
+    Devuelve el PrecioServicio vigente para la combinación dada en 'fecha' (por defecto hoy).
+    Reglas:
+      - empresa exacta
+      - sucursal exacta
+      - servicio exacto
+      - tipo_vehiculo exacto
+      - vigencia_inicio <= fecha <= vigencia_fin (o fin null)
+      - activo=True
+    Prioriza la vigencia más reciente (mayor vigencia_inicio).
     """
-    if fecha is None:
-        fecha = timezone.localdate()
+    fecha = fecha or timezone.localdate()
 
     qs = (
         PrecioServicio.objects
-        .de_empresa(empresa)
-        .de_combinacion(sucursal, servicio, tipo_vehiculo)
-        .vigentes_en(fecha)
-        .order_by("-vigencia_inicio", "-actualizado")
-    )
-    obj = qs.first()
-    if not obj:
-        raise PrecioNoDisponibleError(
-            "No existe un precio vigente para la combinación Servicio × Tipo de Vehículo × Sucursal en la fecha solicitada."
+        .filter(
+            empresa=empresa,
+            sucursal=sucursal,
+            servicio=servicio,
+            tipo_vehiculo=tipo_vehiculo,
+            activo=True,
+            vigencia_inicio__lte=fecha,
         )
-    return obj
+        .filter(Q(vigencia_fin__isnull=True) | Q(vigencia_fin__gte=fecha))
+        .order_by("-vigencia_inicio", "-id")
+    )
+
+    return qs.first()
 
 
 def get_precio_vigente_dto(*, empresa, sucursal, servicio, tipo_vehiculo, fecha=None) -> PrecioResult:

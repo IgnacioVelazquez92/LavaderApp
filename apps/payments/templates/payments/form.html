@@ -1,0 +1,146 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Registrar pago" %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-3">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">{% trans "Panel" %}</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">{% trans "Ventas" %}</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:detail' venta.id %}">{% trans "Detalle de venta" %}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{% trans "Registrar pago" %}</li>
+    </ol>
+  </nav>
+
+  <div class="row g-4">
+    <!-- Formulario -->
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h1 class="h5 mb-3">{% trans "Registrar pago" %}</h1>
+
+          <!-- Errores globales -->
+          {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+              {% for error in form.non_field_errors %}
+                <div>{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <form method="post" novalidate>
+            {% csrf_token %}
+          
+            <!-- Medio -->
+            <div class="mb-3">
+              <label for="{{ form.medio.id_for_label }}" class="form-label">
+                Medio de pago
+              </label>
+              {{ form.medio }}
+              {% if form.medio.errors %}
+                <div class="invalid-feedback d-block">
+                  {{ form.medio.errors|join:", " }}
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Monto -->
+            <div class="mb-3">
+              <label for="{{ form.monto.id_for_label }}" class="form-label">
+                {% trans "Monto" %}
+              </label>
+              {{ form.monto }}
+              {% if form.monto.errors %}
+                <div class="invalid-feedback d-block">
+                  {{ form.monto.errors|join:", " }}
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Propina -->
+            <div class="form-check mb-3">
+              {{ form.es_propina }}
+              <label for="{{ form.es_propina.id_for_label }}" class="form-check-label">
+                {% trans "Es propina" %}
+              </label>
+              {% if form.es_propina.errors %}
+                <div class="invalid-feedback d-block">
+                  {{ form.es_propina.errors|join:", " }}
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Referencia -->
+            <div class="mb-3">
+              <label for="{{ form.referencia.id_for_label }}" class="form-label">
+                {% trans "Referencia" %}
+              </label>
+              {{ form.referencia }}
+              {% if form.referencia.errors %}
+                <div class="invalid-feedback d-block">
+                  {{ form.referencia.errors|join:", " }}
+                </div>
+              {% endif %}
+              <div class="form-text">{% trans "Opcional: código o ID de transacción externa." %}</div>
+            </div>
+
+            <!-- Notas -->
+            <div class="mb-3">
+              <label for="{{ form.notas.id_for_label }}" class="form-label">
+                {% trans "Notas internas" %}
+              </label>
+              {{ form.notas }}
+              {% if form.notas.errors %}
+                <div class="invalid-feedback d-block">
+                  {{ form.notas.errors|join:", " }}
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="d-flex justify-content-between">
+              <a href="{% url 'sales:detail' venta.id %}" class="btn btn-outline-secondary">
+                {% trans "Cancelar" %}
+              </a>
+              <button type="submit" class="btn btn-primary">
+                {% trans "Registrar pago" %}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resumen de la venta -->
+    <div class="col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h6">{% trans "Resumen de la venta" %}</h2>
+          <ul class="list-group list-group-flush small">
+            <li class="list-group-item d-flex justify-content-between">
+              <span>{% trans "Cliente" %}</span>
+              <span>{{ venta.cliente }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between">
+              <span>{% trans "Vehículo" %}</span>
+              <span>{{ venta.vehiculo }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between">
+              <span>{% trans "Total" %}</span>
+              <span>${{ venta.total }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between fw-bold">
+              <span>{% trans "Saldo pendiente" %}</span>
+              <span>${{ venta.saldo_pendiente }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

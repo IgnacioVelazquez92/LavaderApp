@@ -113,29 +113,32 @@ class VentaCreateView(LoginRequiredMixin, CreateView):
         vehiculo_obj = None
         if empresa and cliente_id:
             cliente_obj = Cliente.objects.filter(
-                empresa=empresa, activo=True, pk=cliente_id).first()
+                empresa=empresa, activo=True, pk=cliente_id
+            ).first()
         if empresa and vehiculo_id:
             vehiculo_obj = Vehiculo.objects.filter(
-                empresa=empresa, activo=True, pk=vehiculo_id).first()
+                empresa=empresa, activo=True, pk=vehiculo_id
+            ).select_related("tipo").first()
 
         ctx["cliente_seleccionado"] = cliente_obj
         ctx["vehiculo_seleccionado"] = vehiculo_obj
 
         # services_form según contexto
         if empresa and sucursal and vehiculo_obj:
-            from apps.sales.forms.service_select import ServiceSelectionForm
             services_form = ServiceSelectionForm(
-                empresa=empresa, sucursal=sucursal, tipo_vehiculo=vehiculo_obj.tipo
+                empresa=empresa,
+                sucursal=sucursal,
+                tipo_vehiculo=vehiculo_obj.tipo,
             )
         else:
-            from apps.sales.forms.service_select import ServiceSelectionForm
             services_form = ServiceSelectionForm()
 
         ctx["services_form"] = services_form
 
         # Flag para habilitar el botón "Crear venta"
-        tiene_servicios = bool(
-            getattr(services_form.fields.get("servicios", None), "choices", []))
+        field = services_form.fields.get("servicios")
+        tiene_servicios = bool(field and getattr(field, "choices", []))
+
         ctx["crear_habilitado"] = bool(
             cliente_obj and vehiculo_obj and tiene_servicios)
 

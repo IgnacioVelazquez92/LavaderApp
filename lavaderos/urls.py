@@ -18,6 +18,7 @@ urlpatterns = [
     path("catalog/", include("apps.catalog.urls", namespace="catalog")),
     path("precios/", include("apps.pricing.urls", namespace="pricing")),
     path("ventas/", include("apps.sales.urls", namespace="sales")),
+    path("", include(("apps.payments.urls", "payments"), namespace="payments")),
 
 
     path("", login_required(TemplateView.as_view(

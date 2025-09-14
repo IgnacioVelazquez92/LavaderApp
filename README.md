@@ -2937,6 +2937,46 @@ apps/invoicing/
 - **Formato**: en MVP, HTML imprimible + opción a PDF simple.
 - **Re-emisión**: no reusar número; si se anula, registrar otro flujo (fuera del MVP).
 
+### Remito Profesional
+
+---
+
+#### 1. Encabezado
+
+- **Logo de la Empresa:** Debe ser el elemento más visible, ubicado en la parte superior (generalmente a la izquierda o centrado).
+- **Nombre de la Empresa:** Justo debajo del logo o a su lado.
+- **Información de Contacto:** Dirección, número de teléfono y correo electrónico.
+- **Título del Documento:** En un tamaño de fuente mayor, en negrita: **"REMITO"**.
+
+---
+
+#### 2. Datos de la Transacción
+
+- **Número de Remito:** Un identificador único y consecutivo (ej. "Remito Nº 0001-00001234").
+- **Fecha de Emisión:** La fecha en la que se crea el documento.
+- **Datos del Cliente:** Un bloque bien delimitado con:
+  - Nombre o Razón Social.
+  - Dirección de entrega.
+  - Número de identificación (DNI, CUIT, etc.).
+
+---
+
+#### 3. Detalle de los Productos o Servicios
+
+Se presenta como una tabla con las siguientes columnas:
+
+- **Cantidad:** Número de unidades.
+- **Descripción:** Detalle de lo que se está entregando.
+- **Código de Producto (Opcional):** Si aplica, el código interno del producto.
+
+---
+
+#### 4. Pie de Página y Observaciones
+
+- **Espacio para Firmas:** Líneas para "Recibí conforme" y "Entregué conforme", con espacio para las firmas.
+- **Notas o Comentarios:** Espacio para añadir observaciones.
+- **Aviso de Carácter No Fiscal:** Un texto en letra más pequeña y visible, como: **"Este documento es un Remito y no tiene validez como factura o comprobante fiscal."**
+
 ---
 
 ## 7) Roadmap inmediato
@@ -3515,7 +3555,7 @@ apps/app_log/
 3. Integrar con puntos clave de las apps (ej. errores en invoicing/notifications).
 4. UI mínima (listado/detalle) o fallback en admin.
 
-# Integración `apps/saas` ↔ `apps/org` — Pasos para sincronizar planes/suscripciones con Lavadero y Sucursales (sin código)
+# Integración `apps/saas` ↔ `apps/org` — Pasos para sincronizar planes/suscripciones con Lavadero y Sucursales
 
 > **Objetivo**: dejar documentado **qué** hay que hacer (y **dónde**) para que el módulo **SaaS** gobierne límites y estados del **módulo Org** (Lavadero/Empresa y Sucursales), incluido el **trial automático** y el eventual tope de **más de una empresa** para ciertos clientes.  
 > **Importante**: esto es una **guía de implementación**; no incluye código. Queda lista para ejecutarla luego, en una rama dedicada al Módulo 12.

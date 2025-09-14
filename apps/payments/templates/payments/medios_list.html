@@ -1,0 +1,71 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Medios de pago" %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-3">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">{% trans "Panel" %}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{% trans "Medios de pago" %}</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h1 class="h5 mb-0">{% trans "Medios de pago" %}</h1>
+    <a href="{% url 'payments:medios_create' %}" class="btn btn-primary">
+      {% trans "Nuevo medio" %}
+    </a>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      {% if medios %}
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>{% trans "Nombre" %}</th>
+                <th style="width:120px">{% trans "Estado" %}</th>
+                <th style="width:180px" class="text-end">{% trans "Acciones" %}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in medios %}
+                <tr>
+                  <td class="text-break">{{ m.nombre }}</td>
+                  <td>
+                    {% if m.activo %}
+                      <span class="badge bg-success">{% trans "Activo" %}</span>
+                    {% else %}
+                      <span class="badge bg-secondary">{% trans "Inactivo" %}</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <a href="{% url 'payments:medios_update' pk=m.pk %}" class="btn btn-sm btn-outline-secondary">
+                      {% trans "Editar" %}
+                    </a>
+                    <form method="post" action="{% url 'payments:medios_toggle' pk=m.pk %}" class="d-inline">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm {% if m.activo %}btn-outline-warning{% else %}btn-outline-success{% endif %}">
+                        {% if m.activo %}{% trans "Desactivar" %}{% else %}{% trans "Activar" %}{% endif %}
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% include "includes/_pagination.html" with page_obj=page_obj %}
+      {% else %}
+        <div class="alert alert-info mb-0">
+          {% trans "No hay medios de pago configurados aún." %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
