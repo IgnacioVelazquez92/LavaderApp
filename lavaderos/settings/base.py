@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "apps.vehicles",
     "apps.catalog",
     "apps.pricing",
+    "apps.sales",
 ]
 
 SITE_ID = 1  # requerido por allauth

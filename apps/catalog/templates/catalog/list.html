@@ -124,14 +124,16 @@
                   </a>
 
                   {% if s.activo %}
-                    <form method="post" action="{% url 'catalog:service_deactivate' s.pk %}" class="d-inline">
-                      {% csrf_token %}
-                      <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
-                      <button type="submit" class="btn btn-sm btn-outline-warning" title="Desactivar"
-                              onclick="return confirm('¿Desactivar el servicio {{ s.nombre }}?');">
-                        <i class="bi bi-slash-circle"></i><span class="d-none d-md-inline"> Desactivar</span>
-                      </button>
-                    </form>
+                    {# Botón que abre el modal (reemplaza confirm feo) #}
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-warning"
+                      title="Desactivar"
+                      data-bs-toggle="modal"
+                      data-bs-target="#srvDeactivateModal-{{ s.id }}"
+                    >
+                      <i class="bi bi-slash-circle"></i><span class="d-none d-md-inline"> Desactivar</span>
+                    </button>
                   {% else %}
                     <form method="post" action="{% url 'catalog:service_activate' s.pk %}" class="d-inline">
                       {% csrf_token %}
@@ -144,6 +146,37 @@
                 </div>
               </td>
             </tr>
+
+            {# Modal de confirmación para DESACTIVAR (ID único por servicio) #}
+            {% if s.activo %}
+            <div class="modal fade" id="srvDeactivateModal-{{ s.id }}" tabindex="-1"
+                 aria-labelledby="srvDeactivateModalLabel-{{ s.id }}" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                  <div class="modal-header border-0">
+                    <h5 class="modal-title d-flex align-items-center gap-2" id="srvDeactivateModalLabel-{{ s.id }}">
+                      <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+                      Confirmar desactivación
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                  </div>
+                  <div class="modal-body">
+                    <p class="h6 mb-2"><strong>Servicio:</strong> {{ s.nombre }}</p>
+                    <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+                  </div>
+                  <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <form method="post" action="{% url 'catalog:service_deactivate' s.pk %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                      <button type="submit" class="btn btn-warning">Sí, desactivar</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endif %}
+
           {% endfor %}
         {% else %}
           <tr>
@@ -165,7 +198,7 @@
 
   <!-- Paginación -->
   {% if is_paginated %}
-    {% include "includes/_pagination.html" with page_obj=page_obj %}
+    {% include "includes/_pagination.html" %}
   {% endif %}
 </div>
 {% endblock %}

@@ -1,0 +1,43 @@
+{# apps/sales/templates/sales/_item_row.html #}
+<tr>
+  <td>{{ item.servicio }}</td>
+  <td class="text-end">${{ item.subtotal|floatformat:2 }}</td>
+  <td class="text-end">
+    {% if venta.estado == "borrador" or venta.estado == "en_proceso" %}
+      <!-- Botón que abre el modal -->
+      <button type="button"
+              class="btn btn-sm btn-outline-danger"
+              data-bs-toggle="modal"
+              data-bs-target="#confirmDeleteItem{{ item.pk }}">
+        Eliminar
+      </button>
+
+      <!-- Modal de confirmación -->
+      <div class="modal fade" id="confirmDeleteItem{{ item.pk }}" tabindex="-1"
+           aria-labelledby="confirmDeleteItemLabel{{ item.pk }}" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="confirmDeleteItemLabel{{ item.pk }}">Eliminar ítem</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body text-center">
+              <i class="bi bi-exclamation-triangle-fill text-warning display-4 mb-3"></i>
+              <p class="h5 mb-1"><strong>Servicio:</strong> {{ item.servicio }}</p>
+              <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+              <form method="post" action="{% url 'sales:item_delete' pk=venta.pk item_id=item.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">Eliminar</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <span class="text-muted">—</span>
+    {% endif %}
+  </td>
+</tr>

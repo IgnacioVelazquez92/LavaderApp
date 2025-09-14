@@ -1,0 +1,141 @@
+{# apps/sales/templates/sales/create.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}Nueva venta{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-2">
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">Ventas</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Nueva</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h4 mb-0">Crear venta</h1>
+    <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Volver al listado</a>
+  </div>
+
+  {% include "includes/_messages.html" %}
+
+  <!-- Paso 1 y 2: Cliente y vehículo (GET con auto-submit) -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-3" novalidate>
+        <!-- Cliente -->
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="{{ form.cliente.id_for_label }}">Cliente</label>
+          {{ form.cliente }}
+          <div class="form-text">
+            Elegí el cliente.
+            <a href="{% url 'customers:create' %}?next={{ request.get_full_path|urlencode }}">Crear cliente</a>
+          </div>
+        </div>
+
+        <!-- Vehículo (se habilita al elegir cliente) -->
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="{{ form.vehiculo.id_for_label }}">Vehículo</label>
+          {{ form.vehiculo }}
+          <div class="form-text">
+            {% if cliente_seleccionado %}
+              Solo vehículos del cliente.
+              <a href="{% url 'vehicles:new' %}?cliente={{ cliente_seleccionado.pk }}&next={{ request.get_full_path|urlencode }}">Agregar vehículo</a>
+            {% else %}
+              Elegí primero un cliente.
+            {% endif %}
+          </div>
+        </div>
+
+        <script>
+          // Auto-submit en cambio de selects (progresivo)
+          document.addEventListener('change', function (e) {
+            if (e.target && (e.target.name === 'cliente' || e.target.name === 'vehiculo')) {
+              e.target.form.submit();
+            }
+          });
+        </script>
+      </form>
+    </div>
+  </div>
+
+  <!-- Paso 3: Servicios (POST final) -->
+  <div class="card">
+    <div class="card-body">
+      <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <!-- Hidden del cliente/vehículo elegidos -->
+        {% if cliente_seleccionado %}
+          <input type="hidden" name="cliente" value="{{ cliente_seleccionado.pk }}">
+        {% endif %}
+        {% if vehiculo_seleccionado %}
+          <input type="hidden" name="vehiculo" value="{{ vehiculo_seleccionado.pk }}">
+        {% endif %}
+
+        <div class="row g-4">
+          <!-- Servicios disponibles -->
+          <div class="col-12 col-lg-8">
+            <h6 class="mb-2">Servicios</h6>
+
+            {% if vehiculo_seleccionado and services_form.fields.servicios.choices %}
+              <div class="row g-2">
+                {% for checkbox in services_form.servicios %}
+                  <div class="col-12 col-md-6">
+                    <div class="form-check">
+                      {{ checkbox.tag }}
+                      <label class="form-check-label" for="{{ checkbox.id_for_label }}">
+                        {{ checkbox.choice_label }}
+                      </label>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+              <div class="form-text mt-1">Elegí uno o varios servicios (sin cantidades).</div>
+            {% elif vehiculo_seleccionado %}
+              <div class="alert alert-warning">
+                No hay servicios con precio vigente para este tipo de vehículo en la sucursal activa.
+                <a href="{% url 'pricing:list' %}">Configurar precios</a>.
+              </div>
+            {% else %}
+              <div class="alert alert-info">Elegí cliente y vehículo para ver los servicios disponibles.</div>
+            {% endif %}
+
+            {% if services_form.errors.servicios %}
+              <div class="invalid-feedback d-block">{{ services_form.errors.servicios|striptags }}</div>
+            {% endif %}
+          </div>
+
+          <!-- Notas -->
+          <div class="col-12 col-lg-4">
+            <label class="form-label" for="{{ form.notas.id_for_label }}">Notas</label>
+            {{ form.notas }}
+            {% if form.notas.errors %}
+              <div class="invalid-feedback d-block">{{ form.notas.errors|striptags }}</div>
+            {% else %}
+              <div class="form-text">Observaciones o indicaciones especiales (opcional).</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-primary"
+                  {% if not crear_habilitado %}disabled{% endif %}>
+            Crear venta
+          </button>
+          <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Cancelar</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

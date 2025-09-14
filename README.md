@@ -2370,133 +2370,340 @@ erDiagram
 
 # Módulo 7 — `apps/sales` (Ventas / Órdenes de Servicio)
 
-> **Objetivo del módulo:** Crear y gestionar **Ventas** con sus **ítems**, manejar **estados** del ciclo (FSM) y mantener **totales** consistentes. Provee la orden madre para pagos, comprobantes y notificaciones.
+> **Objetivo:** Crear y gestionar **Ventas** con sus **ítems**, manejar **estados** (FSM) y mantener **totales** consistentes. La Venta es la orden madre para **pagos**, **comprobantes** y **notificaciones**.  
+> **Stack:** Django server-rendered + Bootstrap 5 (tema Bootswatch local).
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura de carpetas/archivos (actualizada)
 
 ```
 apps/sales/
 ├─ __init__.py
-├─ apps.py                       # Config de la app (name="apps.sales")
-├─ admin.py                      # Registro de Venta y VentaItem en admin
+├─ apps.py                         # name="apps.sales"
+├─ admin.py                        # Registro de Venta y VentaItem
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                     # Modelos: Venta, VentaItem (foreign keys a org/customers/vehicles/catalog)
-├─ urls.py                       # Rutas propias (listado, nueva, detalle/editar, acciones)
-├─ views.py                      # Vistas server-rendered (CRUD de venta e ítems, acciones de estado)
+├─ models.py                       # Venta, VentaItem
+├─ urls.py                         # Rutas namespaced (app_name="sales")
+├─ views.py                        # CBVs: listado, crear, detalle + acciones
 ├─ forms/
 │  ├─ __init__.py
-│  ├─ sale.py                    # Formulario base de Venta (cliente, vehículo, sucursal, notas)
-│  └─ item.py                    # Formulario de ítem (servicio, cantidad) — precio se resuelve
+│  ├─ sale.py                      # VentaForm (cliente, vehículo, notas)
+│  └─ service_select.py            # ServiceSelectionForm (checkboxes de servicios vigentes)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ sales.py                   # Comandos: crear_venta, actualizar_venta, finalizar, cancelar
-│  ├─ items.py                   # Comandos: agregar_item, quitar_item, actualizar_cantidad
-│  └─ lifecycle.py               # Orquestación de cambios de estado y side-effects (hooks)
-├─ selectors.py                  # Lecturas: listar ventas por estado/fecha, detalle con ítems
-├─ calculations.py               # Cálculos: subtotal, descuentos, propina, total, saldo_pendiente
-├─ fsm.py                        # Máquina de estados permitidos: borrador→en_proceso→terminado→pagado/cancelado
+│  ├─ sales.py                     # crear_venta, finalizar, cancelar, recálculos
+│  ├─ items.py                     # agregar_items (multi-servicio), eliminar_item
+│  └─ lifecycle.py                 # Hooks de cambio de estado (side-effects)
+├─ selectors.py                    # Lecturas optimizadas (listado, detalle)
+├─ calculations.py                 # subtotal, total, propina, saldo_pendiente
+├─ fsm.py                          # borrador → en_proceso → terminado → pagado/cancelado
 ├─ templates/
 │  └─ sales/
-│     ├─ list.html               # Listado y filtros (estado, sucursal, rango fechas)
-│     ├─ create.html             # Crear venta (elige cliente, vehículo, sucursal)
-│     ├─ detail.html             # Detalle/edición: ítems, totales, acciones (finalizar, cancelar)
-│     ├─ _item_row.html          # Partial para fila de ítem
-│     └─ _summary_card.html      # Partial con totales (se recalcula tras cambios)
+│     ├─ list.html                 # Listado + filtros (estado/sucursal) + modales
+│     ├─ create.html               # Crear: (GET) cliente/vehículo → (POST) servicios
+│     ├─ detail.html               # Detalle: ítems, totales, acciones + modales
+│     ├─ _item_row.html            # Fila de ítem con modal de eliminación
+│     └─ _summary_card.html        # Tarjeta de totales
 ├─ static/
 │  └─ sales/
-│     ├─ sales.css               # Estilos propios
-│     └─ sales.js                # UX: añadir/quitar ítems sin recargar (progressive enhancement)
-└─ signals.py                    # (Opcional) Señales post-save para recalcular totales/side-effects
+│     ├─ sales.css                 # (Opcional)
+│     └─ sales.js                  # (Reserva p/ mejoras progresivas)
+└─ signals.py                      # (Opcional) post-save/commit hooks
 ```
 
-### Rol de cada componente
+**Diferencias vs. diseño inicial**
 
-- **`models.py`**: `Venta` (empresa, sucursal, cliente, vehículo, estado, totales, saldo_pendiente) y `VentaItem` (servicio, cantidad, precio unitario cacheado).
-- **`calculations.py`**: funciones puras para recomputar `subtotal`, `descuento`, `propina`, `total` y `saldo_pendiente`.
-- **`fsm.py`**: define estados permitidos y transiciones válidas.
-- **`services/sales.py`** y **`services/items.py`**: mutaciones atómicas que invocan cálculos y validaciones; devuelven objetos/DTO simples.
-- **`services/lifecycle.py`**: hooks de cambio de estado (p.ej. al pasar a `pagado` disparar invoicing/notif, si aplica).
-- **`selectors.py`**: consultas optimizadas para listas y detalle.
-- **`views.py`**: orquestan GET/POST y render; delgadas (delegan en services).
+- Se **elimina** el concepto de **cantidades** por ítem. Cada servicio se agrega **una sola vez** (no “3 lavados”).
+- Se **reemplaza** `forms/item.py` por `forms/service_select.py` con **checkboxes** de servicios válidos (según **tipo de vehículo** + **sucursal activa** + **precios vigentes**).
 
 ---
 
-## 2) Endpoints propuestos (UI server-rendered)
+## 2) UX / UI (decisiones clave)
 
-- `GET  /ventas/` → Listado (filtros: estado, sucursal, fecha).
-- `GET  /ventas/nueva/` → Form para crear venta (selecciona cliente, vehículo, sucursal).
-- `POST /ventas/nueva/` → Crear venta (estado inicial: `borrador`).
-- `GET  /ventas/<uuid>/` → Detalle/editar: ver ítems, totales y acciones.
-- `POST /ventas/<uuid>/items/agregar/` → Agregar ítem (servicio, cantidad).
-- `POST /ventas/<uuid>/items/<item_id>/actualizar/` → Cambiar cantidad.
-- `POST /ventas/<uuid>/items/<item_id>/eliminar/` → Quitar ítem.
-- `POST /ventas/<uuid>/finalizar/` → Transición a `terminado` (bloquea edición de ítems salvo rol admin).
-- `POST /ventas/<uuid>/cancelar/` → Transición a `cancelado`.
-- _(No UI directa aquí)_ **Pagos**: iniciados desde `apps/payments` en `/ventas/<uuid>/pagos/nuevo/` → al registrarse pagos, esta app actualiza saldo/estado.
+1. **Flujo Crear Venta (2 pasos, simple y guiado):**
 
-> Nota: endpoints de **pago** viven en `apps/payments`, pero el **detalle de venta** debe enlazarlos claramente.
+   - **GET**: Selección de **Cliente** → habilita **Vehículo** del cliente (auto-submit).  
+     Links visibles para **crear cliente** (`customers:create`) o **agregar vehículo** (`vehicles:new`) con `next` de retorno.
+   - **POST**: Checkboxes de **Servicios disponibles** (filtrados por tipo de vehículo + precios vigentes en la **sucursal activa**).  
+     Se crea la venta en **borrador** y se redirige al **detalle**.
 
----
+2. **Sin cantidades**: cada ítem = un servicio. Variantes (ej. “Lavado premium”) se modelan como servicios distintos, no como cantidad.
 
-## 3) Contratos de entrada/salida (conceptual)
+3. **Sucursal**: nunca se elige en el form. Se toma **siempre** de `request.sucursal_activa` (TenancyMiddleware).
 
-### 3.1 Crear Venta
+4. **Validaciones fuertes**:
 
-- **Input (POST)**: `cliente_id`, `vehiculo_id`, `sucursal_id`, `notas` (opcional).
-- **Proceso**: `services.sales.crear_venta` valida pertenencia a empresa activa y estado inicial `borrador`.
-- **Output**: `venta_id` y redirect a `/ventas/<id>/`.
+   - `vehiculo.cliente == cliente` y ambos pertenecen a la **empresa activa**.
+   - Solo se listan para selección **servicios con precio vigente** para `(sucursal, tipo_vehículo, fecha=hoy)`.
 
-### 3.2 Agregar/Actualizar/Quitar Ítems
+5. **Bootstrap 5 limpio**:
+   - Inputs con `form-select` / `form-control` desde los **forms**.
+   - Checkboxes en **grid** (`row g-2`, 2 columnas en md+).
+   - **Modales** Bootstrap para confirmar **Finalizar**, **Cancelar** y **Eliminar ítem** (con `bi-exclamation-triangle-fill`).
+   - `text-break` en notas para evitar overflow/scroll horizontal.
 
-- **Input (POST)**:
-  - Agregar: `servicio_id`, `cantidad`.
-  - Actualizar: `item_id`, `cantidad`.
-  - Quitar: `item_id`.
-- **Proceso**:
-  - Resolver **precio vigente** con `apps.pricing.services.resolver.get_precio_vigente(...)` usando `(sucursal, servicio, tipo_vehiculo del vehículo)`.
-  - Cachear `precio_unitario` en `VentaItem`.
-  - Recalcular totales con `calculations.py` y grabar en `Venta`.
-- **Output**: venta actualizada; render parcial de totales o redirect con mensaje.
-
-### 3.3 Finalizar/Cancelar Venta (FSM)
-
-- **Input (POST)**: acción `finalizar` o `cancelar` sobre una venta en estado válido.
-- **Proceso**: `fsm.py` valida transición; `services.lifecycle` ejecuta side-effects (ej. bloquear edición de ítems al finalizar).
-- **Output**: venta en nuevo estado; mensajes de confirmación.
-
-### 3.4 Sincronía con Pagos
-
-- **Input**: desde `apps/payments` al registrar `PAGO(venta_id, metodo, monto, es_propina)`.
-- **Proceso**: `apps/payments` invoca a `services.sales` para actualizar `saldo_pendiente`; si saldo=0 → transición a `pagado`.
-- **Output**: venta `pagada`; habilita emisión de comprobante (módulo invoicing).
+> Requisito: **Bootstrap Icons** cargado en el layout (se usan íconos en modales).
 
 ---
 
-## 4) Dependencias e integraciones
+## 3) Modelos (resumen funcional)
 
-- **Depende de**: `org` (empresa/sucursal), `customers` (cliente), `vehicles` (vehículo/tipo), `catalog` (servicio), `pricing` (resolución de precio).
-- **Usado por**: `payments` (pagos a venta), `invoicing` (comprobante), `notifications` (aviso “listo”), `cashbox` (cierre por periodo).
+- **Venta**
+  - `empresa`, `sucursal`, `cliente`, `vehiculo`
+  - `estado`: `borrador | en_proceso | terminado | pagado | cancelado`
+  - `subtotal`, `propina`, `descuento`, `total`, `saldo_pendiente`
+  - `notas`, `creado_por`, `creado/actualizado`
+- **VentaItem**
+  - `venta` (FK), `servicio` (FK)
+  - `precio_unitario` (cache del resolver al agregar)
+  - `subtotal` (= `precio_unitario`)
+
+**Cálculo de totales**: cada mutación llama a `calculations.py`.  
+**FSM** en `fsm.py` controla las transiciones y bloqueos de edición.
 
 ---
 
-## 5) Seguridad
+## 4) FSM (máquina de estados)
 
-- Todas las vistas requieren autenticación y membresía en la **empresa activa**.
-- Edición de ítems **solo** en `borrador` o `en_proceso`; `terminado` restringe (configurable por rol).
-- No permitir agregar ítems si no hay precio vigente para la combinación.
+```mermaid
+stateDiagram-v2
+    [*] --> borrador
+    borrador --> en_proceso: iniciar trabajo (opcional)
+    en_proceso --> terminado: finalizar
+    terminado --> pagado: pagos = total
+    borrador --> cancelado: cancelar
+    en_proceso --> cancelado: cancelar
+    terminado --> cancelado: cancelar (reglas)
+    pagado --> [*]
+    cancelado --> [*]
+```
+
+> La edición de ítems está **permitida** en `borrador` y `en_proceso`, y **bloqueada** desde `terminado`.
 
 ---
 
-## 6) Roadmap inmediato
+## 5) Forms
 
-1. Modelos `Venta` y `VentaItem`.
-2. `calculations.py` (funciones puras) + `fsm.py` (transiciones).
-3. Services de venta e ítems (mutaciones atómicas).
-4. Vistas + templates (crear, detalle con ítems, acciones).
-5. Integración con `pricing` (resolver precios) y con `payments` (actualizar saldo/estado).
+### 5.1 `VentaForm` (`forms/sale.py`)
+
+- Campos: `cliente`, `vehiculo`, `notas`.
+- **Bootstrap**: asigna `form-select` / `form-control` en `__init__`.
+- **Filtrado**:
+  - `cliente`: activos de la **empresa**.
+  - `vehiculo`: **solo** los del cliente seleccionado (o `disabled` hasta elegir).
+- **Validación**: `vehiculo.cliente == cliente` y ambos dentro de la **empresa activa**.
+
+### 5.2 `ServiceSelectionForm` (`forms/service_select.py`)
+
+- Campo: `servicios` (MultipleChoice, `CheckboxSelectMultiple`).
+- **Choices**: `Servicio` con **PrecioServicio vigente** para:  
+  `empresa = request.empresa_activa` · `sucursal = request.sucursal_activa` · `tipo_vehiculo = venta.vehiculo.tipo` · `fecha = hoy`.
+
+---
+
+## 6) Services
+
+### 6.1 `services/sales.py`
+
+- `crear_venta(empresa, sucursal, cliente, vehiculo, creado_por, notas="")`
+  - Valida tenant + relación cliente/vehículo. Estado inicial `borrador`.
+- `finalizar(venta, actor)` / `cancelar(venta, actor)`
+  - Validan transición vía `fsm.py` y aplican `lifecycle` si corresponde.
+- `recalcular_totales(venta)`
+  - Suma `items.subtotal` y actualiza `total`/`saldo_pendiente`.
+
+### 6.2 `services/items.py`
+
+- `agregar_items(venta, servicios_ids, actor)`
+  - Por cada servicio, resuelve **precio vigente** con `pricing.services.resolver.get_precio_vigente(empresa, sucursal, servicio, tipo_vehiculo, fecha)` y crea `VentaItem` (cachea `precio_unitario`).
+  - Recalcula totales.
+- `eliminar_item(venta, item, actor)`
+  - Borra ítem si el estado permite y recalcula totales.
+
+**Nota de bug resuelto:** parámetro correcto en resolver = `tipo_vehiculo` (no `tipo`).
+
+---
+
+## 7) Views (CBVs)
+
+- **`VentaListView`**  
+  Filtros por `estado` y `sucursal`. Tabla responsive. Acciones rápidas (Ver, Finalizar, Cancelar) con **modales**.
+
+- **`VentaCreateView`**
+
+  - **GET**: muestra `VentaForm` con selects (cliente → vehículo). Auto-submit `onchange`.
+  - **Context**: `cliente_seleccionado`, `vehiculo_seleccionado`, `services_form` y `crear_habilitado` (evita lógica compleja en `{% if %}`).
+  - **POST**: recibe `cliente`, `vehiculo`, `servicios[]`. Toma `sucursal = request.sucursal_activa`. Crea venta + ítems → redirect a **detail**.
+
+- **`VentaDetailView`**  
+  Meta de la venta, **\_summary_card**, tabla de ítems (cada fila incluye modal **Eliminar ítem**), panel **Agregar servicios** (checkboxes) si estado permite, y modales **Finalizar / Cancelar**.
+
+- **Acciones**
+  - `AgregarItemView` (POST multi-servicio)
+  - `EliminarItemView` (POST, modal de confirmación)
+  - `FinalizarVentaView` / `CancelarVentaView` (POST, modales)
+
+---
+
+## 8) URLs (namespace `sales`)
+
+Prefijo global montado en `lavaderos/urls.py`:  
+`path("ventas/", include(("apps.sales.urls", "sales"), namespace="sales")),`
+
+```
+GET  /ventas/                          name="sales:list"
+GET  /ventas/nueva/                    name="sales:create"
+POST /ventas/nueva/                    (mismo endpoint)
+GET  /ventas/<uuid:pk>/                name="sales:detail"
+
+POST /ventas/<uuid:pk>/items/agregar/  name="sales:item_add"
+POST /ventas/<uuid:pk>/items/<int:item_id>/eliminar/  name="sales:item_delete"
+
+POST /ventas/<uuid:pk>/finalizar/      name="sales:finalize"
+POST /ventas/<uuid:pk>/cancelar/       name="sales:cancel"
+```
+
+> En templates, los atajos externos usan los nombres **reales**: `customers:create` y `vehicles:new` (según `apps.customers.urls` y `apps.vehicles.urls`).
+
+---
+
+## 9) Templates (UI/UX)
+
+- **`create.html`**
+  - **Paso 1 (GET)**: selects de **Cliente** / **Vehículo** (filtrado). Links a crear cliente / agregar vehículo con `next`. Auto-submit simple.
+  - **Paso 2 (POST)**: checkboxes de **Servicios** (2 columnas). Botón **Crear venta** deshabilitado hasta tener datos válidos.
+- **`detail.html`**
+  - Encabezado con **badges** de estado. Meta de venta. **\_summary_card** de totales (`list-group`).
+  - Tabla de ítems; cada fila incluye **modal Eliminar** con ícono.
+  - Panel **Agregar servicios** con checkboxes.
+  - Botones **Finalizar / Cancelar** con **modales**.
+- **`list.html`**
+  - Filtros (estado/sucursal) y tabla responsive. Acciones rápidas (Ver, **Finalizar**, **Cancelar**) con modales por fila (IDs únicos).
+- **`_item_row.html`**
+  - Fila simplificada: Servicio / Subtotal / Acciones. Modal de confirmación con `bi-exclamation-triangle-fill`.
+- **`_summary_card.html`**
+  - Tarjeta compacta con subtotal, (opcional) propina/descuento, total y saldo.
+
+> Convenciones respetadas: **sin lógica compleja** en templates; **Bootstrap utilities**; **mensajes** via `django.contrib.messages`.
+
+---
+
+## 10) Seguridad / Tenancy
+
+- Vistas con **login** requerido y membresía a la **empresa activa**.
+- **Sucursal** tomada de la **sesión** (no desde form).
+- Edición solo en `borrador` / `en_proceso`; bloqueo a partir de `terminado`.
+- Lecturas/acciones validan que la **venta** pertenece a la **empresa activa**.
+
+---
+
+## 11) Integraciones
+
+- **pricing**: resolver de precio vigente para `(sucursal, servicio, tipo_vehículo, fecha=hoy)`.
+- **payments**: al registrar pagos, actualizar `saldo_pendiente` y si llega a 0 → transición a **`pagado`** (`lifecycle`).
+- **invoicing**: emisión de comprobante al pasar a `pagado`.
+- **notifications**: aviso “listo para retirar” al finalizar.
+- **cashbox**: cierres por período con totales de ventas/pagos.
+
+---
+
+## 12) Errores zanjados / Lecciones
+
+- `NoReverseMatch` por nombres inconsistentes → se corrigieron los `url` con los **names reales** (`customers:create`, `vehicles:new`).
+- `TemplateSyntaxError` por paréntesis en `{% if %}` → se movió la lógica a la **vista** (flag `crear_habilitado`).
+- Error en resolver de precio: `tipo` → **`tipo_vehiculo`**.
+- Vehículos de otros clientes en el form → `vehiculo` **filtrado** por cliente.
+- Sucursal listada en el form (confusión con empresa) → se quitó del form; se usa **sucursal activa** de la sesión.
+
+---
+
+## 13) QA Manual (checklist)
+
+1. Crear cliente **A** + vehículo **A1**; cliente **B** + vehículo **B1**.
+2. Iniciar **Crear venta** → elegir **A** → el select **Vehículo** muestra **solo A1** (no B1).
+3. Link “Agregar vehículo” prellena `?cliente=A` y retorna con `next`.
+4. Con vehículo elegido, aparecen **solo** servicios con precio vigente para el **tipo** en la **sucursal activa**.
+5. Intentar crear venta **sin servicios** → botón deshabilitado / error amigable.
+6. Crear venta → estado **borrador**; en detalle se muestran ítems.
+7. Eliminar ítem → modal de confirmación + recálculo de totales.
+8. Finalizar desde **detalle** y desde **listado** → modal + bloqueo de edición.
+9. Cancelar → modal + estado actualizado.
+10. Notas largas no rompen layout (sin scroll horizontal).
+
+---
+
+## 14) Roadmap próximo
+
+1. Integrar **payments** (registrar pago → actualizar saldo/estado).
+2. Auditoría (quién/qué/cuándo sobre ítems y estados).
+3. Exportes (CSV) con filtros.
+4. Acciones masivas en listado (ej. cancelar borradores).
+5. KPIs en **home_dashboard** (ventas del día / en proceso).
+
+---
+
+## 15) Diagrama de relaciones
+
+```mermaid
+erDiagram
+    Empresa ||--o{ Sucursal : tiene
+    Empresa ||--o{ Cliente  : tiene
+    Empresa ||--o{ TipoVehiculo : define
+    Empresa ||--o{ Servicio : ofrece
+    Cliente ||--o{ Vehiculo : posee
+    Sucursal ||--o{ Venta   : opera
+    Venta ||--o{ VentaItem  : compone
+    Servicio ||--o{ VentaItem : se_vende
+    Vehiculo ||--o{ Venta    : participa
+
+    Empresa { int id varchar nombre }
+    Sucursal { int id varchar nombre int empresa_id }
+    Cliente { int id varchar nombre varchar apellido int empresa_id }
+    Vehiculo { int id varchar patente int cliente_id int empresa_id int tipo_id }
+    Servicio { int id varchar nombre int empresa_id }
+    Venta {
+        uuid id
+        int empresa_id
+        int sucursal_id
+        int cliente_id
+        int vehiculo_id
+        varchar estado
+        decimal subtotal
+        decimal propina
+        decimal descuento
+        decimal total
+        decimal saldo_pendiente
+    }
+    VentaItem {
+        int id
+        uuid venta_id
+        int servicio_id
+        decimal precio_unitario
+        decimal subtotal
+    }
+```
+
+---
+
+## 16) Convenciones de calidad (recordatorio global)
+
+- **Templates**: sin `.as_widget(attrs=...)`; comparaciones simples; mover lógica a vista; selects muestran **nombres** (no IDs); inputs `date` desde el **Form**.
+- **Forms**: clases Bootstrap se inyectan en `__init__`; en template usar `{{ field }}` + `invalid-feedback`/`form-text`.
+- **CBVs / URLs**: siempre `success_url`/redirect explícito; nombres cortos y namespaced.
+- **Mensajes**: usar `django.contrib.messages` para feedback consistente.
+- **Tenancy**: `empresa_activa` / `sucursal_activa` desde middleware; selector de sucursal en sidebar.
+
+---
+
+### Resumen ejecutivo
+
+- Flujo de creación **simple y centrado en negocio**: Cliente → Vehículo (del cliente) → Servicios válidos (según tipo + precios en sucursal activa).
+- **Sin cantidades** por ítem, coherente con la operación del lavadero.
+- **Validaciones fuertes** multi-tenant y consistencia de datos.
+- **UI cuidada** con Bootstrap 5 y modales (sin `confirm()`), sin lógica compleja en templates.
+- **FSM** clara y **totales** consistentes; lista para integrar pagos y comprobantes.
 
 # Módulo 8 — `apps/payments` (Pagos)
 

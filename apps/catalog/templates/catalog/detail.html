@@ -1,3 +1,4 @@
+{# apps/catalog/templates/catalog/detail.html #}
 {% extends "base_auth.html" %}
 
 {% block title %}Servicio: {{ object.nombre }}{% endblock %}
@@ -62,14 +63,13 @@
             </a>
 
             {% if object.activo %}
-              <form method="post" action="{% url 'catalog:service_deactivate' object.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
-                <button type="submit" class="btn btn-outline-warning"
-                        onclick="return confirm('¿Desactivar el servicio {{ object.nombre }}?');">
-                  <i class="bi bi-slash-circle"></i> Desactivar
-                </button>
-              </form>
+              {# Botón que abre el modal (reemplaza confirm feo) #}
+              <button type="button"
+                      class="btn btn-outline-warning"
+                      data-bs-toggle="modal"
+                      data-bs-target="#srvDeactivateModal-{{ object.id }}">
+                <i class="bi bi-slash-circle"></i> Desactivar
+              </button>
             {% else %}
               <form method="post" action="{% url 'catalog:service_activate' object.pk %}">
                 {% csrf_token %}
@@ -106,5 +106,36 @@
       </div>
     </div>
   </div>
+
+  {# Modal de confirmación para DESACTIVAR (ID único) #}
+  {% if object.activo %}
+  <div class="modal fade" id="srvDeactivateModal-{{ object.id }}" tabindex="-1"
+       aria-labelledby="srvDeactivateModalLabel-{{ object.id }}" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-0">
+          <h5 class="modal-title d-flex align-items-center gap-2" id="srvDeactivateModalLabel-{{ object.id }}">
+            <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+            Confirmar desactivación
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="h5 mb-1"><strong>Servicio:</strong> {{ object.nombre }}</p>
+          
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <form method="post" action="{% url 'catalog:service_deactivate' object.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+            <button type="submit" class="btn btn-warning">Sí, desactivar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
 </div>
 {% endblock %}

@@ -1,0 +1,216 @@
+{# apps/sales/templates/sales/list.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}Ventas{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-2">
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">Ventas</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Listado</li>
+    </ol>
+  </nav>
+
+  <!-- Header + CTA -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h4 mb-0">Ventas</h1>
+    <a class="btn btn-primary" href="{% url 'sales:create' %}">
+      <i class="bi bi-plus-lg"></i> Nueva venta
+    </a>
+  </div>
+
+  <!-- Filtros -->
+  <form method="get" class="row gy-2 gx-2 align-items-end mb-3">
+    <div class="col-12 col-md-3">
+      <label class="form-label mb-0">Estado</label>
+      <select class="form-select" name="estado">
+        <option value="">Todos</option>
+        <option value="borrador"   {% if request.GET.estado == "borrador" %}selected{% endif %}>Borrador</option>
+        <option value="en_proceso" {% if request.GET.estado == "en_proceso" %}selected{% endif %}>En proceso</option>
+        <option value="terminado"  {% if request.GET.estado == "terminado" %}selected{% endif %}>Terminado</option>
+        <option value="pagado"     {% if request.GET.estado == "pagado" %}selected{% endif %}>Pagado</option>
+        <option value="cancelado"  {% if request.GET.estado == "cancelado" %}selected{% endif %}>Cancelado</option>
+      </select>
+      <div class="form-text">Filtrar por estado de la venta.</div>
+    </div>
+
+    {% if sucursales %}
+    <div class="col-12 col-md-3">
+      <label class="form-label mb-0">Sucursal</label>
+      <select class="form-select" name="sucursal">
+        <option value="">Todas</option>
+        {% for s in sucursales %}
+          <option value="{{ s.id }}" {% if request.GET.sucursal == s.id|stringformat:"s" %}selected{% endif %}>
+            {{ s.nombre }}
+          </option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Filtrar por sucursal.</div>
+    </div>
+    {% endif %}
+
+    <div class="col-12 col-md-3">
+      <button type="submit" class="btn btn-outline-secondary w-100">
+        Aplicar filtros
+      </button>
+    </div>
+    {% if request.GET.estado or request.GET.sucursal %}
+    <div class="col-12 col-md-3">
+      <a class="btn btn-outline-dark w-100" href="{% url 'sales:list' %}">Limpiar</a>
+    </div>
+    {% endif %}
+  </form>
+
+  <!-- Tabla de ventas -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Fecha</th>
+          <th scope="col">Cliente</th>
+          <th scope="col">Vehículo</th>
+          <th scope="col" class="d-none d-md-table-cell">Sucursal</th>
+          <th scope="col">Estado</th>
+          <th scope="col" class="text-end">Total</th>
+          <th scope="col" class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if ventas %}
+          {% for v in ventas %}
+          <tr>
+            <td style="white-space:nowrap">{{ v.creado|date:"d/m/Y H:i" }}</td>
+            <td>{{ v.cliente }}</td>
+            <td>{{ v.vehiculo }}</td>
+            <td class="d-none d-md-table-cell">{{ v.sucursal }}</td>
+            <td>
+              {% if v.estado == "borrador" %}
+                <span class="badge text-bg-secondary">Borrador</span>
+              {% elif v.estado == "en_proceso" %}
+                <span class="badge text-bg-warning">En proceso</span>
+              {% elif v.estado == "terminado" %}
+                <span class="badge text-bg-info">Terminado</span>
+              {% elif v.estado == "pagado" %}
+                <span class="badge text-bg-success">Pagado</span>
+              {% elif v.estado == "cancelado" %}
+                <span class="badge text-bg-danger">Cancelado</span>
+              {% else %}
+                <span class="badge text-bg-light">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">${{ v.total|floatformat:2 }}</td>
+            <td class="text-end" style="white-space:nowrap">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'sales:detail' pk=v.pk %}">
+                Ver
+              </a>
+
+              {# Acción rápida: Finalizar (solo si está en proceso) #}
+              {% if v.estado == "en_proceso" %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-success"
+                        data-bs-toggle="modal"
+                        data-bs-target="#finalizeModal{{ v.pk }}">
+                  Finalizar
+                </button>
+              {% endif %}
+
+              {# Acción rápida: Cancelar (si aún no es final) #}
+              {% if v.estado == "borrador" or v.estado == "en_proceso" or v.estado == "terminado" %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-danger"
+                        data-bs-toggle="modal"
+                        data-bs-target="#cancelModal{{ v.pk }}">
+                  Cancelar
+                </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="7">
+              <div class="alert alert-info mb-0">
+                No se encontraron ventas con los filtros actuales.
+                <a href="{% url 'sales:create' %}" class="alert-link">Crear la primera venta</a>.
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include "includes/_pagination.html" %}
+
+  {# Modales por venta (fuera de la tabla para no romper el DOM) #}
+  {% if ventas %}
+    {% for v in ventas %}
+      {% if v.estado == "en_proceso" %}
+        <!-- Modal Finalizar -->
+        <div class="modal fade" id="finalizeModal{{ v.pk }}" tabindex="-1"
+             aria-labelledby="finalizeModalLabel{{ v.pk }}" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="finalizeModalLabel{{ v.pk }}">Finalizar venta</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+              </div>
+              <div class="modal-body">
+                <div class="d-flex align-items-start">
+                  <i class="bi bi-exclamation-triangle-fill text-warning fs-4 me-2"></i>
+                  <div>
+                    <p class="h6 mb-1"><strong>Cliente:</strong> {{ v.cliente }}</p>
+                    <p class="mb-0 text-muted small">Al finalizar, ya no se podrán agregar servicios.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+                <form method="post" action="{% url 'sales:finalize' pk=v.pk %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-success">Finalizar</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      {% if v.estado == "borrador" or v.estado == "en_proceso" or v.estado == "terminado" %}
+        <!-- Modal Cancelar -->
+        <div class="modal fade" id="cancelModal{{ v.pk }}" tabindex="-1"
+             aria-labelledby="cancelModalLabel{{ v.pk }}" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="cancelModalLabel{{ v.pk }}">Cancelar venta</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+              </div>
+              <div class="modal-body">
+                <div class="d-flex align-items-start">
+                  <i class="bi bi-exclamation-triangle-fill text-danger fs-4 me-2"></i>
+                  <div>
+                    <p class="h6 mb-1"><strong>Cliente:</strong> {{ v.cliente }}</p>
+                    <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+                <form method="post" action="{% url 'sales:cancel' pk=v.pk %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-danger">Cancelar venta</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+
+</div>
+{% endblock %}

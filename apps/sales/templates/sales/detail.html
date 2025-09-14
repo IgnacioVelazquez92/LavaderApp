@@ -1,0 +1,264 @@
+{# apps/sales/templates/sales/detail.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}Venta {{ venta.pk }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-2">
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">Ventas</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Detalle</li>
+    </ol>
+  </nav>
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+    <h1 class="h4 mb-0">Venta</h1>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Volver al listado</a>
+
+      {# Acciones por estado con MODALES #}
+      {% if venta.estado == "en_proceso" %}
+        <button type="button"
+                class="btn btn-success"
+                data-bs-toggle="modal"
+                data-bs-target="#finalizeVentaModal{{ venta.pk }}">
+          Finalizar
+        </button>
+      {% endif %}
+
+      {% if venta.estado == "borrador" or venta.estado == "en_proceso" or venta.estado == "terminado" %}
+        <button type="button"
+                class="btn btn-outline-danger"
+                data-bs-toggle="modal"
+                data-bs-target="#cancelVentaModal{{ venta.pk }}">
+          Cancelar
+        </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Meta de la venta -->
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-lg-8">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="text-muted">ID:</span>
+              <code class="small">{{ venta.pk }}</code>
+            </div>
+            <div>
+              {% if venta.estado == "borrador" %}
+                <span class="badge text-bg-secondary">Borrador</span>
+              {% elif venta.estado == "en_proceso" %}
+                <span class="badge text-bg-warning">En proceso</span>
+              {% elif venta.estado == "terminado" %}
+                <span class="badge text-bg-info">Terminado</span>
+              {% elif venta.estado == "pagado" %}
+                <span class="badge text-bg-success">Pagado</span>
+              {% elif venta.estado == "cancelado" %}
+                <span class="badge text-bg-danger">Cancelado</span>
+              {% else %}
+                <span class="badge text-bg-light">—</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <div class="small text-muted">Cliente</div>
+              <div>{{ venta.cliente }}</div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="small text-muted">Vehículo</div>
+              <div>{{ venta.vehiculo }}</div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="small text-muted">Sucursal</div>
+              <div>{{ venta.sucursal }}</div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="small text-muted">Creado</div>
+              <div>{{ venta.creado|date:"d/m/Y H:i" }}</div>
+            </div>
+          </div>
+
+          {% if venta.notas %}
+            <hr>
+            <div>
+              <div class="small text-muted mb-1">Notas</div>
+              <div class="border rounded p-2 bg-light text-break">{{ venta.notas|linebreaksbr }}</div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Resumen -->
+    <div class="col-12 col-lg-4">
+      {% include "sales/_summary_card.html" with venta=venta %}
+    </div>
+  </div>
+
+  <!-- Ítems -->
+  <div class="row g-3">
+    <div class="col-12 col-lg-8">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span class="fw-semibold">Ítems</span>
+          {% if venta.estado == "borrador" or venta.estado == "en_proceso" %}
+            <span class="badge text-bg-light">Edición habilitada</span>
+          {% else %}
+            <span class="badge text-bg-light">Edición bloqueada</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Servicio</th>
+                  <th class="text-end" style="width:140px">Subtotal</th>
+                  <th class="text-end" style="width:120px">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in venta.items.all %}
+                  {% include "sales/_item_row.html" with item=item venta=venta %}
+                {% empty %}
+                  <tr>
+                    <td colspan="5">
+                      <div class="alert alert-info mb-0">Aún no hay ítems.</div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Agregar servicios -->
+    <div class="col-12 col-lg-4">
+      <div class="card">
+        <div class="card-header fw-semibold">Agregar servicios</div>
+        <div class="card-body">
+          {% if venta.estado == "borrador" or venta.estado == "en_proceso" %}
+
+            {% if services_form.fields.servicios.choices %}
+              <form method="post" action="{% url 'sales:item_add' pk=venta.pk %}" novalidate>
+                {% csrf_token %}
+
+                <div class="row g-2">
+                  {% for checkbox in services_form.servicios %}
+                    <div class="col-12 col-md-6">
+                      <div class="form-check">
+                        {{ checkbox.tag }}
+                        <label class="form-check-label" for="{{ checkbox.id_for_label }}">
+                          {{ checkbox.choice_label }}
+                        </label>
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+
+                {% if services_form.errors.servicios %}
+                  <div class="invalid-feedback d-block">{{ services_form.errors.servicios|striptags }}</div>
+                {% else %}
+                  <div class="form-text mt-1">Elegí uno o varios servicios (sin cantidades).</div>
+                {% endif %}
+
+                <div class="d-grid mt-3">
+                  <button type="submit" class="btn btn-primary">Agregar</button>
+                </div>
+              </form>
+            {% else %}
+              <div class="alert alert-warning mb-0">
+                No hay servicios con precio vigente para el tipo de vehículo en la sucursal actual.
+                <a href="{% url 'pricing:list' %}">Configurar precios</a>.
+              </div>
+            {% endif %}
+
+          {% else %}
+            <div class="alert alert-warning mb-0">
+              La venta está <strong>{{ venta.estado }}</strong>; no se pueden agregar servicios.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  {# ===== Modales de acciones de la venta (fuera del contenido principal) ===== #}
+  {% if venta.estado == "en_proceso" %}
+    <!-- Modal Finalizar venta -->
+    <div class="modal fade" id="finalizeVentaModal{{ venta.pk }}" tabindex="-1"
+         aria-labelledby="finalizeVentaModalLabel{{ venta.pk }}" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="finalizeVentaModalLabel{{ venta.pk }}">Finalizar venta</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex align-items-start">
+              <i class="bi bi-exclamation-triangle-fill text-warning fs-4 me-2"></i>
+              <div>
+                <p class="h6 mb-1"><strong>Cliente:</strong> {{ venta.cliente }}</p>
+                <p class="mb-0 text-muted small">Al finalizar, ya no se podrán agregar servicios.</p>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+            <form method="post" action="{% url 'sales:finalize' pk=venta.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-success">Finalizar</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if venta.estado == "borrador" or venta.estado == "en_proceso" or venta.estado == "terminado" %}
+    <!-- Modal Cancelar venta -->
+    <div class="modal fade" id="cancelVentaModal{{ venta.pk }}" tabindex="-1"
+         aria-labelledby="cancelVentaModalLabel{{ venta.pk }}" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="cancelVentaModalLabel{{ venta.pk }}">Cancelar venta</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex align-items-start">
+              <i class="bi bi-exclamation-triangle-fill text-danger fs-4 me-2"></i>
+              <div>
+                <p class="h6 mb-1"><strong>Cliente:</strong> {{ venta.cliente }}</p>
+                <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+            <form method="post" action="{% url 'sales:cancel' pk=venta.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-danger">Cancelar venta</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}
