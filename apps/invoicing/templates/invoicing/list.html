@@ -1,0 +1,148 @@
+{# apps/invoicing/templates/invoicing/list.html #}
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Comprobantes{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-1">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Panel</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Comprobantes</li>
+    </ol>
+  </nav>
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+    <div class="me-3">
+      <h1 class="h4 mb-1">Comprobantes</h1>
+      <div class="small text-body-secondary">
+        {% if page_obj and page_obj.paginator %}
+          {{ page_obj.paginator.count }} resultado{% if page_obj.paginator.count != 1 %}s{% endif %}
+        {% endif %}
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">
+        <i class="bi bi-basket2"></i> Ir a ventas
+      </a>
+    </div>
+  </div>
+
+  {% include "includes/_messages.html" %}
+
+  <!-- Filtros -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end" novalidate>
+        <div class="col-12 col-md-3">
+          <label class="form-label">Sucursal</label>
+          <select name="sucursal" class="form-select">
+            <option value="">Todas</option>
+            {% for s in sucursales_disponibles %}
+              <option value="{{ s.id }}" {% if filtros.sucursal == s.id|stringformat:"s" %}selected{% endif %}>
+                {{ s.nombre }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">Tipo</label>
+          <select name="tipo" class="form-select">
+            <option value="">Todos</option>
+            {% for value,label in tipos_disponibles %}
+              <option value="{{ value }}" {% if filtros.tipo == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">Desde</label>
+          <input type="date" name="desde" class="form-control" value="{{ filtros.desde }}">
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">Hasta</label>
+          <input type="date" name="hasta" class="form-control" value="{{ filtros.hasta }}">
+        </div>
+
+        <div class="col-12 col-md-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-funnel"></i> Filtrar
+          </button>
+          <a class="btn btn-outline-secondary" href="{% url 'invoicing:list' %}">
+            Limpiar
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Comprobante</th>
+              <th scope="col">Tipo</th>
+              <th scope="col">Sucursal</th>
+              <th scope="col">Cliente</th>
+              <th scope="col" class="text-end">Total</th>
+              <th scope="col">Emitido</th>
+              <th scope="col" class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in comprobantes %}
+              <tr>
+                <td class="text-monospace">
+                  <a href="{% url 'invoicing:detail' pk=c.id %}" class="link-underline link-underline-opacity-0">
+                    {{ c.numero_completo }}
+                  </a>
+                </td>
+                <td>
+                  <span class="badge text-bg-secondary">{{ c.tipo }}</span>
+                </td>
+                <td>{{ c.sucursal.nombre }}</td>
+                <td>
+                  {{ c.cliente.nombre }} {{ c.cliente.apellido }}
+                </td>
+                <td class="text-end">{{ c.total }}</td>
+                <td>{{ c.emitido_en|date:"d/m/Y H:i" }}</td>
+                <td class="text-end">
+                  <div class="btn-group">
+                    <a class="btn btn-sm btn-outline-primary" href="{% url 'invoicing:detail' pk=c.id %}">
+                      <i class="bi bi-eye"></i>
+                    </a>
+                    <a class="btn btn-sm btn-primary" href="{% url 'invoicing:download' pk=c.id %}">
+                      <i class="bi bi-download"></i>
+                    </a>
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="7" class="text-center text-body-secondary py-4">
+                  No se encontraron comprobantes con los filtros aplicados.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Paginación -->
+      <div class="p-2">
+        {% include "includes/_pagination.html" %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

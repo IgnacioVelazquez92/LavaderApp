@@ -1,58 +1,38 @@
 # apps/payments/forms/payment.py
+from __future__ import annotations
+
 from decimal import Decimal
 from django import forms
-from django.core.exceptions import ValidationError
-from django.utils.translation import gettext_lazy as _
 
-from apps.payments.models import Pago, MedioPago
+from apps.payments.models import MedioPago
 
 
-class PaymentForm(forms.ModelForm):
-    """
-    Formulario para registrar un pago sobre una venta.
-
-    - Usa MedioPago (configurable por empresa).
-    - Valida monto > 0 (la validación contra saldo/tenant va en el service).
-    - Inyecta clases Bootstrap.
-    - Requiere que le pasen `empresa` en __init__ para filtrar los medios disponibles.
-    """
-
-    class Meta:
-        model = Pago
-        fields = ["medio", "monto", "es_propina", "referencia", "notas"]
+class PaymentForm(forms.Form):
+    medio = forms.ModelChoiceField(
+        queryset=MedioPago.objects.none(), label="Medio de pago")
+    monto = forms.DecimalField(min_value=Decimal(
+        "0.01"), decimal_places=2, max_digits=12, label="Monto")
+    es_propina = forms.BooleanField(
+        required=False, initial=False, label="Es propina")
+    referencia = forms.CharField(required=False, label="Referencia")
+    notas = forms.CharField(
+        required=False, widget=forms.Textarea, label="Notas")
+    idempotency_key = forms.CharField(
+        required=False, max_length=64, label="Clave de idempotencia")
 
     def __init__(self, *args, empresa=None, **kwargs):
         super().__init__(*args, **kwargs)
-
-        # Filtrar medios por empresa y activos
-        if empresa is not None:
+        if empresa:
             self.fields["medio"].queryset = MedioPago.objects.filter(
-                empresa=empresa, activo=True
-            ).order_by("nombre")
-        else:
-            # Evitar exponer medios fuera de contexto
-            self.fields["medio"].queryset = MedioPago.objects.none()
+                empresa=empresa, activo=True)
 
-        # Bootstrap 5 clases
-        self.fields["medio"].widget.attrs.update(
-            {"class": "form-select", "autocomplete": "off"}
-        )
-        self.fields["monto"].widget.attrs.update(
-            {"class": "form-control", "placeholder": "0.00", "inputmode": "decimal"}
-        )
+        # Clases Bootstrap
+        for name, field in self.fields.items():
+            if isinstance(field.widget, (forms.TextInput, forms.NumberInput, forms.Textarea, forms.Select)):
+                field.widget.attrs.update({"class": "form-control"})
         self.fields["es_propina"].widget.attrs.update(
-            {"class": "form-check-input"}
-        )
-        self.fields["referencia"].widget.attrs.update(
-            {"class": "form-control",
-                "placeholder": _("Ej: ID de transacción")}
-        )
-        self.fields["notas"].widget.attrs.update(
-            {"class": "form-control", "rows": 3}
-        )
+            {"class": "form-check-input"})
+        self.fields["medio"].widget.attrs.update({"class": "form-select"})
 
-    def clean_monto(self):
-        monto = self.cleaned_data.get("monto")
-        if monto is None or monto <= Decimal("0.00"):
-            raise ValidationError(_("El monto debe ser mayor a 0."))
-        return monto
+    def clean_es_propina(self):
+        return bool(self.cleaned_data.get("es_propina", False))

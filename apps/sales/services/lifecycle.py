@@ -1,37 +1,62 @@
 # apps/sales/services/lifecycle.py
 """
 Hooks de ciclo de vida de la Venta.
-Se ejecutan cuando hay transiciones de estado importantes.
-Ejemplo: notificar al cliente cuando la venta pasa a 'terminado'.
+Se disparan DESPUÉS de una transición de estado.
+No cambian FSM; solo side-effects.
 """
 
+from __future__ import annotations
+
+import logging
+from django.conf import settings
+
 from apps.sales.models import Venta
-from apps.sales.services.sales import cambiar_estado
-from apps.sales.fsm import VentaEstado
+
+logger = logging.getLogger(__name__)
 
 
-def on_finalizar(venta: Venta):
+def on_finalizar(venta: Venta, actor=None) -> None:
     """
-    Lógica al finalizar una venta.
-    Ej: notificar al cliente que su vehículo está listo.
+    Se ejecuta cuando la venta queda en 'terminado'.
+    Ej.: notificar "vehículo listo", auditar, etc. (si aplica más tarde).
     """
-    # TODO: integrar con apps.notifications
-    return cambiar_estado(venta=venta, nuevo_estado=VentaEstado.TERMINADO)
+    logger.info("Venta %s finalizada (terminado).", venta.id)
 
 
-def on_pagada(venta: Venta):
+def on_pagada(venta: Venta, actor=None) -> None:
     """
-    Lógica al marcar como pagada.
-    Ej: disparar emisión de comprobante en apps.invoicing.
+    Se ejecuta cuando la venta queda en 'pagado'.
+    Si INVOICING_AUTO_EMIT_ON_PAID=True → se intenta auto-emitir comprobante.
+    Si False → no auto-emite (la UI mostrará el botón de Emisión).
     """
-    # TODO: integrar con apps.invoicing
-    return cambiar_estado(venta=venta, nuevo_estado=VentaEstado.PAGADO)
+    auto_emit = getattr(settings, "INVOICING_AUTO_EMIT_ON_PAID", False)
+    if not auto_emit:
+        logger.info(
+            "Venta %s pagada. Auto-emisión desactivada (INVOICING_AUTO_EMIT_ON_PAID=False).",
+            venta.id,
+        )
+        return
+
+    try:
+        # Lógica idempotente y con defaults vive en invoicing.services.emit.emitir_auto
+        from apps.invoicing.services.emit import emitir_auto
+        res = emitir_auto(venta_id=venta.id, actor=actor)
+        if res is None:
+            # Ya había comprobante, o condiciones no dadas; no es error.
+            logger.info(
+                "Venta %s ya tenía comprobante o no aplicaba auto-emisión.", venta.id)
+        else:
+            logger.info(
+                "Venta %s: comprobante auto-emitido %s.", venta.id, res.comprobante.numero_completo
+            )
+    except Exception as exc:
+        # No rompemos el flujo de pago; solo log
+        logger.exception(
+            "Auto-emisión fallida para venta %s: %s", venta.id, exc)
 
 
-def on_cancelar(venta: Venta):
+def on_cancelar(venta: Venta, actor=None) -> None:
     """
-    Lógica al cancelar una venta.
-    Ej: revertir reservas de stock o loggear motivo.
+    Se ejecuta cuando la venta queda en 'cancelado'.
     """
-    # TODO: side-effects adicionales si aplica
-    return cambiar_estado(venta=venta, nuevo_estado=VentaEstado.CANCELADO)
+    logger.info("Venta %s cancelada.", venta.id)

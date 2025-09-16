@@ -4,7 +4,7 @@ Vistas server-rendered para el módulo de Ventas.
 - Listado, creación, detalle (con ítems) y acciones de estado.
 - Todas requieren autenticación y empresa activa en sesión.
 """
-
+from __future__ import annotations
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
@@ -15,7 +15,7 @@ from apps.sales.models import Venta, VentaItem
 from apps.sales.forms.sale import VentaForm
 
 from apps.sales.services import lifecycle as lifecycle_services
-from apps.sales.fsm import VentaEstado
+from apps.sales.fsm import VentaEstado, puede_transicionar
 from apps.customers.models import Cliente
 from apps.sales.forms.service_select import ServiceSelectionForm
 
@@ -201,6 +201,7 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
     """
     Muestra detalle de la venta, ítems y totales.
     Incluye formulario para agregar ítems.
+    Expone flags de comprobantes y acciones para NO meter lógica en templates.
     """
 
     model = Venta
@@ -208,15 +209,27 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
     context_object_name = "venta"
 
     def get_queryset(self):
+        # Filtra por empresa activa (tenancy) y precarga relaciones necesarias
         return (
             Venta.objects.filter(empresa=self.request.empresa_activa)
-            .select_related("cliente", "vehiculo", "sucursal")
-            .prefetch_related("items__servicio")
+            .select_related(
+                "cliente",
+                "vehiculo",
+                "vehiculo__tipo",
+                "sucursal",
+                "comprobante",  # OneToOne reverse con related_name="comprobante" en Comprobante
+            )
+            .prefetch_related(
+                "items__servicio",  # asume related_name="items" en VentaItem
+                "pagos",            # asume related_name="pagos" en Pago
+            )
         )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         venta = self.object
+
+        # ----- Form de selección de servicios (sin lógica en template) -----
         tipo = getattr(venta.vehiculo, "tipo", None)
         if tipo:
             ctx["services_form"] = ServiceSelectionForm(
@@ -226,12 +239,58 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
             )
         else:
             ctx["services_form"] = ServiceSelectionForm()
-        return ctx
 
+        # ----- Ítems (tolerante a nombre del related) -----
+        items_mgr = getattr(venta, "items", None) or getattr(
+            venta, "ventaitem_set", None)
+        ctx["venta_items"] = list(items_mgr.select_related(
+            "servicio").all()) if items_mgr else []
+
+        # ----- Pagos (tolerante a nombre del related) -----
+        pagos_mgr = getattr(venta, "pagos", None) or getattr(
+            venta, "pago_set", None)
+        if pagos_mgr:
+            try:
+                ctx["pagos"] = list(pagos_mgr.select_related("medio").all())
+            except Exception:
+                ctx["pagos"] = list(pagos_mgr.all())
+        else:
+            ctx["pagos"] = []
+
+        # ----- Flags para acciones/CTAs en template -----
+        comprobante = getattr(venta, "comprobante", None)
+        venta_pagada = (venta.estado == VentaEstado.PAGADO)
+        tiene_comprobante = bool(comprobante)
+        saldo_cubierto = (getattr(venta, "saldo_pendiente", None) == 0)
+
+        # FSM: ¿puede finalizar trabajo (pasar a TERMINADO) desde el estado actual?
+        puede_finalizar_trabajo = puede_transicionar(
+            venta.estado, VentaEstado.TERMINADO)
+
+        ctx.update({
+            "venta_pagada": venta_pagada,
+            "tiene_comprobante": tiene_comprobante,
+            "comprobante_id": (comprobante.id if tiene_comprobante else None),
+
+            # Emitir comprobante: disponible apenas está pagada y aún no tiene comprobante
+            "puede_emitir_comprobante": (venta_pagada and not tiene_comprobante),
+
+            # Saldo cubierto pero todavía no pagada (no debería ocurrir si payments marca 'pagado',
+            # pero dejamos el flag por si hay datos legacy)
+            "saldo_cubierto": saldo_cubierto,
+            "debe_finalizar_para_emitir": (saldo_cubierto and not venta_pagada),
+
+            # Acción para cerrar operación cuando el trabajo termina
+            "puede_finalizar_trabajo": puede_finalizar_trabajo,
+        })
+
+        return ctx
 
 # --------------------------------------------------
 # Ítems: agregar, actualizar, eliminar
 # --------------------------------------------------
+
+
 class AgregarItemView(LoginRequiredMixin, View):
     """
     POST: agrega un ítem a la venta (servicio + cantidad).
@@ -305,16 +364,17 @@ class EliminarItemView(LoginRequiredMixin, View):
 # --------------------------------------------------
 class FinalizarVentaView(LoginRequiredMixin, View):
     """
-    POST: transiciona la venta a 'terminado'.
+    POST: Finaliza una venta.
+    - Recalcula totales y saldo.
+    - Si saldo > 0 => estado TERMINADO.
+    - Si saldo == 0 => estado TERMINADO + luego PAGADO.
     """
 
     def post(self, request, pk):
-        venta = get_object_or_404(
-            Venta, pk=pk, empresa=request.empresa_activa
-        )
+        venta = get_object_or_404(Venta, pk=pk, empresa=request.empresa_activa)
         try:
-            lifecycle_services.on_finalizar(venta)
-            messages.success(request, "Venta finalizada correctamente.")
+            sales_services.finalizar_trabajo(venta=venta, actor=request.user)
+            messages.success(request, "Trabajo finalizado.")
         except Exception as e:
             messages.error(request, f"No se pudo finalizar: {e}")
         return redirect("sales:detail", pk=venta.pk)

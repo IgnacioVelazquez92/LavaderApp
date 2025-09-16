@@ -1,0 +1,153 @@
+{# apps/invoicing/templates/invoicing/emit.html #}
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Emitir comprobante{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-1">
+      <li class="breadcrumb-item"><a href="{% url 'home' %}">Panel</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">Ventas</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:detail' pk=venta.id %}">Venta</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Emitir comprobante</li>
+    </ol>
+  </nav>
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+    <div class="me-3">
+      <h1 class="h4 mb-1">Emitir comprobante</h1>
+      <div class="small text-body-secondary">
+        Venta <span class="badge text-bg-secondary">{{ venta.id }}</span>
+        {% if venta_pagada %}
+          <span class="badge text-bg-success ms-2">Venta pagada</span>
+        {% else %}
+          <span class="badge text-bg-danger ms-2">No pagada</span>
+        {% endif %}
+        {% if ya_tiene_comprobante %}
+          <span class="badge text-bg-info ms-2">Ya emitido</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'sales:detail' pk=venta.id %}">
+        <i class="bi bi-arrow-left"></i> Volver a la venta
+      </a>
+      {% if ya_tiene_comprobante and comprobante_existente %}
+        <a class="btn btn-outline-primary" href="{% url 'invoicing:detail' pk=comprobante_existente.id %}">
+          <i class="bi bi-receipt"></i> Ver comprobante
+        </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Alertas informativas según estado (sin lógica compleja) -->
+  {% if not venta_pagada %}
+    <div class="alert alert-warning d-flex align-items-center" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      La venta aún no está pagada. No es posible emitir el comprobante.
+    </div>
+  {% endif %}
+
+  {% if ya_tiene_comprobante and comprobante_existente %}
+    <div class="alert alert-info d-flex align-items-center" role="alert">
+      <i class="bi bi-info-circle-fill me-2"></i>
+      Esta venta ya tiene un comprobante emitido.
+      <a class="alert-link ms-1" href="{% url 'invoicing:detail' pk=comprobante_existente.id %}">Ver detalle</a>.
+    </div>
+  {% endif %}
+
+  <!-- Card del formulario -->
+  <div class="card">
+    <div class="card-body">
+      <form id="emit-form" method="post" action="{% url 'invoicing:emit' venta_id=venta.id %}" novalidate>
+        {% csrf_token %}
+
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label">Tipo de comprobante</label>
+            {{ form.tipo }}
+            {% if form.tipo.errors %}
+              <div class="invalid-feedback d-block">{{ form.tipo.errors.0 }}</div>
+            {% endif %}
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label">Punto de venta</label>
+            {{ form.punto_venta }}
+            <div class="form-text">Numérico (hasta 4 dígitos). Ej.: 1, 12, 1001.</div>
+            {% if form.punto_venta.errors %}
+              <div class="invalid-feedback d-block">{{ form.punto_venta.errors.0 }}</div>
+            {% endif %}
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label">Cliente de facturación (opcional)</label>
+            {{ form.cliente_facturacion }}
+            <div class="form-text">Usar un perfil alternativo si difiere del cliente operativo.</div>
+            {% if form.cliente_facturacion.errors %}
+              <div class="invalid-feedback d-block">{{ form.cliente_facturacion.errors.0 }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="small text-body-secondary">
+            Al emitir se generará un número único por sucursal y tipo, y un archivo imprimible.
+          </div>
+
+          <!-- Botón que abre modal de confirmación -->
+          {% if puede_emitir %}
+            <button type="button"
+                    class="btn btn-primary"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modal-confirmar-emision">
+              <i class="bi bi-check2-circle"></i> Emitir comprobante
+            </button>
+          {% else %}
+            <button type="button" class="btn btn-primary" disabled>
+              <i class="bi bi-check2-circle"></i> Emitir comprobante
+            </button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de confirmación (sin confirm() nativo) -->
+  <div class="modal fade" id="modal-confirmar-emision" tabindex="-1" aria-labelledby="modal-confirmar-emision-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-6" id="modal-confirmar-emision-label">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            Confirmar emisión
+          </h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2">Se asignará un número único y se guardará un snapshot inmutable de la venta.</p>
+          <p class="mb-0"><strong>Esta acción no se puede deshacer.</strong></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            Cancelar
+          </button>
+          <!-- Envía el formulario principal sin JS extra -->
+          <button type="submit" class="btn btn-primary" form="emit-form">
+            <i class="bi bi-check2-circle"></i> Confirmar y emitir
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

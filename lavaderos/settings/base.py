@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "apps.pricing",
     "apps.sales",
     "apps.payments",
+    "apps.invoicing",
+    "apps.app_log",
 ]
 
 SITE_ID = 1  # requerido por allauth
@@ -56,6 +58,9 @@ MIDDLEWARE = [
     "lavaderos.middleware.TenancyMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "apps.app_log.middleware.RequestIDMiddleware",
+    "apps.app_log.middleware.RequestLogMiddleware",
+    "apps.app_log.middleware.AppLogExceptionMiddleware",
 ]
 
 ROOT_URLCONF = "lavaderos.urls"  # ajusta al nombre real de tu módulo de URLs raíz
@@ -169,20 +174,98 @@ EMAIL_SUBJECT_PREFIX = "[Lavadero] "
 # -------------------------------------------------------------------
 # LOGGING (común y simple; ajustá según tus necesidades)
 # -------------------------------------------------------------------
+# settings.py
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {"format": "[{levelname}] {asctime} {name}: {message}", "style": "{"},
-        "simple": {"format": "[{levelname}] {message}", "style": "{"},
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
+
+    "filters": {
+        "request_context": {
+            "()": "apps.app_log.logging_filters.RequestContextFilter",
         },
     },
-    "root": {"handlers": ["console"], "level": "INFO"},
+
+    "formatters": {
+        # Línea compacta y legible, ideal para debug y grep
+        "per_user_line": {
+            "format": (
+                "%(asctime)s %(levelname)s "
+                "user=%(username)s empresa=%(empresa_id)s req=%(request_id)s "
+                "%(message)s"
+            ),
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+        # Para access log detallado (si querés separar)
+        "per_user_access": {
+            "format": (
+                "%(asctime)s %(levelname)s "
+                "user=%(username)s empresa=%(empresa_id)s req=%(request_id)s "
+                "method=%(method)s path=%(path)s status=%(status)s ms=%(duration_ms)s "
+                "%(message)s"
+            ),
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+        "applog_db": {  # sigue guardando en la BD
+            "level": "INFO",
+            "class": "apps.app_log.logging_handler.AppLogDBHandler",
+        },
+        # NUEVO: escribe .log por usuario y día
+        "per_user_daily_file": {
+            "level": "INFO",
+            "class": "apps.app_log.file_handler.PerUserDailyFileHandler",
+            "filters": ["request_context"],
+            "formatter": "per_user_line",   # o "per_user_access" si preferís
+            # carpeta base (podés poner ruta absoluta)
+            "base_dir": "logs",
+        },
+    },
+
+    "loggers": {
+        "django.request": {
+            "handlers": ["console", "applog_db", "per_user_daily_file"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "apps": {
+            "handlers": ["console", "applog_db", "per_user_daily_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.access": {             # <--- NUEVO
+            "handlers": ["per_user_daily_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps.audit": {              # <--- NUEVO
+            "handlers": ["per_user_daily_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+
 }
 
+
 SAAS_MAX_EMPRESAS_POR_USUARIO = 1
+
+
+AUDIT_TRACKED_MODELS = [
+    "sales.Venta",
+    "payments.Pago",
+    "vehicles.Vehiculo",
+    "catalog.Servicio",
+
+    # Agregá aquí todos los que quieras auditar
+]
+
+# Campos que NO queremos incluir en diffs/snapshots (ruido o sensibles).
+AUDIT_EXCLUDE_FIELDS = [
+    "id",
+    "creado_en", "actualizado_en",
+    "created_at", "updated_at",
+    # agregar otros si son ruidosos (ej. timestamps automáticos)
+]

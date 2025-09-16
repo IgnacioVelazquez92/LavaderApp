@@ -1,0 +1,155 @@
+{# apps/invoicing/templates/invoicing/_invoice_print.html #}
+{% load static %}
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ snapshot.comprobante.tipo }} {{ snapshot.comprobante.numero }}</title>
+    <link rel="stylesheet" href="{% static 'css/bootswatch/brite.min.css' %}">
+  </head>
+  <body class="bg-white">
+    <div class="container py-4">
+
+      <!-- Encabezado -->
+      <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+          <h1 class="h4 mb-1">{{ snapshot.empresa.nombre }}</h1>
+          <div class="small text-body-secondary">
+            Sucursal: {{ snapshot.sucursal.nombre }}
+            <span class="ms-2">PV: {{ snapshot.sucursal.punto_venta }}</span>
+          </div>
+        </div>
+        <div class="text-end">
+          {% if snapshot.comprobante.tipo == 'REMITO' %}
+            <div class="h4 mb-0">REMITO</div>
+          {% else %}
+            <div class="h4 mb-0">COMPROBANTE</div>
+          {% endif %}
+          <div class="text-monospace">{{ snapshot.comprobante.numero }}</div>
+          <div class="small text-body-secondary">
+            Emitido: {{ snapshot.comprobante.emitido_en }}
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-3">
+
+      <!-- Datos del cliente y venta -->
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6">
+          <div class="small text-body-secondary">Cliente</div>
+          <div class="fw-semibold">
+            {{ snapshot.cliente.nombre }} {{ snapshot.cliente.apellido }}
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-body-secondary">Venta</div>
+          <div class="text-monospace">{{ snapshot.venta.id }}</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-body-secondary">Vehículo</div>
+          <div>
+            {{ snapshot.vehiculo.patente }}
+            {% if snapshot.vehiculo.tipo %}
+              <span class="text-body-secondary">· {{ snapshot.vehiculo.tipo }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-body-secondary">Moneda</div>
+          <div>{{ snapshot.comprobante.moneda }}</div>
+        </div>
+      </div>
+
+      <!-- Tabla de ítems -->
+      <div class="table-responsive mb-3">
+        <table class="table table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Descripción</th>
+              <th scope="col" class="text-end">Precio</th>
+              <th scope="col" class="text-end">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in snapshot.items %}
+              <tr>
+                <td class="text-break">{{ it.servicio_nombre }}</td>
+                <td class="text-end">{{ it.precio_unitario }}</td>
+                <td class="text-end">{{ it.subtotal }}</td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="3" class="text-center text-body-secondary py-4">
+                  Sin ítems.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row" class="text-end" colspan="2">Subtotal</th>
+              <td class="text-end">{{ snapshot.venta.subtotal }}</td>
+            </tr>
+            <tr>
+              <th scope="row" class="text-end" colspan="2">Propina</th>
+              <td class="text-end">{{ snapshot.venta.propina }}</td>
+            </tr>
+            <tr>
+              <th scope="row" class="text-end" colspan="2">Descuento</th>
+              <td class="text-end">{{ snapshot.venta.descuento }}</td>
+            </tr>
+            <tr class="table-light">
+              <th scope="row" class="text-end" colspan="2">Total</th>
+              <td class="text-end fw-semibold">{{ snapshot.venta.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Observaciones -->
+      {% if snapshot.venta.notas %}
+        <div class="mb-3">
+          <div class="small text-body-secondary">Observaciones</div>
+          <div class="text-break">{{ snapshot.venta.notas }}</div>
+        </div>
+      {% endif %}
+
+      <!-- Firmas (solo para Remito) -->
+      {% if snapshot.comprobante.tipo == 'REMITO' %}
+        <div class="row g-4 my-4">
+          <div class="col-12 col-md-6">
+            <div class="border rounded p-3">
+              <div class="small text-body-secondary mb-5">Entregué conforme</div>
+              <div class="border-top pt-2 text-center">Firma y Aclaración</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-6">
+            <div class="border rounded p-3">
+              <div class="small text-body-secondary mb-5">Recibí conforme</div>
+              <div class="border-top pt-2 text-center">Firma y Aclaración</div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- Leyenda -->
+      <div class="alert alert-warning small d-flex align-items-center" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        {{ snapshot.leyendas.no_fiscal }}
+      </div>
+
+      <!-- Pie -->
+      <div class="d-flex justify-content-between small text-body-secondary mt-4">
+        <div>
+          Documento generado por LavaderosApp — {{ snapshot.empresa.nombre }}
+        </div>
+        <div>
+          {{ snapshot.comprobante.tipo }} · {{ snapshot.comprobante.numero }}
+        </div>
+      </div>
+
+    </div>
+  </body>
+</html>

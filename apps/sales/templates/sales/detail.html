@@ -17,25 +17,28 @@
   <!-- Header -->
   <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
     <h1 class="h4 mb-0">Venta</h1>
-    <div class="d-flex gap-2">
-      <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Volver al listado</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
 
-      {# Acciones por estado con MODALES #}
-      {% if venta.estado == "en_proceso" %}
+      {# CTA: Finalizar trabajo (FSM lo permite) con modal #}
+      {% if puede_finalizar_trabajo %}
         <button type="button"
                 class="btn btn-success"
                 data-bs-toggle="modal"
                 data-bs-target="#finalizeVentaModal{{ venta.pk }}">
-          Finalizar
+          <i class="bi bi-flag-checkered"></i> Finalizar trabajo
         </button>
       {% endif %}
 
-      {% if venta.estado in "borrador,en_proceso,terminado" %}
+      {# CTA: Cancelar (permitido en estados no finales) con modal #}
+      {% if venta.estado == "borrador" or venta.estado == "en_proceso" or venta.estado == "terminado" %}
         <button type="button"
                 class="btn btn-outline-danger"
                 data-bs-toggle="modal"
                 data-bs-target="#cancelVentaModal{{ venta.pk }}">
-          Cancelar
+          <i class="bi bi-x-circle"></i> Cancelar
         </button>
       {% endif %}
     </div>
@@ -51,7 +54,7 @@
               <span class="text-muted">ID:</span>
               <code class="small">{{ venta.pk }}</code>
             </div>
-            <div>
+            <div class="d-flex gap-2">
               {% if venta.estado == "borrador" %}
                 <span class="badge text-bg-secondary">Borrador</span>
               {% elif venta.estado == "en_proceso" %}
@@ -64,6 +67,12 @@
                 <span class="badge text-bg-danger">Cancelado</span>
               {% else %}
                 <span class="badge text-bg-light">—</span>
+              {% endif %}
+
+              {% if venta.saldo_pendiente == 0 %}
+                <span class="badge text-bg-success">Saldo cubierto</span>
+              {% else %}
+                <span class="badge text-bg-secondary">Saldo pendiente</span>
               {% endif %}
             </div>
           </div>
@@ -98,9 +107,49 @@
       </div>
     </div>
 
-    <!-- Resumen -->
+    <!-- Columna derecha: resumen + comprobante -->
     <div class="col-12 col-lg-4">
       {% include "sales/_summary_card.html" with venta=venta %}
+
+      <!-- Card Comprobante -->
+      <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span class="fw-semibold"><i class="bi bi-receipt me-1"></i> Comprobante</span>
+          {% if venta_pagada %}
+            <span class="badge text-bg-success">Venta pagada</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Pendiente de pago</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          {% if puede_emitir_comprobante %}
+            <div class="alert alert-info d-flex align-items-center" role="alert">
+              <i class="bi bi-info-circle-fill me-2"></i>
+              La venta está pagada. Podés emitir el comprobante/remito.
+            </div>
+            <div class="d-grid">
+              <a class="btn btn-primary" href="{% url 'invoicing:emit' venta_id=venta.id %}">
+                <i class="bi bi-check2-circle"></i> Emitir comprobante
+              </a>
+            </div>
+          {% elif tiene_comprobante %}
+            <div class="d-grid gap-2">
+              <a class="btn btn-outline-primary" href="{% url 'invoicing:detail' pk=comprobante_id %}">
+                <i class="bi bi-eye"></i> Ver comprobante
+              </a>
+              <a class="btn btn-primary" href="{% url 'invoicing:download' pk=comprobante_id %}">
+                <i class="bi bi-download"></i> Descargar
+              </a>
+            </div>
+          {% else %}
+            <div class="alert alert-secondary mb-0">
+              No hay comprobante emitido.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+      <!-- /Card Comprobante -->
+
     </div>
   </div>
 
@@ -117,22 +166,21 @@
           {% endif %}
         </div>
         <div class="card-body">
-
           <div class="table-responsive">
             <table class="table table-sm align-middle">
               <thead class="table-light">
                 <tr>
                   <th>Servicio</th>
-                  <th class="text-end" style="width:140px">Subtotal</th>
-                  <th class="text-end" style="width:120px">Acciones</th>
+                  <th class="text-end">Subtotal</th>
+                  <th class="text-end">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {% for item in venta.items.all %}
+                {% for item in venta_items %}
                   {% include "sales/_item_row.html" with item=item venta=venta %}
                 {% empty %}
                   <tr>
-                    <td colspan="5">
+                    <td colspan="3">
                       <div class="alert alert-info mb-0">Aún no hay ítems.</div>
                     </td>
                   </tr>
@@ -140,7 +188,6 @@
               </tbody>
             </table>
           </div>
-
         </div>
       </div>
     </div>
@@ -152,6 +199,7 @@
         <div class="card-body">
           {% if venta.estado == "borrador" or venta.estado == "en_proceso" %}
 
+            {# No llamamos métodos en template; solo chequeamos choices ya armadas por el form #}
             {% if services_form.fields.servicios.choices %}
               <form method="post" action="{% url 'sales:item_add' pk=venta.pk %}" novalidate>
                 {% csrf_token %}
@@ -176,7 +224,9 @@
                 {% endif %}
 
                 <div class="d-grid mt-3">
-                  <button type="submit" class="btn btn-primary">Agregar</button>
+                  <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Agregar
+                  </button>
                 </div>
               </form>
             {% else %}
@@ -203,14 +253,14 @@
         <div class="card-header d-flex justify-content-between align-items-center">
           <span class="fw-semibold">Pagos</span>
           <a href="{% url 'payments:create' venta_id=venta.pk %}" class="btn btn-sm btn-primary">
-            Registrar pago
+            <i class="bi bi-cash-coin"></i> Registrar pago
           </a>
         </div>
         <div class="card-body">
-          {% if venta.pagos.all %}
+          {% if pagos %}
             <div class="table-responsive">
               <table class="table table-sm table-striped align-middle">
-                <thead>
+                <thead class="table-light">
                   <tr>
                     <th>Fecha</th>
                     <th>Método</th>
@@ -220,14 +270,14 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for pago in venta.pagos.all %}
+                  {% for pago in pagos %}
                     <tr>
                       <td>{{ pago.creado_en|date:"d/m/Y H:i" }}</td>
                       <td>{{ pago.medio }}</td>
                       <td class="text-end">${{ pago.monto }}</td>
                       <td>
                         {% if pago.es_propina %}
-                          <span class="badge bg-info">Sí</span>
+                          <span class="badge text-bg-info">Sí</span>
                         {% else %}
                           <span class="text-muted">—</span>
                         {% endif %}
@@ -249,14 +299,14 @@
   </div>
 
   <!-- ===== Modales de acciones de la venta ===== -->
-  {% if venta.estado == "en_proceso" %}
-    <!-- Modal Finalizar venta -->
+  {% if puede_finalizar_trabajo %}
+    <!-- Modal Finalizar trabajo -->
     <div class="modal fade" id="finalizeVentaModal{{ venta.pk }}" tabindex="-1"
          aria-labelledby="finalizeVentaModalLabel{{ venta.pk }}" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title" id="finalizeVentaModalLabel{{ venta.pk }}">Finalizar venta</h5>
+            <h5 class="modal-title" id="finalizeVentaModalLabel{{ venta.pk }}">Finalizar trabajo</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
           </div>
           <div class="modal-body">
@@ -272,7 +322,7 @@
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
             <form method="post" action="{% url 'sales:finalize' pk=venta.pk %}">
               {% csrf_token %}
-              <button type="submit" class="btn btn-success">Finalizar</button>
+              <button type="submit" class="btn btn-success">Finalizar trabajo</button>
             </form>
           </div>
         </div>
@@ -280,7 +330,7 @@
     </div>
   {% endif %}
 
-  {% if venta.estado in "borrador,en_proceso,terminado" %}
+  {% if venta.estado == "borrador" or venta.estado == "en_proceso" or venta.estado == "terminado" %}
     <!-- Modal Cancelar venta -->
     <div class="modal fade" id="cancelVentaModal{{ venta.pk }}" tabindex="-1"
          aria-labelledby="cancelVentaModalLabel{{ venta.pk }}" aria-hidden="true">
