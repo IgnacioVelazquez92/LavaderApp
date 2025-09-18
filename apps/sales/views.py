@@ -386,11 +386,10 @@ class CancelarVentaView(LoginRequiredMixin, View):
     """
 
     def post(self, request, pk):
-        venta = get_object_or_404(
-            Venta, pk=pk, empresa=request.empresa_activa
-        )
+        venta = get_object_or_404(Venta, pk=pk, empresa=request.empresa_activa)
         try:
-            lifecycle_services.on_cancelar(venta)
+            venta = sales_services.cancelar_venta(venta=venta)  # ← sin actor
+            venta.refresh_from_db()  # validación inmediata
             messages.success(request, "Venta cancelada.")
         except Exception as e:
             messages.error(request, f"No se pudo cancelar: {e}")

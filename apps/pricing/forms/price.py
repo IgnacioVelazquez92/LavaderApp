@@ -7,6 +7,10 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from ..models import PrecioServicio, Moneda
+# ⬇️ importa los modelos referenciados para filtrar por empresa
+from apps.org.models import Sucursal
+from apps.catalog.models import Servicio
+from apps.vehicles.models import TipoVehiculo
 
 
 class PriceForm(forms.ModelForm):
@@ -24,55 +28,53 @@ class PriceForm(forms.ModelForm):
         )
 
     def __init__(self, *args: Any, empresa=None, **kwargs: Any) -> None:
-        """
-        - Aplica clases Bootstrap a TODOS los widgets.
-        - Filtra los queryset por empresa activa (multi-tenant).
-        - Establece valores por defecto sensatos.
-        """
         super().__init__(*args, **kwargs)
 
-        # Asegurá que la instancia ya tenga empresa para validaciones
+        # Guarda el contexto de empresa y setéalo en la instancia para validaciones/save
+        self._empresa_ctx = empresa
         if empresa is not None:
             self.instance.empresa = empresa
 
-        # Bootstrap 5: clases por defecto
+        # Bootstrap 5
         for name, field in self.fields.items():
-            widget = field.widget
-            if isinstance(widget, forms.CheckboxInput):
-                widget.attrs.update({"class": "form-check-input"})
-            elif isinstance(widget, (forms.Select, forms.SelectMultiple)):
-                widget.attrs.update({"class": "form-select"})
+            w = field.widget
+            if isinstance(w, forms.CheckboxInput):
+                w.attrs.update({"class": "form-check-input"})
+            elif isinstance(w, (forms.Select, forms.SelectMultiple)):
+                w.attrs.update({"class": "form-select"})
             else:
-                widget.attrs.update({"class": "form-control"})
+                w.attrs.update({"class": "form-control"})
 
-        # ✅ Forzar calendario nativo HTML5 en fechas
+        # Calendario HTML5
         for fname in ("vigencia_inicio", "vigencia_fin"):
             if fname in self.fields:
                 w = self.fields[fname].widget
-                # tipo de input = date (calendario)
                 w.input_type = "date"
-                # formateo consistente con HTML5
                 if hasattr(w, "format"):
                     w.format = "%Y-%m-%d"
-                # opcional: placeholder limpio cuando no hay valor
                 w.attrs.setdefault("placeholder", "")
 
-        # Placeholders/ayudas mínimas
         self.fields["precio"].widget.attrs.setdefault("placeholder", "0,00")
 
-        # Defaults
         if not self.initial.get("vigencia_inicio"):
             self.initial["vigencia_inicio"] = timezone.localdate()
 
-        self._empresa_ctx = empresa
+        # ⬇️ FILTROS MULTI-TENANT (clave del bug)
+        if empresa is not None:
+            # Si tenés flag de activo en estos modelos, podés sumar activo=True
+            self.fields["sucursal"].queryset = (
+                Sucursal.objects.filter(empresa=empresa).order_by("nombre")
+            )
+            self.fields["servicio"].queryset = (
+                Servicio.objects.filter(
+                    empresa=empresa, activo=True).order_by("nombre")
+            )
+            self.fields["tipo_vehiculo"].queryset = (
+                TipoVehiculo.objects.filter(
+                    empresa=empresa, activo=True).order_by("nombre")
+            )
 
     def clean(self):
-        """
-        Validaciones extra a nivel form:
-          - coherencia de fechas (fin >= inicio si fin existe),
-          - evita iguales exactos a uno ya existente (ayuda al UX antes del constraint),
-          - chequeo ligero de “abierto activo” para dar error claro.
-        """
         cleaned = super().clean()
 
         ini = cleaned.get("vigencia_inicio")
@@ -87,10 +89,26 @@ class PriceForm(forms.ModelForm):
         servicio = cleaned.get("servicio")
         tipo = cleaned.get("tipo_vehiculo")
 
+        # ⬇️ COHERENCIA DE EMPRESA (defensa en profundidad)
+        if empresa:
+            if sucursal and getattr(sucursal, "empresa_id", None) != empresa.id:
+                self.add_error(
+                    "sucursal", "La sucursal no pertenece a la empresa activa.")
+            if servicio and getattr(servicio, "empresa_id", None) != empresa.id:
+                self.add_error(
+                    "servicio", "El servicio no pertenece a la empresa activa.")
+            if tipo and getattr(tipo, "empresa_id", None) != empresa.id:
+                self.add_error(
+                    "tipo_vehiculo", "El tipo de vehículo no pertenece a la empresa activa.")
+
+        # Ayuda previa contra duplicados exactos en misma fecha de inicio
         if empresa and sucursal and servicio and tipo and ini:
-            # Ayuda previa: si ya existe la misma combinación con el mismo inicio
             qs = PrecioServicio.objects.filter(
-                empresa=empresa, sucursal=sucursal, servicio=servicio, tipo_vehiculo=tipo, vigencia_inicio=ini
+                empresa=empresa,
+                sucursal=sucursal,
+                servicio=servicio,
+                tipo_vehiculo=tipo,
+                vigencia_inicio=ini,
             )
             if self.instance.pk:
                 qs = qs.exclude(pk=self.instance.pk)
@@ -101,9 +119,6 @@ class PriceForm(forms.ModelForm):
         return cleaned
 
     def save(self, commit=True):
-        """
-        Asigna la empresa activa en la instancia antes de persistir.
-        """
         obj: PrecioServicio = super().save(commit=False)
         if self._empresa_ctx is not None:
             obj.empresa = self._empresa_ctx

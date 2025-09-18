@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 from django import forms
-
 from apps.payments.models import MedioPago
 
 
@@ -22,17 +21,29 @@ class PaymentForm(forms.Form):
 
     def __init__(self, *args, empresa=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.empresa = empresa  # ← conservar empresa para clean_*
         if empresa:
-            self.fields["medio"].queryset = MedioPago.objects.filter(
-                empresa=empresa, activo=True)
+            self.fields["medio"].queryset = (
+                MedioPago.objects.filter(
+                    empresa=empresa, activo=True).order_by("nombre")
+            )
 
-        # Clases Bootstrap
+        # Bootstrap
         for name, field in self.fields.items():
-            if isinstance(field.widget, (forms.TextInput, forms.NumberInput, forms.Textarea, forms.Select)):
-                field.widget.attrs.update({"class": "form-control"})
-        self.fields["es_propina"].widget.attrs.update(
-            {"class": "form-check-input"})
-        self.fields["medio"].widget.attrs.update({"class": "form-select"})
+            w = field.widget
+            if isinstance(w, forms.CheckboxInput):
+                w.attrs.update({"class": "form-check-input"})
+            elif isinstance(w, (forms.Select,)):
+                w.attrs.update({"class": "form-select"})
+            else:
+                w.attrs.update({"class": "form-control"})
+
+    def clean_medio(self):
+        medio = self.cleaned_data.get("medio")
+        if self.empresa and medio and medio.empresa_id != self.empresa.id:
+            raise forms.ValidationError(
+                "El medio de pago no pertenece a la empresa activa.")
+        return medio
 
     def clean_es_propina(self):
         return bool(self.cleaned_data.get("es_propina", False))

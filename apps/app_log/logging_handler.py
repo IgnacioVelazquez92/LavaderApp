@@ -9,41 +9,51 @@ import logging
 
 
 class AppLogDBHandler(logging.Handler):
+    """
+    Handler que envía logs Python/Django a AppLog (BD).
+    Copia atributos del record incluidos por RequestContextFilter y por 'extra'.
+    Tolera arranque sin apps ready ni tablas.
+    """
+
     def emit(self, record: logging.LogRecord):
         try:
-            # Import perezoso: evita cargar models/servicios antes de tiempo
-            from django.core.exceptions import ImproperlyConfigured
             from django.apps import apps
             if not apps.ready:
-                return  # Aún no está listo el registry → no logueamos a DB
-
-            # Import acá dentro para no romper la configuración temprana
+                return
             from .services.logger import log_event
 
             level = (record.levelname or "INFO").lower()
             msg = self.format(
                 record) if self.formatter else record.getMessage()
+
+            # Meta base
             meta = {
                 "logger": record.name,
-                "pathname": record.pathname,
-                "lineno": record.lineno,
-                "funcName": record.funcName,
-                "exc_text": record.exc_text,
+                "pathname": getattr(record, "pathname", None),
+                "lineno": getattr(record, "lineno", None),
+                "funcName": getattr(record, "funcName", None),
+                "exc_text": getattr(record, "exc_text", None),
             }
 
-            # Intentá guardar. Si la tabla no existe todavía (primer migrate), ignorá.
-            try:
-                log_event(
-                    nivel=level,
-                    origen=record.name,
-                    evento="django_log",
-                    mensaje=msg,
-                    meta=meta,
-                )
-            except Exception:
-                # Casos típicos: OperationalError (tabla no existe), AppRegistryNotReady, etc.
-                pass
+            # Extras enriquecidos (si existen)
+            for attr in (
+                "method", "path", "status", "duration_ms",
+                "request_id", "parent_request_id",
+                "username", "empresa_id",
+                "redirect_to", "route_name", "template_name",
+                "messages", "body_preview",
+            ):
+                val = getattr(record, attr, None)
+                if val not in (None, "-", ""):
+                    meta[attr] = val
 
+            log_event(
+                nivel=level,
+                origen=record.name,
+                evento="django_log",
+                mensaje=msg,
+                meta=meta,
+            )
         except Exception:
-            # Nunca romper el flujo de logging por errores del handler
+            # Nunca romper el flujo de logging
             pass

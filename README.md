@@ -2393,17 +2393,17 @@ apps/sales/
 │  └─ service_select.py            # ServiceSelectionForm (checkboxes de servicios vigentes)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ sales.py                     # crear_venta, finalizar, cancelar, recálculos
+│  ├─ sales.py                     # crear_venta, finalizar, cancelar, recalcular_totales, marcar_pagada
 │  ├─ items.py                     # agregar_items (multi-servicio), eliminar_item
 │  └─ lifecycle.py                 # Hooks de cambio de estado (side-effects)
 ├─ selectors.py                    # Lecturas optimizadas (listado, detalle)
 ├─ calculations.py                 # subtotal, total, propina, saldo_pendiente
-├─ fsm.py                          # borrador → en_proceso → terminado → pagado/cancelado
+├─ fsm.py                          # máquina de estados y validación de transiciones
 ├─ templates/
 │  └─ sales/
 │     ├─ list.html                 # Listado + filtros (estado/sucursal) + modales
 │     ├─ create.html               # Crear: (GET) cliente/vehículo → (POST) servicios
-│     ├─ detail.html               # Detalle: ítems, totales, acciones + modales
+│     ├─ detail.html               # Detalle: ítems, totales, pagos, comprobante + acciones
 │     ├─ _item_row.html            # Fila de ítem con modal de eliminación
 │     └─ _summary_card.html        # Tarjeta de totales
 ├─ static/
@@ -2415,8 +2415,9 @@ apps/sales/
 
 **Diferencias vs. diseño inicial**
 
-- Se **elimina** el concepto de **cantidades** por ítem. Cada servicio se agrega **una sola vez** (no “3 lavados”).
-- Se **reemplaza** `forms/item.py` por `forms/service_select.py` con **checkboxes** de servicios válidos (según **tipo de vehículo** + **sucursal activa** + **precios vigentes**).
+- **Ítems con cantidad**: `VentaItem` tiene `cantidad` y `subtotal` (propiedad = `cantidad × precio_unitario`). Se mantiene una fila por servicio (constraint único por venta+servicio) y la cantidad puede evolucionar (UI futura).
+- Se mantiene `forms/service_select.py` (checkboxes) para MVP: agrega cada servicio con cantidad 1 (la edición de cantidad se planifica).
+- **Detalle de Venta** incluye **panel de comprobante** (emisión en módulo `invoicing`) y **tabla de pagos** (módulo `payments`).
 
 ---
 
@@ -2429,7 +2430,7 @@ apps/sales/
    - **POST**: Checkboxes de **Servicios disponibles** (filtrados por tipo de vehículo + precios vigentes en la **sucursal activa**).  
      Se crea la venta en **borrador** y se redirige al **detalle**.
 
-2. **Sin cantidades**: cada ítem = un servicio. Variantes (ej. “Lavado premium”) se modelan como servicios distintos, no como cantidad.
+2. **Cantidad por ítem** (modelo): persistimos `cantidad`; en el MVP la agregación es por selección (1 c/u). La edición de cantidad se habilitará en un paso posterior.
 
 3. **Sucursal**: nunca se elige en el form. Se toma **siempre** de `request.sucursal_activa` (TenancyMiddleware).
 
@@ -2440,7 +2441,7 @@ apps/sales/
 
 5. **Bootstrap 5 limpio**:
    - Inputs con `form-select` / `form-control` desde los **forms**.
-   - Checkboxes en **grid** (`row g-2`, 2 columnas en md+).
+   - Checkboxes en **grid** (`row g-2`).
    - **Modales** Bootstrap para confirmar **Finalizar**, **Cancelar** y **Eliminar ítem** (con `bi-exclamation-triangle-fill`).
    - `text-break` en notas para evitar overflow/scroll horizontal.
 
@@ -2456,9 +2457,10 @@ apps/sales/
   - `subtotal`, `propina`, `descuento`, `total`, `saldo_pendiente`
   - `notas`, `creado_por`, `creado/actualizado`
 - **VentaItem**
-  - `venta` (FK), `servicio` (FK)
+  - `venta` (FK), `servicio` (FK, único por venta)
+  - **`cantidad`** (entero ≥ 1; en MVP se crea en 1)
   - `precio_unitario` (cache del resolver al agregar)
-  - `subtotal` (= `precio_unitario`)
+  - **`subtotal`** (propiedad = `cantidad × precio_unitario`)
 
 **Cálculo de totales**: cada mutación llama a `calculations.py`.  
 **FSM** en `fsm.py` controla las transiciones y bloqueos de edición.
@@ -2472,7 +2474,10 @@ stateDiagram-v2
     [*] --> borrador
     borrador --> en_proceso: iniciar trabajo (opcional)
     en_proceso --> terminado: finalizar
-    terminado --> pagado: pagos = total
+    %% Pago completo puede ocurrir desde estados no finales
+    borrador --> pagado: saldo=0
+    en_proceso --> pagado: saldo=0
+    terminado --> pagado: saldo=0
     borrador --> cancelado: cancelar
     en_proceso --> cancelado: cancelar
     terminado --> cancelado: cancelar (reglas)
@@ -2480,7 +2485,8 @@ stateDiagram-v2
     cancelado --> [*]
 ```
 
-> La edición de ítems está **permitida** en `borrador` y `en_proceso`, y **bloqueada** desde `terminado`.
+> **Regla operativa actual:** cuando el **saldo llega a 0**, la venta pasa a **`pagado`** aunque esté en `borrador` o `en_proceso` (no se permite si está `cancelado`). Luego, los lavacoches pueden marcar **`terminado`** para notificar.  
+> La **edición de ítems** está **permitida** en `borrador` y `en_proceso`, y **bloqueada** desde `terminado`.
 
 ---
 
@@ -2509,20 +2515,22 @@ stateDiagram-v2
 
 - `crear_venta(empresa, sucursal, cliente, vehiculo, creado_por, notas="")`
   - Valida tenant + relación cliente/vehículo. Estado inicial `borrador`.
-- `finalizar(venta, actor)` / `cancelar(venta, actor)`
+- `finalizar_venta(venta)` / `cancelar_venta(venta)`
   - Validan transición vía `fsm.py` y aplican `lifecycle` si corresponde.
 - `recalcular_totales(venta)`
-  - Suma `items.subtotal` y actualiza `total`/`saldo_pendiente`.
+  - Suma `items.subtotal` y actualiza `subtotal/total/saldo_pendiente`.
+- **`marcar_pagada(venta)`**
+  - Marca `estado="pagado"` desde cualquier estado **no cancelado** (acorde al circuito operativo).
 
 ### 6.2 `services/items.py`
 
 - `agregar_items(venta, servicios_ids, actor)`
-  - Por cada servicio, resuelve **precio vigente** con `pricing.services.resolver.get_precio_vigente(empresa, sucursal, servicio, tipo_vehiculo, fecha)` y crea `VentaItem` (cachea `precio_unitario`).
+  - Por cada servicio, resuelve **precio vigente** con `pricing.services.resolver.get_precio_vigente(empresa, sucursal, servicio, tipo_vehiculo, fecha)` y crea `VentaItem` (cachea `precio_unitario`, `cantidad=1`).
   - Recalcula totales.
 - `eliminar_item(venta, item, actor)`
   - Borra ítem si el estado permite y recalcula totales.
 
-**Nota de bug resuelto:** parámetro correcto en resolver = `tipo_vehiculo` (no `tipo`).
+**Nota**: el parámetro del resolver es **`tipo_vehiculo`** (no `tipo`).
 
 ---
 
@@ -2534,11 +2542,11 @@ stateDiagram-v2
 - **`VentaCreateView`**
 
   - **GET**: muestra `VentaForm` con selects (cliente → vehículo). Auto-submit `onchange`.
-  - **Context**: `cliente_seleccionado`, `vehiculo_seleccionado`, `services_form` y `crear_habilitado` (evita lógica compleja en `{% if %}`).
+  - **Context**: `cliente_seleccionado`, `vehiculo_seleccionado`, `services_form` y `crear_habilitado`.
   - **POST**: recibe `cliente`, `vehiculo`, `servicios[]`. Toma `sucursal = request.sucursal_activa`. Crea venta + ítems → redirect a **detail**.
 
 - **`VentaDetailView`**  
-  Meta de la venta, **\_summary_card**, tabla de ítems (cada fila incluye modal **Eliminar ítem**), panel **Agregar servicios** (checkboxes) si estado permite, y modales **Finalizar / Cancelar**.
+  Meta de la venta, **\_summary_card**, tabla de ítems, panel **Agregar servicios**, **tabla de pagos**, y **panel de comprobante** (si `pagado`, permite emitir). Modales **Finalizar / Cancelar**.
 
 - **Acciones**
   - `AgregarItemView` (POST multi-servicio)
@@ -2565,7 +2573,7 @@ POST /ventas/<uuid:pk>/finalizar/      name="sales:finalize"
 POST /ventas/<uuid:pk>/cancelar/       name="sales:cancel"
 ```
 
-> En templates, los atajos externos usan los nombres **reales**: `customers:create` y `vehicles:new` (según `apps.customers.urls` y `apps.vehicles.urls`).
+> En templates, los atajos externos usan los **names reales**: `customers:create` y `vehicles:new`.
 
 ---
 
@@ -2573,26 +2581,27 @@ POST /ventas/<uuid:pk>/cancelar/       name="sales:cancel"
 
 - **`create.html`**
   - **Paso 1 (GET)**: selects de **Cliente** / **Vehículo** (filtrado). Links a crear cliente / agregar vehículo con `next`. Auto-submit simple.
-  - **Paso 2 (POST)**: checkboxes de **Servicios** (2 columnas). Botón **Crear venta** deshabilitado hasta tener datos válidos.
+  - **Paso 2 (POST)**: checkboxes de **Servicios**. Botón **Crear venta** deshabilitado hasta tener datos válidos.
 - **`detail.html`**
-  - Encabezado con **badges** de estado. Meta de venta. **\_summary_card** de totales (`list-group`).
-  - Tabla de ítems; cada fila incluye **modal Eliminar** con ícono.
-  - Panel **Agregar servicios** con checkboxes.
-  - Botones **Finalizar / Cancelar** con **modales**.
+  - Encabezado con **badges** de estado. Meta de venta. **\_summary_card** de totales.
+  - Tabla de **ítems**; cada fila incluye **modal Eliminar**.
+  - Panel **Agregar servicios** (checkboxes).
+  - **Pagos**: tabla con método, monto, propina, referencia + botón “Registrar pago”.
+  - **Comprobante**: si `pagado` y sin comprobante → CTA “Emitir”; si existe → **Ver / Descargar**.
 - **`list.html`**
-  - Filtros (estado/sucursal) y tabla responsive. Acciones rápidas (Ver, **Finalizar**, **Cancelar**) con modales por fila (IDs únicos).
+  - Filtros (estado/sucursal) y tabla responsive. Acciones rápidas (Ver, **Finalizar**, **Cancelar**) con modales por fila.
 - **`_item_row.html`**
-  - Fila simplificada: Servicio / Subtotal / Acciones. Modal de confirmación con `bi-exclamation-triangle-fill`.
+  - Fila: Servicio / Subtotal / Acciones. Modal de confirmación con `bi-exclamation-triangle-fill`.
 - **`_summary_card.html`**
-  - Tarjeta compacta con subtotal, (opcional) propina/descuento, total y saldo.
+  - Tarjeta compacta con subtotal, descuento, propina, total y saldo.
 
-> Convenciones respetadas: **sin lógica compleja** en templates; **Bootstrap utilities**; **mensajes** via `django.contrib.messages`.
+> Reglas duras de templates: sin lógica compleja ni `.get()` en HTML; clases Bootstrap desde los Forms; URLs por **namespace:name**; **modales** para confirmaciones (nunca `confirm()`).
 
 ---
 
 ## 10) Seguridad / Tenancy
 
-- Vistas con **login** requerido y membresía a la **empresa activa**.
+- Vistas con **login** requerido y membresía en la **empresa activa**.
 - **Sucursal** tomada de la **sesión** (no desde form).
 - Edición solo en `borrador` / `en_proceso`; bloqueo a partir de `terminado`.
 - Lecturas/acciones validan que la **venta** pertenece a la **empresa activa**.
@@ -2602,20 +2611,21 @@ POST /ventas/<uuid:pk>/cancelar/       name="sales:cancel"
 ## 11) Integraciones
 
 - **pricing**: resolver de precio vigente para `(sucursal, servicio, tipo_vehículo, fecha=hoy)`.
-- **payments**: al registrar pagos, actualizar `saldo_pendiente` y si llega a 0 → transición a **`pagado`** (`lifecycle`).
-- **invoicing**: emisión de comprobante al pasar a `pagado`.
-- **notifications**: aviso “listo para retirar” al finalizar.
-- **cashbox**: cierres por período con totales de ventas/pagos.
+- **payments**: al registrar pagos, actualizar `saldo_pendiente` y **si llega a 0 → `marcar_pagada()`** (aunque esté en `borrador`/`en_proceso`; no si está `cancelado`).
+- **invoicing**: emisión de comprobante cuando la venta está **`pagado`** (número por sucursal y tipo; snapshot de la venta).
+- **notifications**: aviso “listo para retirar” al pasar a **`terminado`**.
+- **cashbox**: cierres por período con totales de ventas/pagos (propinas separadas).
 
 ---
 
 ## 12) Errores zanjados / Lecciones
 
-- `NoReverseMatch` por nombres inconsistentes → se corrigieron los `url` con los **names reales** (`customers:create`, `vehicles:new`).
-- `TemplateSyntaxError` por paréntesis en `{% if %}` → se movió la lógica a la **vista** (flag `crear_habilitado`).
-- Error en resolver de precio: `tipo` → **`tipo_vehiculo`**.
-- Vehículos de otros clientes en el form → `vehiculo` **filtrado** por cliente.
-- Sucursal listada en el form (confusión con empresa) → se quitó del form; se usa **sucursal activa** de la sesión.
+- `NoReverseMatch` por nombres inconsistentes → corregidos con **names reales**.
+- `TemplateSyntaxError` por paréntesis en `{% if %}` → lógica movida a vistas con **flags**.
+- Resolver de precio: parámetro correcto **`tipo_vehiculo`**.
+- `vehiculo` filtrado por cliente en form.
+- Sucursal se toma del **middleware** (no desde el form).
+- **Circuito ajustado**: pago completo → `pagado` sin requerir `terminado`; la **finalización** puede ocurrir luego para notificar.
 
 ---
 
@@ -2624,23 +2634,25 @@ POST /ventas/<uuid:pk>/cancelar/       name="sales:cancel"
 1. Crear cliente **A** + vehículo **A1**; cliente **B** + vehículo **B1**.
 2. Iniciar **Crear venta** → elegir **A** → el select **Vehículo** muestra **solo A1** (no B1).
 3. Link “Agregar vehículo” prellena `?cliente=A` y retorna con `next`.
-4. Con vehículo elegido, aparecen **solo** servicios con precio vigente para el **tipo** en la **sucursal activa**.
+4. Con vehículo elegido, aparecen **solo** servicios con precio vigente para el **tipo** y **sucursal activa**.
 5. Intentar crear venta **sin servicios** → botón deshabilitado / error amigable.
 6. Crear venta → estado **borrador**; en detalle se muestran ítems.
-7. Eliminar ítem → modal de confirmación + recálculo de totales.
-8. Finalizar desde **detalle** y desde **listado** → modal + bloqueo de edición.
-9. Cancelar → modal + estado actualizado.
-10. Notas largas no rompen layout (sin scroll horizontal).
+7. Registrar **pagos parciales** → `saldo_pendiente` se reduce correctamente (propina no descuenta).
+8. **Sobrepago**: el sistema ofrece registrar la **diferencia como propina** (confirmación/split).
+9. Al cubrir el saldo → estado pasa a **`pagado`** (aun si estaba en `borrador`/`en_proceso`).
+10. Finalizar → estado **`terminado`**; no permite agregar ítems.
+11. Emitir comprobante (en `invoicing`) solo cuando la venta está **`pagado`**.
+12. Notas largas no rompen layout (sin scroll horizontal).
 
 ---
 
 ## 14) Roadmap próximo
 
-1. Integrar **payments** (registrar pago → actualizar saldo/estado).
-2. Auditoría (quién/qué/cuándo sobre ítems y estados).
+1. Edición de **cantidad** por ítem desde el detalle (con recalculado instantáneo).
+2. Auditoría (quién/qué/cuándo sobre ítems, pagos y estados).
 3. Exportes (CSV) con filtros.
 4. Acciones masivas en listado (ej. cancelar borradores).
-5. KPIs en **home_dashboard** (ventas del día / en proceso).
+5. KPIs en **home_dashboard** (ventas del día / en proceso / pagadas).
 
 ---
 
@@ -2659,7 +2671,7 @@ erDiagram
     Vehiculo ||--o{ Venta    : participa
 
     Empresa { int id varchar nombre }
-    Sucursal { int id varchar nombre int empresa_id }
+    Sucursal { int id varchar nombre int empresa_id int punto_venta }
     Cliente { int id varchar nombre varchar apellido int empresa_id }
     Vehiculo { int id varchar patente int cliente_id int empresa_id int tipo_id }
     Servicio { int id varchar nombre int empresa_id }
@@ -2680,8 +2692,9 @@ erDiagram
         int id
         uuid venta_id
         int servicio_id
+        int cantidad
         decimal precio_unitario
-        decimal subtotal
+        %% subtotal se calcula (propiedad)
     }
 ```
 
@@ -2689,10 +2702,10 @@ erDiagram
 
 ## 16) Convenciones de calidad (recordatorio global)
 
-- **Templates**: sin `.as_widget(attrs=...)`; comparaciones simples; mover lógica a vista; selects muestran **nombres** (no IDs); inputs `date` desde el **Form**.
+- **Templates**: sin `.as_widget(attrs=...)`; comparaciones simples; mover lógica a vista; selects muestran **nombres** (no IDs).
 - **Forms**: clases Bootstrap se inyectan en `__init__`; en template usar `{{ field }}` + `invalid-feedback`/`form-text`.
-- **CBVs / URLs**: siempre `success_url`/redirect explícito; nombres cortos y namespaced.
-- **Mensajes**: usar `django.contrib.messages` para feedback consistente.
+- **CBVs / URLs**: `success_url`/redirect explícito; nombres cortos y namespaced.
+- **Mensajes**: `django.contrib.messages` para feedback consistente.
 - **Tenancy**: `empresa_activa` / `sucursal_activa` desde middleware; selector de sucursal en sidebar.
 
 ---
@@ -2700,292 +2713,563 @@ erDiagram
 ### Resumen ejecutivo
 
 - Flujo de creación **simple y centrado en negocio**: Cliente → Vehículo (del cliente) → Servicios válidos (según tipo + precios en sucursal activa).
-- **Sin cantidades** por ítem, coherente con la operación del lavadero.
-- **Validaciones fuertes** multi-tenant y consistencia de datos.
-- **UI cuidada** con Bootstrap 5 y modales (sin `confirm()`), sin lógica compleja en templates.
-- **FSM** clara y **totales** consistentes; lista para integrar pagos y comprobantes.
+- **Ítems con cantidad** (persistida); en MVP se agregan como 1 y se planifica UI para editar.
+- **Pagos** con idempotencia y tratamiento de **sobrepago** (diferencia como propina).
+- **Estado `pagado`** al cubrir saldo, independientemente de estar en `borrador` o `en_proceso` (no si `cancelado`).
+- **UI cuidada** con Bootstrap 5 y modales; **panel de comprobante** integrado con `invoicing`.
+- **FSM** y **totales** consistentes; integraciones con `pricing`, `payments`, `invoicing`, `notifications` y `cashbox`.
 
 # Módulo 8 — `apps/payments` (Pagos)
 
-> **Objetivo del módulo:** Registrar **pagos** para una venta (método, monto, propina), actualizar el **saldo** y, cuando corresponda, marcar la venta como **pagada**. Debe garantizar **idempotencia** básica y trazabilidad por referencias externas.
+> **Objetivo del módulo:** Registrar **pagos** para una venta (medio, monto, propina), mantener **saldo** consistente y, cuando el saldo llegue a **0**, pasar la venta a **`pagado`** (aunque esté en `borrador`/`en_proceso`). El módulo garantiza **idempotencia** básica, maneja **sobrepago** con confirmación (puede **dividir** en pago + propina) y aporta trazabilidad (`referencia`, `idempotency_key`).  
+> **Stack:** Django + CBVs server-rendered, Bootstrap 5 (modales; sin `confirm()` nativo).
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura de carpetas/archivos (actualizada)
 
 ```
 apps/payments/
 ├─ __init__.py
-├─ apps.py                      # Config de la app (name="apps.payments")
-├─ admin.py                     # Registro de Pago en admin
+├─ apps.py                       # name="apps.payments"
+├─ admin.py                      # Registro de MedioPago y Pago
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                    # Modelo: Pago (venta, metodo, monto, es_propina, referencia, idempotency_key)
-├─ urls.py                      # Rutas propias (alta desde venta, listado opcional)
-├─ views.py                     # Vistas server-rendered (form de pago, confirmaciones)
+├─ models.py                     # MedioPago, Pago
+├─ urls.py                       # Rutas (crear pago, confirmación sobrepago, listado opcional)
+├─ views.py                      # Vistas server-rendered (form de pago, confirmación/split)
 ├─ forms/
 │  ├─ __init__.py
-│  └─ payment.py               # Form de registro de pago (validaciones mínimas)
+│  └─ payment.py                 # PaymentForm (medio, monto, es_propina, referencia, idempotency_key)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ payments.py              # Comandos: registrar_pago(), revertir_pago() (opcional)
-│  └─ reconciliation.py        # (Opcional) conciliaciones simples por método/fecha
-├─ selectors.py                 # Lecturas: pagos por venta, por fecha, por método
-├─ validators.py                # Reglas: montos > 0, métodos permitidos, idempotencia
+│  └─ payments.py                # registrar_pago(), recalcular_saldo(), OverpayNeedsConfirmation
+├─ selectors.py                  # Consultas (pagos por venta, por rango/medio/sucursal)
+├─ validators.py                 # (Opcional) Reglas extra; parte quedó en services/models
 ├─ templates/
 │  └─ payments/
-│     ├─ form.html             # Formulario de alta de pago
-│     ├─ list.html             # (Opcional) Listado global/por fecha
-│     └─ _summary_sale.html    # (Opcional) Resumen de venta y saldo
+│     ├─ form.html               # Alta de pago (desde detalle de venta)
+│     ├─ confirm_overpay.html    # Confirmación de sobrepago → registrar diferencia como propina
+│     ├─ list.html               # (Opcional) Listado global/por fecha
+│     └─ _summary_sale.html      # (Opcional) Resumen venta+saldo para sidebar
 └─ static/
    └─ payments/
-      ├─ payments.css          # Estilos propios
-      └─ payments.js           # UX (confirmaciones, máscara de montos)
+      ├─ payments.js             # (Opcional) UX (máscaras, autoselect)
+      └─ payments.css            # (Opcional) Estilos
 ```
 
-### Rol de cada componente
+**Cambios clave vs. borrador anterior**
 
-- **`models.py`**: `Pago(venta, metodo, monto, es_propina, referencia, idempotency_key, pagado_en)` con integridad de empresa a través de la venta.
-- **`forms/payment.py`**: valida monto > 0, formato de referencia, opción `es_propina`.
-- **`validators.py`**: chequeos de método permitido (efectivo, tarjeta, MP), unicidad de `idempotency_key` por venta.
-- **`services/payments.py`**: `registrar_pago(venta, datos)` agrega pago, recalcula saldo en `sales`, y si saldo=0 transiciona a `pagado`.
-- **`selectors.py`**: consultas para UI y reportes (pagos por venta, por rango, por método).
-- **`views.py`**: orquesta formularios, confirma y redirige a la venta.
-
----
-
-## 2) Endpoints propuestos
-
-- `GET  /ventas/<uuid:venta_id>/pagos/nuevo/` → Form de alta de pago.
-- `POST /ventas/<uuid:venta_id>/pagos/nuevo/` → Registrar pago.
-- `GET  /pagos/` → (Opcional) Listado global con filtros por fecha/método/sucursal.
-
-> El flujo natural parte desde el **detalle de la venta** (módulo `sales`) enlazando a “Agregar pago”.
+- Se incorpora **`MedioPago`** por empresa (único `empresa+nombre`, `activo`).
+- `Pago` tiene `es_propina` y **constraint** `monto > 0`. Idempotencia por `(venta, idempotency_key)` (condicional).
+- **Service** `registrar_pago()` maneja **sobrepago**:
+  - Si **monto > saldo** y `es_propina=False` → lanza `OverpayNeedsConfirmation(saldo, monto)`.
+  - Si se confirma (o `auto_split_propina=True`) → **split**: crea **2 pagos**  
+    (uno por el **saldo** `es_propina=False`, otro por la **diferencia** `es_propina=True`).
+- **recalcular_saldo()** descuenta solo **pagos no propina** y, si `saldo == 0` y la venta **no está cancelada**, llama a `sales.services.marcar_pagada()`.
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 2) Endpoints
 
-### Registrar Pago
+```
+GET  /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"         # form
+POST /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"         # submit
 
-- **Input (POST)**:
-  - `metodo` (str: `efectivo`, `tarjeta`, `mp`, etc.).
-  - `monto` (decimal positivo).
-  - `es_propina` (bool).
-  - `referencia` (str, opcional: id transacción externa, cupón).
-  - `idempotency_key` (str, opcional pero recomendado).
-- **Proceso**:
-  - Validar método y monto.
-  - Enforzar **idempotencia**: si existe un `Pago` con la misma `idempotency_key` para esa venta, **no duplicar**.
-  - Crear `Pago` y **delegar** en `apps.sales` el **recalculo** de `saldo_pendiente`.
-  - Si `saldo_pendiente == 0`, transicionar venta a **`pagado`** (vía `sales.services.lifecycle`).
-- **Output (UI)**:
-  - Redirect a `/ventas/<id>/` con mensaje “Pago registrado”.
-  - En duplicado por idempotencia: mensaje “Este pago ya fue registrado”.
+# Flujo de sobrepago (confirmación)
+GET  /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/  name="payments:confirm_overpay"  # muestra confirmación
+POST /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/  name="payments:confirm_overpay"  # hace el split
 
-### Revertir Pago (opcional)
+# (Opcional) Listado global
+GET  /pagos/                                             name="payments:list"
+```
 
-- **Input**: `pago_id` y motivo.
-- **Proceso**: marcar reverso y recalcular saldo.
-- **Output**: venta vuelve a estado consistente (podría salir de `pagado` si corresponde).
+> Entrada típica: botón **“Registrar pago”** en `sales:detail` abre `payments:create` en la misma página o en ruta dedicada.
 
 ---
 
-## 4) Integraciones y dependencias
+## 3) Modelos
 
-- **Depende de `sales`**: necesita la venta para asociar el pago y actualizar totales/estado.
-- **Usado por `cashbox`**: para cierres por período y por **método** de pago.
-- **Opcional a futuro**: integración con pasarela (MP/Stripe) colocando `referencia` e `idempotency_key`.
+### 3.1 `MedioPago`
 
----
+- Campos: `empresa(FK)`, `nombre`, `activo`, timestamps.
+- Constraint: único por `empresa+nombre` (evita duplicados “Efectivo”, “Transferencia BBVA”, etc.).
 
-## 5) Seguridad
+### 3.2 `Pago`
 
-- Requiere usuario autenticado y membresía en la **empresa activa**.
-- Validar que la venta **pertenece** a la empresa activa.
-- Restringir revertir/eliminar pagos a rol `admin` (si se habilita esa acción).
+- Campos: `id(UUID pk)`, `venta(FK)`, `medio(FK)`, `monto(>0)`, `es_propina(bool)`, `referencia`, `notas`, `idempotency_key`, `creado_por`, timestamps.
+- Índices: por fecha y `(venta, es_propina)`.
+- Constraint: `monto > 0`. Idempotencia condicional por `(venta, idempotency_key)` (cuando la key no es `NULL`).
 
----
+**Reglas de negocio**
 
-## 6) Consideraciones funcionales clave
-
-- **Idempotencia**: imprescindible en integraciones para evitar duplicados al reintentar.
-- **Propina**: puede registrarse como pago marcado `es_propina=True`; los cierres de caja deben sumar propinas separadas.
-- **Parcialidades**: permitir múltiples pagos hasta cubrir el total.
-- **Moneda**: consistente con `pricing`; en MVP se asume una moneda por empresa.
+- **Propina** no descuenta saldo.
+- **Idempotencia**: si existe `(venta, idempotency_key)`, se devuelve ese pago y se recalcula saldo (no duplica).
+- **Sobrepago**:
+  - Si el pago NO es propina y `monto > saldo` → se exige confirmación del usuario para registrar **diferencia como propina**.
+  - Al confirmar (o si se pasa `auto_split_propina=True` desde la vista), se crean **dos pagos** con keys derivadas `"<key>:saldo"` y `"<key>:propina"`.
 
 ---
 
-## 7) Roadmap inmediato
+## 4) Services
 
-1. Modelo `Pago` + validadores.
-2. Servicio `registrar_pago()` que actualiza saldo/estado de venta.
-3. Form + vistas (GET/POST) y redirección a la venta.
-4. Selectors para listados y reportes básicos.
-5. Enlaces claros desde `/ventas/<id>/` para agregar pagos.
+### 4.1 `registrar_pago(venta, medio, monto, es_propina, referencia, notas, creado_por, idempotency_key=None, auto_split_propina=False) -> list[Pago]`
+
+- Bloquea la venta con `select_for_update()` para consistencia de saldo en concurrencia.
+- Valida `monto > 0` y pertenencia de `medio.empresa == venta.empresa`.
+- Idempotencia simple (cuando **no hay split**).
+- Recalcula saldo previo y posterior.
+- Casuística:
+  - `es_propina=True` → crea un pago (propina), recalcula y retorna.
+  - `es_propina=False` y `monto <= saldo` → crea un pago normal, recalcula y retorna.
+  - `es_propina=False` y `monto > saldo` →
+    - Si `auto_split_propina=False` → **raise `OverpayNeedsConfirmation`** con `saldo`/`monto`.
+    - Si `auto_split_propina=True` → crea **pago por saldo** + **pago propina por diferencia**; recalcula y retorna ambos.
+
+### 4.2 `recalcular_saldo(venta)`
+
+- Suma pagos **no propina** y setea `venta.saldo_pendiente = max(venta.total - sum, 0)` (update atómico).
+- Si `saldo == 0` y `venta.estado != "cancelado"` → `sales.services.marcar_pagada(venta)`.
+
+> **Importante:** por decisión operativa, una venta puede quedar **`pagado`** incluso si está en `borrador` o `en_proceso`. Más tarde se puede marcar **`terminado`** para notificar al cliente.
+
+---
+
+## 5) Views (flujo)
+
+### 5.1 `CreatePaymentView` (`payments:create`)
+
+- GET: muestra `PaymentForm` (medio, monto, es_propina, referencia, idempotency_key).
+- POST: intenta `registrar_pago()`:
+  - Si **OK** → mensajes y redirect a `sales:detail`.
+  - Si **`OverpayNeedsConfirmation`** → guarda `monto`, `saldo`, `medio_id`, `idempotency_key`, etc. en la **session** (scope corto) y redirige a `payments:confirm_overpay`.
+
+### 5.2 `ConfirmOverpayView` (`payments:confirm_overpay`)
+
+- GET: muestra un resumen (saldo, monto ingresado, **diferencia**) con **modal** → “Registrar diferencia como propina”.
+- POST: llama `registrar_pago(..., auto_split_propina=True)` usando los valores almacenados y limpia la session. Mensaje y redirect a `sales:detail`.
+
+### 5.3 `PaymentListView` (opcional)
+
+- Filtros por rango, medio, sucursal/empresa; tabla resumida para backoffice/caja.
+
+---
+
+## 6) Forms
+
+### `PaymentForm`
+
+- Campos: `medio (ModelChoice por empresa activa y activos)`, `monto (Decimal)`, `es_propina (bool)`, `referencia (str opcional)`, `idempotency_key (str opcional)`.
+- `__init__` inyecta clases Bootstrap (`form-select` / `form-control`) y filtra `medio` por `empresa_activa`.
+- Validación `monto > 0` (duplicada con constraint/servicio por defensa en profundidad).
+
+---
+
+## 7) Selectors
+
+- `pagos_por_venta(venta)`
+- `pagos_por_fecha(empresa, desde, hasta, medio=None, sucursal=None)`
+- `resumen_por_medio(empresa, rango)` → totales y propinas separadas (para cierres de caja).
+
+---
+
+## 8) URLs (namespace `payments`)
+
+Prefijo recomendado en `lavaderos/urls.py` (o el que uses):
+
+```
+path("pagos/", include(("apps.payments.urls", "payments"), namespace="payments")),
+```
+
+Rutas:
+
+```
+GET/POST /ventas/<uuid:venta_id>/pagos/nuevo/                 name="payments:create"
+GET/POST /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/   name="payments:confirm_overpay"
+GET       /pagos/                                             name="payments:list"         # opcional
+```
+
+---
+
+## 9) Integración con `sales`
+
+- **Detalle de venta (`sales:detail`)** muestra la **tabla de pagos** y un botón **“Registrar pago”** → `payments:create`.
+- Cada registro/edición borra cache y **recalcula**: `saldo_pendiente` y eventualmente **`estado="pagado"`** (si saldo==0 y no cancelado).
+- Los **templates** no calculan nada: solo muestran **flags** y valores computados por la vista/servicio.
+
+---
+
+## 10) Seguridad / Tenancy
+
+- Requiere `LoginRequired` y **empresa activa** válida en `request` (middleware Tenancy).
+- El `medio` debe pertenecer a la **misma empresa** que la venta.
+- El usuario debe tener permiso para operar la venta en esa empresa/sucursal (en MVP se asume membresía; roles finos a futuro).
+- Restringir **revertir/eliminar pagos** a rol `admin` (si se habilita) y dejar audit log.
+
+---
+
+## 11) UX / UI
+
+- **Nada de `confirm()` nativo**. Se usan **modales Bootstrap** para confirmar acciones (sobrepago, eliminar pago si se habilita).
+- Inputs con clases Bootstrap desde el **Form**. En template: `{{ form.campo }}` + mensajes con `invalid-feedback`.
+- **Mensajes** coherentes via `django.contrib.messages` (success/info/warning/error).
+- En sobrepago, la confirmación muestra **monto**, **saldo**, **diferencia** y el texto “La diferencia se registrará como **propina**”.
+
+---
+
+## 12) Errores tratados / Idempotencia
+
+- **Idempotencia**: si llega un reintento con la misma `idempotency_key`, se retorna el pago existente y se recalcula el saldo (no duplica).
+- **Con split**: se derivan keys `"<key>:saldo"` y `"<key>:propina"` para poder reintentar sin duplicar ninguna de las dos mitades.
+- **Concurrencia**: se usa `select_for_update()` sobre la venta dentro de una transacción para evitar condiciones de carrera al recalcular el saldo.
+
+---
+
+## 13) QA Manual (checklist)
+
+1. **Medios** por empresa: crear “Efectivo”, “Transferencia” (activos).
+2. Crear **Venta** con total ≈ 30.000 y **saldo_pendiente** = total.
+3. Registrar **pago parcial** (10.000, no propina) → saldo = 20.000; estado **no** cambia a `pagado`.
+4. Registrar **pago exacto** por el **saldo restante** → saldo = 0; estado pasa a **`pagado`**.
+5. Registrar **propina** (marcada) → saldo **no** cambia; propinas suman aparte.
+6. Intentar **sobrepago** (p. ej. 35.000 con saldo 30.000 y `es_propina=False`) → ver **pantalla de confirmación**; aceptar → se crean **2 pagos** (30.000 no propina + 5.000 propina); saldo = 0; estado `pagado`.
+7. Reintentar el submit con la **misma `idempotency_key`** → no duplica (mismo pago/split), saldo consistente.
+8. En detalle de venta, ver **tabla de pagos** y **saldo** correcto tras cada operación.
+9. Si la venta está `cancelado`, intentar registrar pagos → bloquear (política a definir; en MVP evitar registrar).
+
+---
+
+## 14) Roadmap inmediato
+
+- **Reversa de pago** (soft delete/estado `revertido` + recalcular saldo + auditoría).
+- **Cierres de caja**: resumen por medio, sucursal, rango. Monto de propinas separado.
+- **Integración pasarelas** (MP/Stripe): usar `referencia` como id externo y **`idempotency_key`** origen pasarela.
+- **Roles/permisos** finos (cajero, supervisor).
+
+---
+
+## 15) Notas de implementación
+
+- Mantener el **cálculo de saldo** y **transición a `pagado`** **únicamente** en el **service** (`payments.services.payments`), nunca en templates o signals con lógica duplicada.
+- Si se usa `signals` (post-save de `Pago`), que deleguen en el **service** para evitar divergir reglas.
+- **Mensajes** cortos y claros en UI; evitar textos técnicos en errores.
+
+---
+
+## 16) Ejemplo de circuito (resumen)
+
+```mermaid
+sequenceDiagram
+  participant U as Operador
+  participant PAY as payments.services
+  participant DB as PostgreSQL
+
+  U->>PAY: registrar_pago(venta, medio, monto, es_propina, ...)
+  PAY->>DB: lock venta (select_for_update)
+  PAY->>DB: sumar pagos no-propina, calcular saldo
+  alt monto > saldo y !es_propina
+    PAY-->>U: OverpayNeedsConfirmation(saldo, monto)
+    U->>PAY: confirmar split (auto_split_propina=True)
+    PAY->>DB: crear pago_saldo + pago_propina
+  else
+    PAY->>DB: crear pago simple
+  end
+  PAY->>DB: recalcular saldo
+  alt saldo == 0 y venta != cancelado
+    PAY->>DB: venta.estado = pagado
+  end
+  DB-->>U: OK (pagos, saldo, estado)
+```
+
+---
+
+### Resumen ejecutivo
+
+- **Pagos robustos** con idempotencia y tratamiento de **sobrepago** (confirmación/split a propina).
+- **Saldo** consistente y **transición automática a `pagado`** cuando corresponde.
+- **Tenancy** garantizado (medio y venta en misma empresa).
+- **UI** simple, con modales y mensajes claros; sin lógica en templates.
+- Lista para integrarse con **invoicing** (emisión solo cuando **`pagado`**), **cashbox** y auditoría.
 
 # Módulo 9 — `apps/invoicing` (Comprobantes Simples y Numeración)
 
-> **Objetivo del módulo:** Emitir **comprobantes no fiscales** para ventas pagadas, con **numeración por Sucursal y Tipo**, y generar un **snapshot** (HTML/PDF) de la venta al momento de emisión.
+> **Objetivo:** Emitir **comprobantes no fiscales** (p. ej. **REMITO** o **TICKET**) para **ventas pagadas**, con **numeración por Sucursal + Punto de Venta + Tipo**, guardando un **snapshot inmutable** y un archivo **HTML/PDF** imprimible.  
+> **Stack:** Django server-rendered + Bootstrap 5 (plantilla B/N, sin colores), renderer HTML→PDF.
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura de carpetas/archivos (actualizada)
 
 ```
 apps/invoicing/
 ├─ __init__.py
-├─ apps.py                      # Config de la app (name="apps.invoicing")
-├─ admin.py                     # Registro de Comprobante y Secuencia en admin
+├─ apps.py                           # name="apps.invoicing"
+├─ admin.py                          # Admin de Comprobante / Secuencia / Clientes de facturación
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                    # Modelos: Comprobante, SecuenciaComprobante, ClienteFacturacion
-├─ urls.py                      # Rutas (listado, emitir desde venta, ver/descargar)
-├─ views.py                     # Vistas server-rendered (emisión, listado, detalle)
+├─ models.py                         # Comprobante, SecuenciaComprobante, ClienteFacturacion, TipoComprobante
+├─ urls.py                           # Rutas (listado, emitir desde venta, ver/descargar)
+├─ views.py                          # Listado, Detalle, Emitir (FormView), Descargar
 ├─ forms/
 │  ├─ __init__.py
-│  └─ invoice.py               # Form para datos de facturación (si aplica) y tipo comprobante
+│  └─ invoice.py                     # InvoiceEmitForm (tipo, punto_venta, cliente_facturacion opc.)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ numbering.py             # Lógica de numeración transaccional por sucursal/tipo
-│  ├─ emit.py                  # Caso de uso: emitir comprobante (snapshot + guardar PDF/HTML)
-│  └─ renderers.py             # Render del template HTML a PDF/archivo estático
-├─ selectors.py                 # Lecturas: comprobantes por fecha, por venta, por sucursal
+│  ├─ numbering.py                   # next_number(): numeración atómica por sucursal/tipo/punto_venta
+│  ├─ emit.py                        # emitir(): valida, numera, snapshot, render y persistencia
+│  └─ renderers.py                   # render_html(context) y html_to_pdf(html) (opcional)
+├─ selectors.py                      # por_rango(empresa, sucursal?, tipo?, desde?, hasta?)
 ├─ templates/
 │  └─ invoicing/
-│     ├─ list.html             # Listado de comprobantes
-│     ├─ emit.html             # Form (si requiere datos de facturación/tipo)
-│     ├─ detail.html           # Vista detalle con link al archivo
-│     └─ _invoice_print.html   # Template base del comprobante (HTML imprimible)
+│     ├─ list.html                   # Listado con filtros (fecha/sucursal/tipo)
+│     ├─ emit.html                   # Form de emisión (confirma con modal)
+│     ├─ detail.html                 # Metadatos + links a archivo
+│     └─ _invoice_print.html         # Plantilla imprimible (B/N, bordes, tipografía sans-serif)
 ├─ static/
 │  └─ invoicing/
-│     ├─ invoicing.css         # Estilos para impresión/PDF
-│     └─ invoicing.js          # (Opcional) helpers UI
+│     ├─ invoicing.css               # Reglas mínimas para impresión/PDF (B/N)
+│     └─ invoicing.js                # (Opcional) mejoras UI
 └─ pdf/
-   └─ storage_backend.md       # Notas: dónde se guardan PDFs (filesystem en dev; storage en prod)
+   └─ storage_backend.md             # Notas de almacenamiento (MEDIA_ROOT en dev; S3/GCS en prod)
 ```
 
-### Rol de cada componente
+---
 
-- **`models.py`**:
-  - `Comprobante(venta, cliente_facturacion, tipo, punto_venta, numero, total, moneda, pdf_url, emitido_en)`.
-  - `SecuenciaComprobante(sucursal, tipo, proximo_numero, actualizado_en)` (control de numeración).
-  - `ClienteFacturacion(cliente, razon_social, cuit, domicilio, …)` (opcional si se captura info distinta del cliente).
-- **`services/numbering.py`**: incrementa la secuencia **de forma atómica** (bloqueo/transaction).
-- **`services/emit.py`**: valida venta pagada, toma número, construye **snapshot** (líneas, totales), renderiza y persiste `Comprobante`.
-- **`services/renderers.py`**: render HTML → PDF/archivo (en MVP, guardar HTML y/o PDF básico).
-- **`selectors.py`**: listados/consultas por rango y sucursal.
-- **`forms/invoice.py`**: datos mínimos si hace falta capturar/seleccionar perfil de facturación y tipo.
+## 2) Modelos (definición funcional)
+
+### 2.1 `TipoComprobante` (enum)
+
+- Valores: `REMITO`, `TICKET` (extensible).
+- `choices` para formularios/selects.
+
+### 2.2 `SecuenciaComprobante`
+
+- `sucursal(FK)`, `tipo (TipoComprobante)`, `punto_venta (int)`, `proximo_numero (int)`.
+- **Unicidad**: `(sucursal, tipo, punto_venta)`.
+- Usado por `services/numbering.py` para **incremento atómico** (dentro de transacción).
+
+### 2.3 `ClienteFacturacion` (opcional)
+
+- `empresa(FK)`, `cliente(FK opc.)`, `razon_social`, `cuit`, `domicilio`, `localidad`, `condicion_iva`, `activo`.
+- Permite **perfil alternativo** de facturación distinto del cliente operativo (si está cargado).
+
+### 2.4 `Comprobante`
+
+- **Claves**: `empresa(FK)`, `sucursal(FK)`, `venta(OneToOne)` _(MVP: 1 venta → 1 comprobante)_.
+- **Numeración**: `tipo (enum)`, `punto_venta (int)`, `numero (int)`.
+- **Importes**: `total`, `moneda` _(string; MVP asume moneda única por empresa)_.
+- **Archivos**: `archivo_html (FileField)`, `archivo_pdf (FileField opcional)`.
+- **Otros**: `cliente(FK)`, `cliente_facturacion(FK opcional)`, `emitido_por (User)`, `snapshot (JSONField)`, `emitido_en`.
+- **Propiedades**:
+  - `numero_completo` → `"PPPP-NNNNNNNN"` (punto_venta y número 0-padded).
+  - `get_absolute_url()` → detalle.
+
+**Snapshot (inmutable):**
+
+```json
+{
+  "comprobante": {"tipo":"REMITO","numero":"0001-00001234","emitido_en":"..","moneda":"ARS"},
+  "empresa": {"id":..,"nombre":"..","logo_url":".."},
+  "sucursal": {"id":..,"nombre":"..","punto_venta":"1","direccion":"..","telefono":"..","email":".."},
+  "cliente": {"id":..,"nombre":"..","apellido":"..","cuit":"..","domicilio":"..","localidad":"..","iva":".."},
+  "vehiculo": {"id":..,"patente":"..","tipo":".."},
+  "venta": {"id":"..","estado":"pagado","subtotal":"..","propina":"..","descuento":"..","total":"..","saldo_pendiente":"0.00","notas":".."},
+  "items": [
+    {"servicio_id":..,"servicio_nombre":"Lavado Full","cantidad":1,"precio_unitario":"30000.00","subtotal":"30000.00"}
+  ],
+  "leyendas": {"no_fiscal":"Documento no fiscal."}
+}
+```
+
+> El snapshot se **serializa a JSON** al emitir y **no cambia** aunque modifiquen datos posteriores.
 
 ---
 
-## 2) Endpoints propuestos
+## 3) Servicios
 
-- `GET  /comprobantes/` → Listado (filtros por fecha/sucursal/tipo).
-- `GET  /ventas/<uuid:venta_id>/emitir/` → Form/confirmación de emisión (si requiere datos).
-- `POST /ventas/<uuid:venta_id>/emitir/` → **Emitir** comprobante: asigna número y genera snapshot.
-- `GET  /comprobantes/<uuid:id>/` → Detalle de comprobante (metadatos + link `pdf_url`/html).
-- `GET  /comprobantes/<uuid:id>/descargar/` → Descarga del archivo (si se guarda local).
+### 3.1 `services/numbering.next_number(sucursal, tipo, punto_venta) -> ctx`
 
-> La entrada al flujo suele estar desde el **detalle de la venta** (cuando está `pagada`).
+- Dentro de `transaction.atomic()` toma o crea la `SecuenciaComprobante` y retorna:
+  - `punto_venta (int)`, `numero (int)` y **formato** `numero_completo` `"PPPP-NNNNNNNN"`.
+- **Atómico** y **concurrente-seguro** (row-level lock).
 
----
+### 3.2 `services/emit.emitir(...) -> EmitirResultado`
 
-## 3) Contratos de entrada/salida (conceptual)
+**Firma:**
 
-### Emitir Comprobante
+```py
+emitir(
+  *, venta_id, tipo: str, punto_venta: int = 1,
+  cliente_facturacion_id: int | None = None,
+  actor: User | None = None, reintentos_idempotentes: bool = True
+) -> EmitirResultado  # {comprobante, creado: bool}
+```
 
-- **Input**: `venta_id` (de una venta **pagada**), `tipo` (p.ej. `ticket`), `cliente_facturacion_id` (opcional), `punto_venta` (configurable por sucursal).
-- **Proceso**:
-  1. Validar que la venta pertenece a la **empresa activa** y está en estado **pagado**.
-  2. Obtener **número** de `SecuenciaComprobante(sucursal, tipo)` de forma transaccional.
-  3. Construir **snapshot**: copiar `servicios`, `cantidades`, `precios`, `totales`.
-  4. Renderizar plantilla `/_invoice_print.html` → **HTML/PDF** y guardar archivo (escribir `pdf_url`).
-  5. Persistir `Comprobante` con metadatos.
-- **Output**: registro `Comprobante` creado; redirect a `/comprobantes/<id>/`.
+**Flujo:**
 
-### Ver/Descargar
+1. Cargar `Venta` y validar: pertenece a **empresa activa** (la vista lo asegura) y **estado = "pagado"**.
+2. **Idempotencia**: si la venta ya tiene `comprobante` y `reintentos_idempotentes=True` → retorna existente (`creado=False`).
+3. `next_number()` por `(sucursal, tipo, punto_venta)`.
+4. Construir **snapshot** (copias literales de líneas y totales).
+5. `render_html({"snapshot": ...})` y `html_to_pdf(html)` (si está disponible).
+6. Crear `Comprobante` y **guardar** `archivo_html` y `archivo_pdf` (si existe).
 
-- **Input**: `id` del comprobante.
-- **Proceso**: cargar registro; servir archivo desde `pdf_url` o storage backend.
-- **Output**: HTML/PDF entregado.
-
----
-
-## 4) Dependencias e integraciones
-
-- **Depende de `sales`**: requiere venta `pagada` para emitir.
-- **Depende de `org`**: usa Sucursal (para **secuencia** y punto de venta).
-- **Opcional con `customers`**: `ClienteFacturacion` puede diferir del `Cliente`.
-- **Usado por `notifications`**: link a comprobante en mensaje “vehículo listo” (opcional).
-- **Storage**: en dev, filesystem (`MEDIA_ROOT`); en prod, storage externo (S3/GCS).
+> **Nota:** El **logo** se inserta desde el **snapshot** (`empresa.logo_url` o `empresa.logo` → `url`). Si el logo faltara, la plantilla reserva el **placeholder** (bloque vacío con bordes).
 
 ---
 
-## 5) Seguridad
+## 4) Vistas y URLs
 
-- Solo usuarios autenticados con permisos en la **empresa activa**.
-- Emisión disponible **solo si** `Venta.estado == "pagado"`.
-- Numeración protegida con **transacciones**; evitar duplicados.
+### 4.1 URLs (namespace `invoicing`)
 
----
+Prefijo global (ejemplo en `lavaderos/urls.py`):
 
-## 6) Consideraciones clave (MVP)
+```
+path("comprobantes/", include(("apps.invoicing.urls", "invoicing"), namespace="invoicing"))
+```
 
-- **Snapshot inmutable**: el comprobante no debe cambiar si luego cambian precios/servicios.
-- **Numeración por sucursal y tipo**: cada combinación mantiene su contador.
-- **Formato**: en MVP, HTML imprimible + opción a PDF simple.
-- **Re-emisión**: no reusar número; si se anula, registrar otro flujo (fuera del MVP).
+Rutas:
 
-### Remito Profesional
+```
+GET   /comprobantes/                             name="invoicing:list"
+GET   /comprobantes/<uuid:pk>/                   name="invoicing:detail"
+GET   /comprobantes/<uuid:pk>/descargar/         name="invoicing:download"
 
----
+# Iniciado desde el detalle de la venta
+GET   /ventas/<uuid:venta_id>/emitir/            name="invoicing:emit"
+POST  /ventas/<uuid:venta_id>/emitir/            name="invoicing:emit"
+```
 
-#### 1. Encabezado
+### 4.2 `ComprobanteListView`
 
-- **Logo de la Empresa:** Debe ser el elemento más visible, ubicado en la parte superior (generalmente a la izquierda o centrado).
-- **Nombre de la Empresa:** Justo debajo del logo o a su lado.
-- **Información de Contacto:** Dirección, número de teléfono y correo electrónico.
-- **Título del Documento:** En un tamaño de fuente mayor, en negrita: **"REMITO"**.
+- Filtra por **empresa activa** y GET params:
+  - `?sucursal=<id>` (válida si pertenece a la empresa), `?tipo=REMITO|TICKET`, `?desde=YYYY-MM-DD`, `?hasta=YYYY-MM-DD`.
+- Usa `selectors.por_rango(...)`.
 
----
+### 4.3 `ComprobanteDetailView`
 
-#### 2. Datos de la Transacción
+- Carga el `Comprobante` validando **empresa activa**.
+- Muestra metadatos y acciones (**Ver/Descargar**).
 
-- **Número de Remito:** Un identificador único y consecutivo (ej. "Remito Nº 0001-00001234").
-- **Fecha de Emisión:** La fecha en la que se crea el documento.
-- **Datos del Cliente:** Un bloque bien delimitado con:
-  - Nombre o Razón Social.
-  - Dirección de entrega.
-  - Número de identificación (DNI, CUIT, etc.).
+### 4.4 `EmitirComprobanteView` (FormView)
 
----
+- Muestra `InvoiceEmitForm` con:
+  - **Tipo** (`TipoComprobante`), **Punto de Venta** (pre-llenado con `sucursal_activa.punto_venta` si existe; editable para edge cases), **Cliente de facturación** (opcional).
+- `POST`: llama `emitir(...)`. Si ya existía y `reintentos_idempotentes=True`, redirige al existente con mensaje **info**.
+- **Precondición**: venta en **estado `"pagado"`**. Si no, muestra **error** y redirige a `sales:detail`.
 
-#### 3. Detalle de los Productos o Servicios
+### 4.5 `ComprobanteDownloadView`
 
-Se presenta como una tabla con las siguientes columnas:
-
-- **Cantidad:** Número de unidades.
-- **Descripción:** Detalle de lo que se está entregando.
-- **Código de Producto (Opcional):** Si aplica, el código interno del producto.
+- Sirve **PDF** si existe; si no, **HTML** (`FileResponse`, `content_type` por extensión).
+- Valida que el comprobante **pertenezca** a la empresa activa.
 
 ---
 
-#### 4. Pie de Página y Observaciones
+## 5) Plantilla imprimible `_invoice_print.html` (B/N)
 
-- **Espacio para Firmas:** Líneas para "Recibí conforme" y "Entregué conforme", con espacio para las firmas.
-- **Notas o Comentarios:** Espacio para añadir observaciones.
-- **Aviso de Carácter No Fiscal:** Un texto en letra más pequeña y visible, como: **"Este documento es un Remito y no tiene validez como factura o comprobante fiscal."**
+**Requisitos visuales (cumplidos):**
+
+- **Encabezado**: logo (si no hay, bloque con placeholder), **Nombre de la Empresa**, datos de **Sucursal** (dirección, teléfono, mail). A la derecha: **título** `REMITO` o `TICKET` y **leyenda** pequeña: _“DOCUMENTO NO VÁLIDO COMO FACTURA”_.
+- **Datos del Comprobante**: `N° 0001-00001234`, **Fecha**.
+- **Cliente**: Nombre/Razón social, Domicilio, Localidad, **CUIT**, **IVA** (si snapshot lo contiene).
+- **Condiciones**: “Contado”, “Cta. Cte.” y “Factura N° \_\_\_\_” (casillas visuales no interactivas).
+- **Tabla de ítems** (bordes): columnas **CANTIDAD**, **DESCRIPCIÓN**, **P. UNIT.**, **PARCIAL**. Al pie: **TOTAL** (alineado a la derecha).
+- **Observaciones** (si hay) y **Firmas** (Recibí/Entregué).
+- **Tipografía**: sans-serif (ej. Arial). **Sin color**. **Solo utilidades Bootstrap** + reglas mínimas en `invoicing.css` para impresión.
+
+> El **tipo** mostrado en el título se toma del **comprobante** (no hardcodeado).  
+> El **logo** se dibuja si `snapshot.empresa.logo_url` o `empresa.logo.url` existe; si no, se deja el **placeholder**.
 
 ---
 
-## 7) Roadmap inmediato
+## 6) Seguridad / Tenancy
 
-1. Modelos `Comprobante`, `SecuenciaComprobante`, `ClienteFacturacion` (opcional).
-2. Servicio `numbering.next_number(sucursal, tipo)` con transacción.
-3. Servicio `emit.emitir(venta_id, datos)` que realiza el snapshot y persiste `Comprobante`.
-4. Template `/_invoice_print.html` y almacenamiento del archivo (HTML/PDF).
-5. Vistas + rutas (listar, emitir, ver/descargar).
+- Toda consulta filtra por **empresa activa** (middleware Tenancy).
+- Solo se puede **emitir** si `Venta.estado == "pagado"` y la **venta** pertenece a la empresa activa.
+- **Numeración** protegida por transacción y lock sobre `SecuenciaComprobante`.
+
+---
+
+## 7) Integración con Ventas y Pagos
+
+- **Ventas (`apps/sales`)**: el **detalle** muestra tarjeta **Comprobante** con flags:
+  - Si **pagado** y **sin comprobante** → botón “Emitir comprobante”.
+  - Si **ya emitido** → botones “Ver” / “Descargar”.
+- **Pagos (`apps/payments`)**: cuando el **saldo** queda en `0` se marca la venta como **`pagado`** (incluso si sigue en `borrador/en_proceso`). Luego, el taller puede pasar a **`terminado`** para notificar al cliente.
+
+---
+
+## 8) Selectors
+
+- `por_rango(empresa, sucursal=None, tipo=None, desde=None, hasta=None)` → `QuerySet` optimizado (select_related a `sucursal`, `venta`, `cliente`).
+- Útil para listados, cierres y exportes.
+
+---
+
+## 9) Consideraciones MVP / Decisiones
+
+- **Snapshot inmutable** y **archivo persistido** (HTML obligatorio; PDF si el renderer está disponible).
+- **Numeración** por **Sucursal + Punto de Venta + Tipo**; el **punto de venta** se propone desde la **sucursal activa** (si está configurado) y puede ajustarse manualmente para casos especiales (sucursales con múltiples PtoV o migraciones).
+- **Re-emisión**: no se reusa número ni se sobreescribe; si ya existe y el usuario reintenta, el flujo devuelve el **existente** (idempotente).
+- **Logo**: provisto por `Empresa` (campo `logo` o `logo_url` en snapshot). Si está ausente, el diseño **no se rompe**: se muestra un bloque reservado.
+- **Formato** B/N **sin emojis ni colores**; Bootstrap utilities + bordes visibles para mesa y firmas.
+
+---
+
+## 10) QA Manual (checklist)
+
+1. Venta con **saldo=0** y `estado="pagado"` → botón “Emitir comprobante” visible en `sales:detail`.
+2. Emisión de **REMITO** con `punto_venta` propuesto (p. ej. 1) → se genera `0001-00000001`, archivo HTML y (si aplica) PDF.
+3. Reintentar emisión sobre misma venta → se informa que ya existía y redirige al detalle.
+4. Listado `/comprobantes/` con filtros: por **sucursal**, **tipo**, **rango de fechas**; mantiene `empresa` actual.
+5. Detalle muestra **título** correcto (**REMITO/TICKET**), **leyenda no fiscal**, **items**, **totales**, **firmas**.
+6. **Logo**: si la empresa tiene archivo/logo URL, se ve; si no, el placeholder respeta el layout.
+7. **Descarga**: abre PDF si existe; si no, abre HTML con `content-type` correcto.
+8. Cambiar **punto_venta** y emitir otra venta → la secuencia continúa por `(sucursal, tipo, punto_venta)` correcto.
+9. Intentar emitir con venta **no pagada** → bloquea con mensaje y redirige a detalle de venta.
+
+---
+
+## 11) Roadmap
+
+- **Anulación** / **nota de crédito** (no fiscal) con encadenamiento a la venta/comprobante original.
+- **Exportes** (CSV/PDF masivo) por sucursal/tipo/rango.
+- **Campos fiscales** opcionales por país (si en el futuro se integran **CAI/CAE** reales).
+- **Notificaciones**: incluir link al comprobante en el mensaje “Listo para retirar”.
+- **Diseños alternativos** (ticket térmico compacto).
+
+---
+
+## 12) Secuencia de alto nivel
+
+```mermaid
+sequenceDiagram
+  participant U as Operador
+  participant PAY as payments
+  participant INV as invoicing
+  participant DB as PostgreSQL
+
+  U->>PAY: Registrar pago(s) (medio, monto)
+  PAY->>DB: Insert pagos + recalcular saldo
+  alt saldo == 0
+    PAY->>DB: Venta.estado = "pagado"
+  end
+
+  U->>INV: Emitir comprobante (tipo, punto_venta, cliente_facturación?)
+  INV->>DB: next_number(sucursal,tipo,ptoV) (atomic)
+  INV->>DB: Guardar Comprobante + snapshot + archivos
+  DB-->>U: OK (número, links Ver/Descargar)
+```
+
+---
+
+### Resumen ejecutivo
+
+- Emisión **idempotente** y **segura** sobre ventas **pagadas**.
+- **Numeración atómica** por Sucursal/Tipo/PtoV.
+- **Snapshot inmutable** + **archivo HTML/PDF** listo para imprimir.
+- **Plantilla B/N** con datos de empresa/sucursal/cliente/ítems y **bordes** claros.
+- Integrado con **Sales** (UI de emisión desde el detalle) y **Payments** (estado `pagado`).
 
 # Módulo 10 — `apps/notifications` (Plantillas y Log de Notificaciones)
 
@@ -3463,97 +3747,196 @@ apps/audit/
 4. Middleware de `access` para 1–2 rutas sensibles.
 5. Listado/Detalle básico para inspección rápida en soporte.
 
-# Módulo 14 — `apps/app_log` (Logs Técnicos de Aplicación)
+# Módulo 14 — `apps/app_log` (Observabilidad: Logs Técnicos + Auditoría + Negocio)
 
-> **Objetivo del módulo:** Registrar eventos **técnicos** (errores, advertencias, info, debug) generados por la aplicación para diagnóstico y soporte. Se diferencia de `audit` porque aquí se almacenan **logs de sistema**, no de negocio.
+> **Objetivo:** Proveer observabilidad **profesional y reutilizable**:
+>
+> - **Access logs** enriquecidos (HTTP) con `request_id` y `parent_request_id`.
+> - **Business logs** (servicios de dominio) con `success`, `reason`, `affected_rows`, `prev_state/new_state`.
+> - **Auditoría CRUD** automática con diffs `before/after`.
+> - **Destino dual**: **BD** (consulta/soporte) y **archivos por usuario/día** (debug rápido).
+> - **Sanitización de payloads** (body preview) y metadata útil para diagnóstico.
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura
 
 ```
 apps/app_log/
 ├─ __init__.py
-├─ apps.py                       # Config de la app (name="apps.app_log")
-├─ admin.py                      # Registro de AppLog en admin
+├─ apps.py                       # AppConfig que carga señales
+├─ admin.py                      # Admin de AppLog y AuditLog
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                     # Modelo: AppLog
+├─ models.py                     # AppLog, AuditLog
 ├─ services/
 │  ├─ __init__.py
-│  └─ logger.py                 # API interna: log_event(nivel, origen, evento, mensaje, meta)
-├─ selectors.py                  # Lecturas: logs por empresa, nivel, fecha
+│  └─ logger.py                  # log_event, log_exception, helpers
+├─ logging_handler.py            # Handler: logging de Django → AppLog (BD)
+├─ file_handler.py               # Handler: archivos por usuario/día
+├─ logging_filters.py            # RequestContextFilter (usuario, empresa, req/parent IDs, etc.)
+├─ signals.py                    # Auditoría CRUD (pre/post save/delete) + logger apps.audit
+├─ selectors.py                  # Consultas de soporte (filtros por empresa, nivel, fecha)
+├─ middleware.py                 # RequestID + AccessLog + ExceptionLog (enriquecidos)
 ├─ templates/
 │  └─ app_log/
-│     ├─ list.html               # Listado con filtros básicos (nivel, fecha, empresa)
-│     └─ detail.html             # Vista detalle de un log (mensaje + meta_json)
+│     ├─ list.html               # Listado filtrable (opcional)
+│     └─ detail.html             # Detalle (mensaje + meta_json)
 └─ static/
    └─ app_log/
-      ├─ app_log.css             # Estilos básicos
-      └─ app_log.js              # (Opcional) helpers UI (expandir JSON, autorefresh)
+      ├─ app_log.css
+      └─ app_log.js
 ```
 
-### Rol de cada componente
+---
 
-- **`models.py`**: `AppLog(empresa, nivel, origen, evento, mensaje, meta_json, creado_en)` con `nivel ∈ {debug, info, warning, error, critical}`.
-- **`services/logger.py`**: API interna para escribir logs desde cualquier app; encapsula normalización y persistencia.
-- **`selectors.py`**: consultas para filtrar logs en vistas de soporte.
-- **`templates/app_log/*`**: UI mínima para inspección si se desea.
+## 2) Modelos
+
+### `AppLog`
+
+- **Qué registra:** eventos técnicos y **access logs** con contexto.
+- **Campos clave:** `empresa_id`, `user_id`, `username`, `nivel`, `origen`, `evento`, `mensaje`, `http_method`, `http_path`, `http_status`, `duration_ms`, `ip`, `user_agent`, `meta_json`, `request_id`, `correlation_id`.
+- **`meta_json` típico (access):**
+  ```json
+  {
+    "status": 302,
+    "duration_ms": 20,
+    "route_name": "sales:cancel",
+    "redirect_to": "/ventas/<id>/",
+    "messages": [{ "level": "success", "message": "Venta cancelada." }],
+    "template_name": null,
+    "body_preview": { "csrfmiddlewaretoken": "***redacted***" },
+    "parent_request_id": "aaa-bbb-ccc"
+  }
+  ```
+
+### `AuditLog`
+
+- **Qué registra:** auditoría de negocio (CRUD) con snapshots y diffs.
+- **Campos clave:** `empresa_id`, `user_id`, `username`, `resource_type`, `resource_id`, `action (create|update|delete|soft_delete|restore)`, `changes`, `snapshot_before`, `snapshot_after`, `success`, `reason`, `ip`, `user_agent`, `request_id`.
 
 ---
 
-## 2) Endpoints propuestos
+## 3) Flujo de observabilidad
 
-- `GET  /logs/` → Listado de logs con filtros (fecha, nivel, origen, empresa).
-- `GET  /logs/<uuid:id>/` → Detalle de un log.
+```mermaid
+flowchart TD
+    subgraph Request
+        A[HTTP Request]
+        B[RequestIDMiddleware]
+        C[RequestLogMiddleware (access enriquecido)]
+        D[Views/Services (business logs)]
+        E[Signals (Audit CRUD)]
+    end
 
-> La interfaz puede ser mínima o incluso quedar en **admin** en MVP.
+    A --> B --> C --> D --> F
+    D --> E --> F
+    C --> F
 
----
+    subgraph Sinks
+        F[Handlers]
+        F --> G[BD: AppLog / AuditLog]
+        F --> H[Archivos: logs/YYYY-MM-DD/<username>.log]
+    end
+```
 
-## 3) Contratos de entrada/salida (conceptual)
-
-### Escritura de log (API interna)
-
-- **Input**:
-  - `empresa_id` (opcional, si aplica contexto).
-  - `nivel` (`debug|info|warning|error|critical`).
-  - `origen` (ej. “sales.services”).
-  - `evento` (str corto: “venta_finalizada”, “pago_rechazado”).
-  - `mensaje` (texto breve).
-  - `meta_json` (dict serializado: stacktrace, payload, headers, etc.).
-- **Proceso**: persistir `AppLog`.
-- **Output**: id del log creado (para correlación).
-
-### Lectura de logs
-
-- **Input (GET)**: filtros por nivel, fecha, empresa.
-- **Proceso**: ejecutar query en `selectors.py`.
-- **Output**: listado con metadatos y link a detalle.
+- **Correlación:** `request_id` por request; cuando hay redirect 3xx, el siguiente request lleva `parent_request_id` para encadenar POST → GET.
 
 ---
 
-## 4) Dependencias e integraciones
+## 4) Dónde loguear (guía práctica)
 
-- **Independiente de negocio**: puede ser invocado desde cualquier app (`sales`, `payments`, `invoicing`, etc.).
-- **Complementario de `audit`**: mientras `audit` registra acciones de usuario, `app_log` guarda fallos internos (ej. error al renderizar PDF).
-- **No requiere relaciones fuertes**: `empresa` opcional para logs globales.
+- **Middleware (automático, una vez):**
+  - Access log **enriquecido**: `method`, `path`, `status`, `duration_ms`, `redirect_to`, `route_name`, `template_name`, `messages`, `body_preview` (sanitizado).
+  - Excepciones no manejadas → AppLog + archivos.
+- **Servicios de dominio (`apps/*/services/*.py`):**
+  - Cada operación crítica: **ANTES** (validaciones) y **DESPUÉS** (persistencia), con:
+    - `success`, `reason`, `affected_rows`
+    - `entity_id(s)`
+    - `prev_state` / `new_state`
+  - Ej: `cancelar_venta(venta, user, request)` hace `save(update_fields=["estado"])`, re-lee, compara y loguea `success`.
+- **Señales (`signals.py`):**
+  - CRUD automático con `changes` y snapshots (no para `bulk_*`).
+- **Regla simple:** **vistas** llaman **servicios**; los servicios contienen la **verdad** (persistencia + logs de negocio).
 
 ---
 
-## 5) Seguridad
+## 5) Configuración en `settings.py`
 
-- Acceso a vistas `/logs/` restringido a usuarios con rol **admin**.
-- Cuidar no almacenar datos sensibles sin sanitizar en `meta_json` (headers, contraseñas).
+### Variables
+
+```python
+AUDIT_TRACKED_MODELS = [
+    "sales.Venta",
+    "payments.Pago",
+    "vehicles.Vehiculo",
+    "catalog.Servicio",
+]
+AUDIT_EXCLUDE_FIELDS = ["id", "creado_en", "actualizado_en", "created_at", "updated_at"]
+```
+
+### Feature flags (por entorno)
+
+```python
+APP_LOG_ENABLE_DB = True              # BD AppLog
+APP_LOG_ENABLE_AUDIT = True           # BD AuditLog (señales)
+APP_LOG_ENABLE_FILES = True           # Archivos por usuario/día
+APP_LOG_FILES_BASE_DIR = "logs"       # Carpeta de logs
+# APP_LOG_JSON_FILES = False          # (opcional) JSONL si usás python-json-logger
+```
+
+### LOGGING (handlers y loggers)
+
+- **Handlers**:
+  - `applog_db`: a BD (AppLog).
+  - `per_user_daily_file`: **formato corto** (negocio/auditoría).
+  - `per_user_daily_access_file`: **formato extendido** (access).
+- **Loggers**:
+  - `apps.access` → `per_user_daily_access_file` (+ BD si flag).
+  - `apps` → `per_user_daily_file` (+ BD si flag).
+  - `apps.audit` → `per_user_daily_file` (+ BD si flag).
+  - `django.request` (errores) → `per_user_daily_access_file` (+ BD si flag).
+
+_(ver bloque de LOGGING en el settings del proyecto)_
 
 ---
 
-## 6) Roadmap inmediato
+## 6) Seguridad y sanitización
 
-1. Modelo `AppLog`.
-2. Servicio `logger.log_event(...)`.
-3. Integrar con puntos clave de las apps (ej. errores en invoicing/notifications).
-4. UI mínima (listado/detalle) o fallback en admin.
+- **Nunca** almacenar secretos (contraseñas, tokens, cookies).
+- `body_preview` captura **solo** primeras N bytes y **redacta** claves sensibles.
+- Sanitizar snapshots y diffs (`AuditLog`) si contienen PII no necesaria.
+
+---
+
+## 7) Operación y retención
+
+- **Archivos:** `logs/YYYY-MM-DD/<username>.log`.
+- **BD:** AppLog/AuditLog consultables por admin (índices por fecha, empresa, status, path).
+- **Retención recomendada:** dev 15–30 días (archivos), prod según normas (BD/archivos).
+- Comando (sugerido) de limpieza BD: `manage.py prune_logs --days N` (implementar si aplica).
+
+---
+
+## 8) Debug checklist (casos como “cancelar venta”)
+
+1. Ver access del **POST**: `status`, `messages`, `redirect_to`, `body_preview`.
+2. Ver **business log** del servicio: `success`, `reason`, `prev_state/new_state`, `affected_rows`.
+3. Ver **AuditLog**: `changes.estado` (debería mostrar `before → after`).
+4. Si 2 o 3 no muestran cambio, es que **no se persistió** (revisar `save()` y `update_fields`).
+5. Correlacionar POST `request_id` con GET `parent_request_id` para la pantalla resultante.
+
+---
+
+## 9) Buenas prácticas
+
+- **Idempotencia** en servicios (si ya está cancelada, `success=False` con `reason` explícito).
+- **Logs estructurados** (usa keys estables en `meta_json`).
+- **No usar prints**; usar `logging.getLogger("apps")` y `log_event`.
+- **Evitar bulk_update** en operaciones auditadas (no dispara señales); o loguear explícito.
+- **Tests**: cubrir que el servicio deja `success=True` y que `AuditLog` registra el diff esperado.
+
+---
 
 # Integración `apps/saas` ↔ `apps/org` — Pasos para sincronizar planes/suscripciones con Lavadero y Sucursales
 

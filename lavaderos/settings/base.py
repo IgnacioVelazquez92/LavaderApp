@@ -1,3 +1,4 @@
+import logging
 from django.contrib.messages import constants as messages
 from pathlib import Path
 import os
@@ -172,9 +173,21 @@ EMAIL_SUBJECT_PREFIX = "[Lavadero] "
 # -------------------------------------------------------------------
 
 # -------------------------------------------------------------------
-# LOGGING (común y simple; ajustá según tus necesidades)
+# LOGGING
 # -------------------------------------------------------------------
-# settings.py
+# Observabilidad: toggles por entorno
+APP_LOG_ENABLE_DB = os.environ.get(
+    "APP_LOG_ENABLE_DB", "1") == "1"        # BD AppLog
+APP_LOG_ENABLE_AUDIT = os.environ.get(
+    "APP_LOG_ENABLE_AUDIT", "1") == "1"  # BD AuditLog
+APP_LOG_ENABLE_FILES = os.environ.get(
+    "APP_LOG_ENABLE_FILES", "1") == "1"  # archivos por usuario/día
+APP_LOG_FILES_BASE_DIR = os.environ.get(
+    "APP_LOG_FILES_BASE_DIR", "logs")  # carpeta logs
+APP_LOG_JSON_FILES = os.environ.get(
+    "APP_LOG_JSON_FILES", "0") == "1"      # JSONL en vez de texto
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -186,7 +199,6 @@ LOGGING = {
     },
 
     "formatters": {
-        # Línea compacta y legible, ideal para debug y grep
         "per_user_line": {
             "format": (
                 "%(asctime)s %(levelname)s "
@@ -195,12 +207,13 @@ LOGGING = {
             ),
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
-        # Para access log detallado (si querés separar)
         "per_user_access": {
             "format": (
                 "%(asctime)s %(levelname)s "
                 "user=%(username)s empresa=%(empresa_id)s req=%(request_id)s "
                 "method=%(method)s path=%(path)s status=%(status)s ms=%(duration_ms)s "
+                "redirect=%(redirect_to)s route=%(route_name)s tmpl=%(template_name)s "
+                "messages=%(messages)s body=%(body_preview)s "
                 "%(message)s"
             ),
             "datefmt": "%Y-%m-%d %H:%M:%S",
@@ -209,44 +222,67 @@ LOGGING = {
 
     "handlers": {
         "console": {"class": "logging.StreamHandler"},
-        "applog_db": {  # sigue guardando en la BD
+
+        # BD → AppLog (tolera arranque sin migraciones)
+        "applog_db": {
             "level": "INFO",
             "class": "apps.app_log.logging_handler.AppLogDBHandler",
         },
-        # NUEVO: escribe .log por usuario y día
+
+        # Archivos por usuario/día (negocio/auditoría, formato corto)
         "per_user_daily_file": {
             "level": "INFO",
             "class": "apps.app_log.file_handler.PerUserDailyFileHandler",
             "filters": ["request_context"],
-            "formatter": "per_user_line",   # o "per_user_access" si preferís
-            # carpeta base (podés poner ruta absoluta)
-            "base_dir": "logs",
+            "formatter": "per_user_line",
+            "base_dir": APP_LOG_FILES_BASE_DIR,
+        },
+
+        # Archivos por usuario/día (access log, formato extendido)
+        "per_user_daily_access_file": {
+            "level": "INFO",
+            "class": "apps.app_log.file_handler.PerUserDailyFileHandler",
+            "filters": ["request_context"],
+            "formatter": "per_user_access",
+            "base_dir": APP_LOG_FILES_BASE_DIR,
         },
     },
 
     "loggers": {
+        # Errores HTTP → consola + BD + archivos
         "django.request": {
-            "handlers": ["console", "applog_db", "per_user_daily_file"],
+            "handlers": ["console"]
+            + (["applog_db"] if APP_LOG_ENABLE_DB else [])
+            + (["per_user_daily_access_file"] if APP_LOG_ENABLE_FILES else []),
             "level": "ERROR",
             "propagate": False,
         },
+
+        # Logs de negocio genéricos
         "apps": {
-            "handlers": ["console", "applog_db", "per_user_daily_file"],
+            "handlers": ["console"]
+            + (["applog_db"] if APP_LOG_ENABLE_DB else [])
+            + (["per_user_daily_file"] if APP_LOG_ENABLE_FILES else []),
             "level": "INFO",
             "propagate": False,
         },
-        "apps.access": {             # <--- NUEVO
-            "handlers": ["per_user_daily_file"],
+
+        # Access logs (desde RequestLogMiddleware)
+        "apps.access": {
+            "handlers": (["per_user_daily_access_file"] if APP_LOG_ENABLE_FILES else [])
+            + (["applog_db"] if APP_LOG_ENABLE_DB else []),
             "level": "INFO",
             "propagate": False,
         },
-        "apps.audit": {              # <--- NUEVO
-            "handlers": ["per_user_daily_file"],
+
+        # Auditoría (desde signals.py)
+        "apps.audit": {
+            "handlers": (["per_user_daily_file"] if APP_LOG_ENABLE_FILES else [])
+            + (["applog_db"] if APP_LOG_ENABLE_DB else []),
             "level": "INFO",
             "propagate": False,
         },
     },
-
 }
 
 

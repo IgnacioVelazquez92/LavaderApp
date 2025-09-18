@@ -31,9 +31,11 @@
       <a class="btn btn-outline-secondary" href="{% url 'invoicing:list' %}">
         <i class="bi bi-arrow-left"></i> Volver al listado
       </a>
-      <a class="btn btn-outline-primary" href="{% url 'sales:detail' pk=comprobante.venta.id %}">
+      {% if comprobante.venta_id %}
+      <a class="btn btn-outline-primary" href="{% url 'sales:detail' pk=comprobante.venta_id %}">
         <i class="bi bi-basket2"></i> Ver venta
       </a>
+      {% endif %}
       <a class="btn btn-primary" href="{% url 'invoicing:download' pk=comprobante.id %}">
         <i class="bi bi-download"></i> Descargar
       </a>
@@ -43,6 +45,7 @@
   <!-- Mensajes globales -->
   {% include "includes/_messages.html" %}
 
+  {% with snap=comprobante.snapshot %}
   <div class="row g-3">
     <!-- Resumen de comprobante -->
     <div class="col-12 col-lg-5">
@@ -54,11 +57,11 @@
           <ul class="list-group list-group-flush">
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Empresa
-              <span class="text-body-secondary">{{ snapshot.empresa.nombre }}</span>
+              <span class="text-body-secondary">{{ snap.empresa.nombre }}</span>
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Sucursal
-              <span class="text-body-secondary">{{ snapshot.sucursal.nombre }}</span>
+              <span class="text-body-secondary">{{ snap.sucursal.nombre }}</span>
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Moneda
@@ -71,7 +74,7 @@
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Cliente (operativo)
               <span class="text-body-secondary">
-                {{ snapshot.cliente.nombre }} {{ snapshot.cliente.apellido }}
+                {{ snap.cliente.nombre }} {{ snap.cliente.apellido }}
               </span>
             </li>
             {% if comprobante.cliente_facturacion %}
@@ -84,7 +87,7 @@
             {% endif %}
             <li class="list-group-item">
               <div class="small text-body-secondary">
-                {{ snapshot.leyendas.no_fiscal }}
+                {{ snap.leyendas.no_fiscal }}
               </div>
             </li>
           </ul>
@@ -112,28 +115,28 @@
           <div class="row g-3">
             <div class="col-12 col-md-6">
               <div class="small text-body-secondary">Cliente</div>
-              <div>{{ snapshot.cliente.nombre }} {{ snapshot.cliente.apellido }}</div>
+              <div>{{ snap.cliente.nombre }} {{ snap.cliente.apellido }}</div>
             </div>
             <div class="col-12 col-md-6">
               <div class="small text-body-secondary">Venta</div>
-              <div class="text-monospace">{{ snapshot.venta.id }}</div>
+              <div class="text-monospace">{{ snap.venta.id }}</div>
             </div>
             <div class="col-12 col-md-6">
               <div class="small text-body-secondary">Vehículo</div>
               <div>
-                {{ snapshot.vehiculo.patente }}
-                {% if snapshot.vehiculo.tipo %}
-                  <span class="text-body-secondary">· {{ snapshot.vehiculo.tipo }}</span>
+                {{ snap.vehiculo.patente }}
+                {% if snap.vehiculo.tipo %}
+                  <span class="text-body-secondary">· {{ snap.vehiculo.tipo }}</span>
                 {% endif %}
               </div>
             </div>
             <div class="col-12 col-md-6">
               <div class="small text-body-secondary">Estado de venta</div>
-              <div class="badge text-bg-success">{{ snapshot.venta.estado }}</div>
+              <div class="badge text-bg-success">{{ snap.venta.estado }}</div>
             </div>
             <div class="col-12">
               <div class="small text-body-secondary">Notas</div>
-              <div class="text-break">{{ snapshot.venta.notas }}</div>
+              <div class="text-break">{{ snap.venta.notas }}</div>
             </div>
           </div>
         </div>
@@ -155,7 +158,7 @@
                 </tr>
               </thead>
               <tbody>
-                {% for it in snapshot.items %}
+                {% for it in snap.items %}
                 <tr>
                   <td class="text-break">{{ it.servicio_nombre }}</td>
                   <td class="text-end">{{ it.precio_unitario }}</td>
@@ -172,15 +175,11 @@
               <tfoot>
                 <tr>
                   <th scope="row" class="text-end" colspan="2">Subtotal</th>
-                  <td class="text-end">{{ snapshot.venta.subtotal }}</td>
-                </tr>
-                <tr>
-                  <th scope="row" class="text-end" colspan="2">Propina</th>
-                  <td class="text-end">{{ snapshot.venta.propina }}</td>
+                  <td class="text-end">{{ snap.venta.subtotal }}</td>
                 </tr>
                 <tr>
                   <th scope="row" class="text-end" colspan="2">Descuento</th>
-                  <td class="text-end">{{ snapshot.venta.descuento }}</td>
+                  <td class="text-end">{{ snap.venta.descuento }}</td>
                 </tr>
                 <tr class="table-light">
                   <th scope="row" class="text-end" colspan="2">Total</th>
@@ -194,6 +193,7 @@
 
     </div>
   </div>
+  {% endwith %}
 
 </div>
 {% endblock %}

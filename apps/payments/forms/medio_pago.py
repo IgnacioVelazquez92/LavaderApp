@@ -6,25 +6,17 @@ from apps.payments.models import MedioPago
 
 
 class MedioPagoForm(forms.ModelForm):
-    """
-    Form de MedioPago:
-    - No expone 'empresa' (se asigna desde la vista con request.empresa_activa)
-    - Valida unicidad por (empresa, nombre) de forma amigable
-    - Aplica clases Bootstrap desde __init__
-    """
-
     class Meta:
         model = MedioPago
         fields = ["nombre", "activo"]
 
     def __init__(self, *args, **kwargs):
-        # empresa llega vía kwarg para validaciones
         self.empresa = kwargs.pop("empresa", None)
         super().__init__(*args, **kwargs)
-        self.fields["nombre"].widget.attrs.update(
-            {"class": "form-control",
-                "placeholder": _("Ej: Efectivo, MercadoPago, Transferencia BBVA")}
-        )
+        self.fields["nombre"].widget.attrs.update({
+            "class": "form-control",
+            "placeholder": _("Ej: Efectivo, MercadoPago, Transferencia BBVA"),
+        })
         self.fields["activo"].widget.attrs.update(
             {"class": "form-check-input"})
 
@@ -32,7 +24,6 @@ class MedioPagoForm(forms.ModelForm):
         nombre = (self.cleaned_data.get("nombre") or "").strip()
         if not nombre:
             raise ValidationError(_("Ingresá un nombre."))
-        # Validación de unicidad por empresa (además del UniqueConstraint a nivel DB)
         if self.empresa:
             qs = MedioPago.objects.filter(
                 empresa=self.empresa, nombre__iexact=nombre)
@@ -42,3 +33,12 @@ class MedioPagoForm(forms.ModelForm):
                 raise ValidationError(
                     _("Ya existe un medio de pago con ese nombre en esta empresa."))
         return nombre
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        if self.empresa is not None:
+            obj.empresa = self.empresa
+        if commit:
+            obj.full_clean()
+            obj.save()
+        return obj

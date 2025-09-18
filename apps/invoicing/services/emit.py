@@ -1,5 +1,7 @@
 # apps/invoicing/services/emit.py
 from __future__ import annotations
+from django.core.files.storage import default_storage
+import base64
 
 import json
 from dataclasses import dataclass
@@ -65,6 +67,7 @@ def _build_snapshot(*, venta, tipo: str, numero_completo: str, punto_venta: int)
         "empresa": {
             "id": venta.empresa_id,
             "nombre": getattr(venta.empresa, "nombre", ""),
+            "logo_data": _empresa_logo_base64(getattr(venta, "empresa", None)),
         },
         "sucursal": {
             "id": venta.sucursal_id,
@@ -237,3 +240,23 @@ def emitir_auto(*, venta_id, actor=None) -> Optional[EmitirResultado]:
         actor=actor,
         reintentos_idempotentes=True,
     )
+
+
+def _empresa_logo_base64(empresa) -> str | None:
+    """
+    Devuelve el logo de la empresa como data URI base64 (png/jpg), o None si no hay.
+    Evita dependencias de rutas absolutas al renderizar PDF.
+    """
+    logo = getattr(empresa, "logo", None)  # ImageField o FileField
+    if not logo:
+        return None
+    try:
+        with default_storage.open(logo.name, "rb") as f:
+            data = f.read()
+        # detecta mimetype simple por extensión
+        ext = (logo.name.split(".")[-1] or "").lower()
+        mime = "image/png" if ext in ("png",) else "image/jpeg"
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception:
+        return None

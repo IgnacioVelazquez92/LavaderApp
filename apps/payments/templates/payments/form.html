@@ -18,6 +18,7 @@
         <div class="card-header fw-semibold">Registrar pago</div>
         <div class="card-body">
 
+          {# fallback server-side si el backend pidió confirmación #}
           {% if requiere_confirmacion %}
             <div class="alert alert-warning d-flex align-items-start">
               <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -29,7 +30,8 @@
             </div>
           {% endif %}
 
-          <form method="post" novalidate>
+          <form id="payment-form" method="post" novalidate
+                data-saldo="{{ venta.saldo_pendiente }}">
             {% csrf_token %}
 
             <div class="mb-3">
@@ -68,8 +70,10 @@
               {% if form.idempotency_key.errors %}<div class="invalid-feedback d-block">{{ form.idempotency_key.errors|striptags }}</div>{% endif %}
             </div>
 
+            {# oculto que controla el split en el backend #}
+            <input type="hidden" name="confirmar_split" id="confirmar_split" value="{% if requiere_confirmacion %}1{% else %}0{% endif %}">
+
             {% if requiere_confirmacion %}
-              <input type="hidden" name="confirmar_split" value="1">
               <div class="d-flex gap-2">
                 <a href="{% url 'payments:create' venta_id=venta.pk %}" class="btn btn-outline-secondary">Volver y editar</a>
                 <button type="submit" class="btn btn-primary">
@@ -108,4 +112,93 @@
 
   </div>
 </div>
+
+{# ---------------- MODAL / JS (solo front-end) ---------------- #}
+<div class="modal fade" id="modalConfirmOverpay" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Aplicar diferencia como propina</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        Estás registrando <strong>$<span id="montoIngresado"></span></strong> y el saldo actual es
+        <strong>$<span id="saldoActual"></span></strong>.<br>
+        La <strong>diferencia</strong> es <strong>$<span id="diferenciaPropina"></span></strong>.<br><br>
+        ¿Querés aplicar esa diferencia como <strong>propina</strong>?
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Volver y editar</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmarSplit">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const form = document.getElementById('payment-form');
+  if (!form) return;
+
+  const inputMonto = document.getElementById('id_monto');
+  const inputEsPropina = document.getElementById('id_es_propina');
+  const hiddenSplit = document.getElementById('confirmar_split');
+  const saldo = parseFloat(String(form.dataset.saldo).replace(',', '.')) || 0;
+
+  // Utils de parseo tolerante (soporta 12.345,67 y 12345.67)
+  function parseDecimal(value) {
+    if (typeof value !== 'string') return Number(value) || 0;
+    const v = value.trim();
+    // Si hay coma y punto, intentamos formato “es-AR”: quitamos puntos de miles y cambiamos coma por punto
+    if (v.indexOf(',') >= 0 && v.indexOf('.') >= 0) {
+      return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+    // Si solo hay coma, asumimos decimal con coma
+    if (v.indexOf(',') >= 0) return parseFloat(v.replace(',', '.')) || 0;
+    // Default
+    return parseFloat(v) || 0;
+  }
+
+  // Bootstrap modal
+  let bsModal;
+  function getModal() {
+    const el = document.getElementById('modalConfirmOverpay');
+    if (!bsModal) bsModal = new bootstrap.Modal(el);
+    return { el, bsModal };
+  }
+
+  form.addEventListener('submit', function(ev) {
+    // si el backend ya pidió confirmación, dejamos pasar
+    if (hiddenSplit && hiddenSplit.value === '1') return;
+
+    const monto = parseDecimal(inputMonto ? inputMonto.value : '0');
+    const esPropina = !!(inputEsPropina && inputEsPropina.checked);
+
+    // Mostrar modal SOLO si es sobrepago y no marcaron propina manual
+    if (!esPropina && monto > saldo && saldo > 0) {
+      ev.preventDefault();
+
+      // Completar textos del modal
+      document.getElementById('montoIngresado').textContent = monto.toFixed(2);
+      document.getElementById('saldoActual').textContent = saldo.toFixed(2);
+      document.getElementById('diferenciaPropina').textContent = (monto - saldo).toFixed(2);
+
+      const { el, bsModal } = getModal();
+      bsModal.show();
+
+      // Confirmar → setear hidden y enviar
+      const btn = document.getElementById('btnConfirmarSplit');
+      const handler = function() {
+        hiddenSplit.value = '1';
+        bsModal.hide();
+        // evitar duplicar handler
+        btn.removeEventListener('click', handler);
+        form.submit();
+      };
+      btn.addEventListener('click', handler, { once: true });
+    }
+    // si no hay sobrepago, envío normal
+  }, false);
+})();
+</script>
 {% endblock %}

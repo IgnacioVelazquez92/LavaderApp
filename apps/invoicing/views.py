@@ -139,17 +139,33 @@ class ComprobanteListView(LoginRequiredMixin, TenancyRequiredMixin, ListView):
         return ctx
 
 
+# class ComprobanteDetailView(LoginRequiredMixin, TenancyRequiredMixin, DetailView):
+#     model = Comprobante
+#     template_name = "invoicing/detail.html"
+#     context_object_name = "comprobante"
+
+#     def get_queryset(self):
+#         empresa = self.get_empresa_activa()
+#         return (
+#             Comprobante.objects
+#             .select_related("empresa", "sucursal", "venta", "cliente", "cliente_facturacion", "emitido_por")
+#             .filter(empresa=empresa)
+#         )
+
+#     def get_context_data(self, **kwargs):
+#         ctx = super().get_context_data(**kwargs)
+#         # Exponer el snapshot como variable de template
+#         ctx["snapshot"] = (self.object.snapshot or {})
+#         return ctx
+
+# views.py (igual que ahora)
 class ComprobanteDetailView(LoginRequiredMixin, TenancyRequiredMixin, DetailView):
-    """
-    Detalle de comprobante con validación de empresa activa.
-    """
     model = Comprobante
     template_name = "invoicing/detail.html"
     context_object_name = "comprobante"
 
     def get_queryset(self):
         empresa = self.get_empresa_activa()
-        # Filtra por empresa para no exponer comprobantes de otros tenants
         return (
             Comprobante.objects
             .select_related("empresa", "sucursal", "venta", "cliente", "cliente_facturacion", "emitido_por")
