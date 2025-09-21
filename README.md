@@ -3273,7 +3273,8 @@ sequenceDiagram
 
 # Módulo 10 — `apps/notifications` (Plantillas y Log de Notificaciones)
 
-> **Objetivo del módulo:** Gestionar **plantillas** de mensajes (Email/WhatsApp/SMS — simulado en MVP), **renderizarlas** con datos de la venta/cliente, y **registrar** cada envío en un **log** con su estado. En el MVP no se integra un proveedor real: el “envío” es simulado y auditable.
+> **Objetivo del módulo:** Gestionar **plantillas** de mensajes (Email/WhatsApp/SMS — simulado en MVP), **renderizarlas** con datos de la venta/cliente, y **registrar** cada envío en un **log** con su estado.  
+> En el MVP no se integra un proveedor real: el “envío” es simulado y auditable.
 
 ---
 
@@ -3287,28 +3288,28 @@ apps/notifications/
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                       # Modelos: PlantillaNotif, LogNotif
-├─ urls.py                         # Rutas propias (listar/editar plantillas, enviar desde venta)
+├─ urls.py                         # Todas las rutas (CRUD plantillas, enviar desde venta)
 ├─ views.py                        # Vistas server-rendered (CRUD plantillas, acción enviar/preview)
 ├─ forms/
 │  ├─ __init__.py
-│  └─ template.py                 # Form de creación/edición de plantilla
+│  └─ template.py                  # Form de creación/edición de plantilla
 ├─ services/
 │  ├─ __init__.py
-│  ├─ renderers.py                # Render de plantilla con contexto (venta, cliente, empresa)
-│  └─ dispatcher.py               # Orquestación de envío simulado + persistencia de LogNotif
+│  ├─ renderers.py                 # Render de plantilla con contexto (venta, cliente, empresa)
+│  └─ dispatcher.py                # Orquestación de envío simulado + persistencia de LogNotif
 ├─ selectors.py                    # Lecturas: listar plantillas activas, logs por venta/fecha
 ├─ templates/
 │  └─ notifications/
-│     ├─ templates_list.html      # Listado de plantillas
-│     ├─ template_form.html       # Alta/edición de plantilla
-│     ├─ preview.html             # Vista previa con variables de muestra
-│     └─ send_from_sale.html      # Pantalla para enviar notificación de una venta
+│     ├─ templates_list.html       # Listado de plantillas
+│     ├─ template_form.html        # Alta/edición de plantilla (con ayuda memoria de variables)
+│     ├─ preview.html              # Vista previa con variables de muestra
+│     └─ send_from_sale.html       # Pantalla para enviar notificación de una venta
 ├─ static/
 │  └─ notifications/
-│     ├─ notifications.css        # Estilos propios
-│     └─ notifications.js         # UX: copiar cuerpo, reemplazos en vivo (preview)
+│     ├─ notifications.css         # Estilos propios
+│     └─ notifications.js          # UX: copiar cuerpo, reemplazos en vivo (preview)
 └─ emails/
-   └─ generic_subject.txt         # (Opcional) asunto por defecto si canal=email
+   └─ generic_subject.txt          # (Opcional) asunto por defecto si canal=email
 ```
 
 ### Rol de cada componente
@@ -3320,6 +3321,7 @@ apps/notifications/
 - **`services/dispatcher.py`**: simula el **envío** según `canal` y crea `LogNotif` con `estado ∈ {enviado, error}`.
 - **`selectors.py`**: listados de plantillas activas; logs por venta/fecha/canal.
 - **`views.py`**: CRUD de plantillas y acción **enviar** (desde una venta).
+- **`urls.py`**: concentra tanto las rutas de plantillas como la acción `/ventas/<id>/notificar/`.
 
 ---
 
@@ -3334,7 +3336,7 @@ apps/notifications/
 - `POST /ventas/<uuid:venta_id>/notificar/` → Render + “envío” simulado + creación de `LogNotif`.
 - `GET  /notificaciones/logs/` → (Opcional) Listado de logs con filtros por fecha/venta/canal/estado.
 
-> La UI natural agrega un botón “Notificar” en el **detalle de la venta** cuando está `terminado` o `pagado` (configurable).
+> La UI natural agrega un botón **“Notificar cliente”** en el **detalle de la venta** cuando está `terminado` o `pagado`.
 
 ---
 
@@ -3342,18 +3344,20 @@ apps/notifications/
 
 ### Crear/Editar Plantilla
 
-- **Input (POST)**: `clave` (única por empresa), `canal` (`email`/`whatsapp`), `cuerpo_tpl` (texto con `{{variables}}`), `activo`.
+- **Input (POST)**:  
+  `clave` (única por empresa), `canal` (`email`/`whatsapp`), `cuerpo_tpl` (texto con `{{variables}}`), `activo`.
 - **Proceso**: persistir plantilla; validar que `clave` no se repita.
 - **Output**: plantilla lista para usar en envíos.
 
 ### Enviar Notificación desde una Venta
 
-- **Input (POST)**: `venta_id`, `plantilla_id`, `destinatario` (email o teléfono), **contexto adicional opcional** (`nota_extra`).
+- **Input (POST)**:  
+  `venta_id`, `plantilla_id`, `destinatario` (email o teléfono), **contexto adicional opcional** (`nota_extra`).
 - **Proceso**:
   1. `renderers.render(plantilla, venta, extras)` → `cuerpo_renderizado`.
   2. `dispatcher.send(canal, destinatario, cuerpo_renderizado)` (simulado).
   3. Crear `LogNotif(venta, canal, destinatario, cuerpo_renderizado, estado, enviado_en=now)`.
-- **Output (UI)**: redirect al detalle de la venta o a `/notificaciones/logs/` con mensaje de éxito/error.
+- **Output (UI)**: redirect al detalle de la venta con mensaje de éxito/error.
 
 ### Preview
 
@@ -3369,16 +3373,18 @@ apps/notifications/
 - `{{vehiculo.patente}}`, `{{vehiculo.marca}}`, `{{vehiculo.modelo}}`
 - `{{venta.id}}`, `{{venta.total}}`, `{{venta.estado}}`
 - `{{empresa.nombre}}`, `{{sucursal.nombre}}`
+- `{{venta.comprobante_url}}` (link público al comprobante en invoicing, si existe)
 - `{{nota_extra}}` (dato libre desde el form de envío)
 
-> El **renderer** debe manejar “faltantes” con valores por defecto para no romper el envío.
+> El **renderer** maneja faltantes con `"—"` para no romper el envío.  
+> En los templates se muestra una “ayuda memoria” con todas estas variables.
 
 ---
 
 ## 5) Dependencias e integraciones
 
 - **Depende de `sales`**: para cargar venta/cliente/vehículo y validar empresa activa.
-- **Usado por `invoicing`** (opcional): incluir `link` a comprobante en el mensaje.
+- **Usado por `invoicing`**: incluir `link` a comprobante público en el mensaje.
 - **Transversal**: `org` (empresa/sucursal) para contexto.
 
 ---
@@ -3387,7 +3393,8 @@ apps/notifications/
 
 - Solo usuarios autenticados y con permiso en la **empresa activa**.
 - Validar que la **venta** pertenezca a la empresa.
-- Sanitizar variables en el render para evitar inyección (el MVP usa render de texto plano).
+- Sanitizar variables en el render para evitar inyección.
+- Los links públicos de comprobantes son **read-only** y no requieren login, pero se generan con un **`public_key` UUID** para seguridad por ofuscación.
 
 ---
 
@@ -3398,6 +3405,7 @@ apps/notifications/
 3. Dispatcher simulado + creación de `LogNotif`.
 4. Vistas y templates: CRUD de plantillas, “Enviar desde venta” y “Preview”.
 5. Enlace claro en `/ventas/<id>/` para notificar al cliente.
+6. Logs de notificación visibles por admins o staff para auditoría.
 
 # Módulo 11 — `apps/cashbox` (Cierres de Caja)
 

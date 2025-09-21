@@ -8,6 +8,8 @@ from .views import (
     ComprobanteDetailView,
     ComprobanteDownloadView,
     EmitirComprobanteView,
+    PublicInvoiceView,
+    PublicInvoiceDownloadView
 )
 
 app_name = "invoicing"
@@ -33,4 +35,11 @@ urlpatterns = [
     # Nota: Lo exponemos bajo /ventas/ para que el flujo parta de la Venta.
     path("ventas/<uuid:venta_id>/emitir/",
          EmitirComprobanteView.as_view(), name="emit"),
+
+    # ------------------------------------------------------------------
+    # FFACTURAS PUBLICAS
+    # ------------------------------------------------------------------
+    path("pub/<uuid:key>/", PublicInvoiceView.as_view(), name="public_detail"),
+    path("pub/<uuid:key>/descargar/",
+         PublicInvoiceDownloadView.as_view(), name="public_download"),
 ]

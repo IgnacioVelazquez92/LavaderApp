@@ -20,8 +20,11 @@ urlpatterns = [
     path("ventas/", include("apps.sales.urls", namespace="sales")),
     path("", include(("apps.payments.urls", "payments"), namespace="payments")),
     path("", include(("apps.invoicing.urls", "invoicing"), namespace="invoicing")),
-
-
+    path(
+        "notificaciones/",
+        include(("apps.notifications.urls", "notifications"),
+                namespace="notifications"),
+    ),
     path("", login_required(TemplateView.as_view(
         template_name="home_dashboard.html")), name="home"),
     # path("", TemplateView.as_view(template_name="marketing/home.html"), name="home"),

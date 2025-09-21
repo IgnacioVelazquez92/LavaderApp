@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.invoicing",
     "apps.app_log",
+    "apps.notifications",
 ]
 
 SITE_ID = 1  # requerido por allauth
@@ -305,3 +306,5 @@ AUDIT_EXCLUDE_FIELDS = [
     "created_at", "updated_at",
     # agregar otros si son ruidosos (ej. timestamps automáticos)
 ]
+
+SITE_BASE_URL = "http://127.0.0.1:8000"

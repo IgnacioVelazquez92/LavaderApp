@@ -104,7 +104,6 @@
   </div>
 
   <!-- Administración -->
-  <!-- Administración -->
   <div class="accordion-item">
     <h2 class="accordion-header" id="acc-admin-h">
       <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-admin-b">
@@ -118,10 +117,17 @@
             Medios de pago
           </a>
           <a class="nav-link px-3 py-2" href="/cuenta/membresias/">Membresías</a>
-          <a class="nav-link px-3 py-2" href="/admin/">Django Admin</a>
+          {# Quitamos Django Admin público #}
+          {# <a class="nav-link px-3 py-2" href="/admin/">Django Admin</a> #}
+
+          <a class="nav-link px-3 py-2 {% if ns == 'notifications' %}active{% endif %}" 
+            href="{% url 'notifications:templates_list' %}">
+            Plantillas de notificaciones
+          </a>
         </nav>
       </div>
     </div>
   </div>
+
 
 {% endwith %}

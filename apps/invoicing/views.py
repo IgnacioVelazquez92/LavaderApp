@@ -4,7 +4,7 @@ from __future__ import annotations
 import mimetypes
 from datetime import date
 from typing import Any, Dict, Optional
-
+from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
@@ -139,26 +139,6 @@ class ComprobanteListView(LoginRequiredMixin, TenancyRequiredMixin, ListView):
         return ctx
 
 
-# class ComprobanteDetailView(LoginRequiredMixin, TenancyRequiredMixin, DetailView):
-#     model = Comprobante
-#     template_name = "invoicing/detail.html"
-#     context_object_name = "comprobante"
-
-#     def get_queryset(self):
-#         empresa = self.get_empresa_activa()
-#         return (
-#             Comprobante.objects
-#             .select_related("empresa", "sucursal", "venta", "cliente", "cliente_facturacion", "emitido_por")
-#             .filter(empresa=empresa)
-#         )
-
-#     def get_context_data(self, **kwargs):
-#         ctx = super().get_context_data(**kwargs)
-#         # Exponer el snapshot como variable de template
-#         ctx["snapshot"] = (self.object.snapshot or {})
-#         return ctx
-
-# views.py (igual que ahora)
 class ComprobanteDetailView(LoginRequiredMixin, TenancyRequiredMixin, DetailView):
     model = Comprobante
     template_name = "invoicing/detail.html"
@@ -301,3 +281,64 @@ class ComprobanteDownloadView(LoginRequiredMixin, TenancyRequiredMixin, View):
             return FileResponse(f.open("rb"), content_type=content_type, as_attachment=True, filename=f.name.split("/")[-1])
         except FileNotFoundError:
             raise Http404("Archivo no disponible en el almacenamiento.")
+
+
+class PublicInvoiceView(DetailView):
+    """
+    Vista pública (sin auth) del comprobante en formato A4 imprimible.
+    """
+    template_name = "invoicing/_invoice_print.html"
+    context_object_name = "comprobante"
+
+    def get_object(self, queryset=None):
+        key = self.kwargs.get("key")
+        try:
+            obj = Comprobante.objects.select_related(
+                "venta", "sucursal", "empresa", "cliente").get(public_key=key)
+        except Comprobante.DoesNotExist:
+            raise Http404("Comprobante no encontrado")
+
+        if obj.public_revocado:
+            raise Http404("Link no disponible")
+        if obj.public_expires_at and timezone.now() > obj.public_expires_at:
+            raise Http404("Link vencido")
+
+        return obj
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        # El print template espera un 'snapshot' ya listo:
+        ctx["snapshot"] = self.object.snapshot
+        ctx["public"] = True
+        return ctx
+
+
+class PublicInvoiceDownloadView(View):
+    """
+    Descarga pública del PDF si existe; si no, devuelve el HTML.
+    """
+
+    def get(self, request, *args, **kwargs):
+        key = kwargs.get("key")
+        try:
+            obj = Comprobante.objects.get(public_key=key)
+        except Comprobante.DoesNotExist:
+            raise Http404("Comprobante no encontrado")
+
+        if obj.public_revocado:
+            raise Http404("Link no disponible")
+        if obj.public_expires_at and timezone.now() > obj.public_expires_at:
+            raise Http404("Link vencido")
+
+        file_field = obj.archivo_pdf or obj.archivo_html
+        if not file_field:
+            raise Http404("Archivo no disponible")
+
+        # FileResponse sirve el archivo desde storage
+        filename = (obj.archivo_pdf and "comprobante.pdf") or "comprobante.html"
+        return FileResponse(
+            file_field.open("rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/pdf" if obj.archivo_pdf else "text/html; charset=utf-8",
+        )

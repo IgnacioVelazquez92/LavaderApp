@@ -1,0 +1,195 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Notificar al cliente{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h1 class="h3 mb-0">Notificar al cliente</h1>
+      <p class="text-muted mb-0">Prepará un mensaje para enviar por <strong>WhatsApp Web</strong>.</p>
+    </div>
+    <div>
+      <a href="{% url 'sales:detail' pk=venta.id %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver a la venta
+      </a>
+    </div>
+  </div>
+
+  <!-- Resumen de la venta -->
+  <div class="card mb-3 shadow-sm">
+    <div class="card-body">
+      <div class="row g-3 align-items-center">
+        <div class="col-12 col-md">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <span class="badge rounded-pill {% if venta.estado == 'terminado' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              <i class="bi bi-gear-wide-connected me-1"></i> Estado: {{ venta.estado|upper }}
+            </span>
+            <span class="badge text-bg-light"><i class="bi bi-cash-coin me-1"></i>Total: ${{ venta.total }}</span>
+            <span class="badge text-bg-light"><i class="bi bi-building me-1"></i>Sucursal: {{ venta.sucursal.nombre }}</span>
+          </div>
+        </div>
+        <div class="col-12 col-md">
+          <div class="d-flex flex-wrap gap-2">
+            <span class="badge text-bg-primary"><i class="bi bi-person-fill me-1"></i>{{ venta.cliente.nombre }} {{ venta.cliente.apellido }}</span>
+            <span class="badge text-bg-secondary"><i class="bi bi-car-front-fill me-1"></i>{{ venta.vehiculo.marca }} {{ venta.vehiculo.modelo }} • {{ venta.vehiculo.patente }}</span>
+          </div>
+        </div>
+        {% if venta.comprobante %}
+        <div class="col-12 col-md-auto">
+          <a href="{{ venta.comprobante.get_absolute_url }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-receipt-cutoff me-1"></i>Ver comprobante
+          </a>
+        </div>
+        {% endif %}
+      </div>
+      {% if venta.estado != "terminado" %}
+        <div class="alert alert-warning mt-3 mb-0" role="alert">
+          <i class="bi bi-exclamation-triangle-fill me-1"></i>
+          Solo se puede notificar cuando la venta está <strong>TERMINADO</strong>.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Formulario -->
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-12 col-lg-8">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+
+            <!-- Plantilla (solo WhatsApp) -->
+            <div class="mb-3">
+              <label for="{{ form.plantilla.id_for_label }}" class="form-label fw-semibold">Plantilla (WhatsApp)</label>
+              {{ form.plantilla }}
+              {% if form.plantilla.errors %}
+                <div class="invalid-feedback d-block">{{ form.plantilla.errors|striptags }}</div>
+              {% else %}
+                <div class="form-text">Elegí una plantilla activa de WhatsApp.</div>
+              {% endif %}
+            </div>
+
+            <!-- Destinatario (tel E.164) -->
+            <div class="mb-3">
+              <label for="{{ form.destinatario.id_for_label }}" class="form-label fw-semibold">Teléfono WhatsApp</label>
+              {{ form.destinatario }}
+              {% if form.destinatario.errors %}
+                <div class="invalid-feedback d-block">{{ form.destinatario.errors|striptags }}</div>
+              {% else %}
+                <div class="form-text">
+                  Formato E.164. Ej.: <code>+5493815550000</code>.
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Nota extra -->
+            <div class="mb-3">
+              <label for="{{ form.nota_extra.id_for_label }}" class="form-label fw-semibold">Nota adicional (opcional)</label>
+              {{ form.nota_extra }}
+              {% if form.nota_extra.errors %}
+                <div class="invalid-feedback d-block">{{ form.nota_extra.errors|striptags }}</div>
+              {% else %}
+                <div class="form-text">Se inserta en <code>{% verbatim %}{{nota_extra}}{% endverbatim %}</code>.</div>
+              {% endif %}
+            </div>
+
+            <!-- Idempotency -->
+            <div class="mb-3">
+              <label for="{{ form.idempotency_key.id_for_label }}" class="form-label fw-semibold">Idempotency key (opcional)</label>
+              {{ form.idempotency_key }}
+              {% if form.idempotency_key.errors %}
+                <div class="invalid-feedback d-block">{{ form.idempotency_key.errors|striptags }}</div>
+              {% else %}
+                <div class="form-text">Queda en el log; útil para reintentos externos.</div>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="card-footer d-flex justify-content-between">
+            <a href="{% url 'sales:detail' pk=venta.id %}" class="btn btn-outline-secondary">Cancelar</a>
+            <button type="submit" class="btn btn-primary" {% if venta.estado != "terminado" %}disabled{% endif %}>
+              <i class="bi bi-send-fill me-1"></i>Preparar mensaje
+            </button>
+          </div>
+        </div>
+
+        <!-- Mensaje preparado (opcional) -->
+        {% if was_prepared and cuerpo_renderizado %}
+        <div class="card shadow-sm mt-3">
+          <div class="card-header small text-muted">Mensaje preparado</div>
+          <div class="card-body">
+            <pre class="mb-0 bg-light border rounded p-2" style="white-space: pre-wrap;">{{ cuerpo_renderizado }}</pre>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Botón abrir WhatsApp Web -->
+        {% if was_prepared and wa_url %}
+        <div class="alert alert-success d-flex align-items-center justify-content-between mt-3" role="alert">
+          <div><i class="bi bi-whatsapp me-2"></i>El mensaje fue preparado para WhatsApp Web.</div>
+          <div class="d-flex gap-2">
+            <a class="btn btn-success" href="{{ wa_url }}" target="_blank" rel="noopener">
+              <i class="bi bi-whatsapp me-1"></i>Abrir WhatsApp Web
+            </a>
+            <a class="btn btn-outline-secondary" href="{% url 'sales:detail' pk=venta.id %}">
+              Volver a la venta
+            </a>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Columna lateral -->
+      <div class="col-12 col-lg-4">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h2 class="h6 text-uppercase text-muted mb-3">Sugerencias</h2>
+            <ul class="list-unstyled small mb-3">
+              <li class="mb-2"><i class="bi bi-check-circle text-success me-1"></i>
+                “Hola <code>{% verbatim %}{{cliente.nombre}}{% endverbatim %}</code> 👋,
+                tu auto (<code>{% verbatim %}{{vehiculo.patente}}{% endverbatim %}</code>) ya está listo…”
+              </li>
+              <li class="mb-2"><i class="bi bi-check-circle text-success me-1"></i>
+                Agregá total: <code>{% verbatim %}{{venta.total}}{% endverbatim %}</code> y sucursal:
+                <code>{% verbatim %}{{sucursal.nombre}}{% endverbatim %}</code>.
+              </li>
+              <li class="mb-2"><i class="bi bi-check-circle text-success me-1"></i>
+                Si hay comprobante: <code>{% verbatim %}{{venta.comprobante_url}}{% endverbatim %}</code>.
+              </li>
+            </ul>
+
+            <h3 class="h6 text-uppercase text-muted mb-2">Variables disponibles</h3>
+            <div class="bg-light border rounded p-2 small">
+              <div><code>{% verbatim %}{{cliente.nombre}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{cliente.apellido}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{cliente.telefono}}{% endverbatim %}</code></div>
+              <div><code>{% verbatim %}{{vehiculo.patente}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{vehiculo.marca}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{vehiculo.modelo}}{% endverbatim %}</code></div>
+              <div><code>{% verbatim %}{{venta.id}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{venta.total}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{venta.estado}}{% endverbatim %}</code></div>
+              <div><code>{% verbatim %}{{empresa.nombre}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{sucursal.nombre}}{% endverbatim %}</code></div>
+              <div><code>{% verbatim %}{{venta.comprobante_url}}{% endverbatim %}</code>,
+                  <code>{% verbatim %}{{nota_extra}}{% endverbatim %}</code></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert alert-info mt-3 small mb-0" role="alert">
+          <i class="bi bi-info-circle me-1"></i>
+          Recordá: el envío está habilitado cuando la venta está <strong>TERMINADO</strong>.
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}

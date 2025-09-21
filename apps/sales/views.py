@@ -18,7 +18,7 @@ from apps.sales.services import lifecycle as lifecycle_services
 from apps.sales.fsm import VentaEstado, puede_transicionar
 from apps.customers.models import Cliente
 from apps.sales.forms.service_select import ServiceSelectionForm
-
+from apps.notifications.models import PlantillaNotif, Canal
 from apps.sales.services import sales as sales_services
 from apps.sales.services import items as items_services
 
@@ -199,9 +199,30 @@ class VentaCreateView(LoginRequiredMixin, CreateView):
 
 class VentaDetailView(LoginRequiredMixin, DetailView):
     """
-    Muestra detalle de la venta, ítems y totales.
-    Incluye formulario para agregar ítems.
-    Expone flags de comprobantes y acciones para NO meter lógica en templates.
+    Muestra el detalle de la venta, sus ítems, pagos y acciones disponibles.
+
+    Decisiones:
+    - **Tenancy**: filtra siempre por `request.empresa_activa`.
+    - **UI/UX**: expone en el contexto TODOS los flags/urls que necesita el template,
+      para no meter lógica en HTML.
+
+    Contexto expuesto (además de `venta`):
+      - `services_form`: formulario para agregar servicios válidos para el tipo de vehículo.
+      - `venta_items`: lista de ítems de la venta (con `servicio` precargado).
+      - `pagos`: lista de pagos (con `medio` precargado si está disponible).
+      - `venta_pagada`: bool (estado == PAGADO).
+      - `tiene_comprobante`: bool (existe relación one-to-one).
+      - `comprobante_id`: UUID o `None`.
+      - `puede_emitir_comprobante`: bool (pagada y sin comprobante).
+      - `saldo_cubierto`: bool (saldo_pendiente == 0).
+      - `debe_finalizar_para_emitir`: bool (edge legacy: saldo==0 pero no pagada).
+      - `puede_finalizar_trabajo`: bool (FSM permite pasar a TERMINADO).
+
+      # Notificaciones (WhatsApp)
+      - `has_whatsapp_templates`: hay plantillas activas de WhatsApp en la empresa.
+      - `can_notify`: bool → venta TERMINADO **y** hay plantillas WA activas.
+      - `notify_url`: URL a `notifications:send_from_sale` con el `venta_id`.
+      - `notify_disabled_reason`: string para tooltip cuando el CTA está deshabilitado.
     """
 
     model = Venta
@@ -209,7 +230,9 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
     context_object_name = "venta"
 
     def get_queryset(self):
-        # Filtra por empresa activa (tenancy) y precarga relaciones necesarias
+        """
+        Filtra por empresa activa y precarga relaciones para evitar N+1.
+        """
         return (
             Venta.objects.filter(empresa=self.request.empresa_activa)
             .select_related(
@@ -217,19 +240,24 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
                 "vehiculo",
                 "vehiculo__tipo",
                 "sucursal",
-                "comprobante",  # OneToOne reverse con related_name="comprobante" en Comprobante
+                "comprobante",  # OneToOneField en Comprobante con related_name="comprobante"
             )
             .prefetch_related(
-                "items__servicio",  # asume related_name="items" en VentaItem
-                "pagos",            # asume related_name="pagos" en Pago
+                "items__servicio",  # related_name="items" (o fallback abajo)
+                # related_name="pagos" en Pago (si no, fallback abajo)
+                "pagos",
             )
         )
 
     def get_context_data(self, **kwargs):
+        from django.urls import reverse  # import local para mantener snippet autocontenido
+        # Selector de notificaciones importado localmente para evitar dependencias globales
+        from apps.notifications import selectors as notif_selectors
+
         ctx = super().get_context_data(**kwargs)
         venta = self.object
 
-        # ----- Form de selección de servicios (sin lógica en template) -----
+        # ---------- Form para agregar servicios ----------
         tipo = getattr(venta.vehiculo, "tipo", None)
         if tipo:
             ctx["services_form"] = ServiceSelectionForm(
@@ -240,13 +268,13 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
         else:
             ctx["services_form"] = ServiceSelectionForm()
 
-        # ----- Ítems (tolerante a nombre del related) -----
+        # ---------- Ítems ----------
         items_mgr = getattr(venta, "items", None) or getattr(
             venta, "ventaitem_set", None)
         ctx["venta_items"] = list(items_mgr.select_related(
             "servicio").all()) if items_mgr else []
 
-        # ----- Pagos (tolerante a nombre del related) -----
+        # ---------- Pagos ----------
         pagos_mgr = getattr(venta, "pagos", None) or getattr(
             venta, "pago_set", None)
         if pagos_mgr:
@@ -257,13 +285,11 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
         else:
             ctx["pagos"] = []
 
-        # ----- Flags para acciones/CTAs en template -----
+        # ---------- Flags de comprobantes / FSM ----------
         comprobante = getattr(venta, "comprobante", None)
         venta_pagada = (venta.estado == VentaEstado.PAGADO)
         tiene_comprobante = bool(comprobante)
         saldo_cubierto = (getattr(venta, "saldo_pendiente", None) == 0)
-
-        # FSM: ¿puede finalizar trabajo (pasar a TERMINADO) desde el estado actual?
         puede_finalizar_trabajo = puede_transicionar(
             venta.estado, VentaEstado.TERMINADO)
 
@@ -271,20 +297,39 @@ class VentaDetailView(LoginRequiredMixin, DetailView):
             "venta_pagada": venta_pagada,
             "tiene_comprobante": tiene_comprobante,
             "comprobante_id": (comprobante.id if tiene_comprobante else None),
-
-            # Emitir comprobante: disponible apenas está pagada y aún no tiene comprobante
             "puede_emitir_comprobante": (venta_pagada and not tiene_comprobante),
-
-            # Saldo cubierto pero todavía no pagada (no debería ocurrir si payments marca 'pagado',
-            # pero dejamos el flag por si hay datos legacy)
             "saldo_cubierto": saldo_cubierto,
             "debe_finalizar_para_emitir": (saldo_cubierto and not venta_pagada),
-
-            # Acción para cerrar operación cuando el trabajo termina
             "puede_finalizar_trabajo": puede_finalizar_trabajo,
         })
 
+        # ---------- Notificaciones (WhatsApp) ----------
+        empresa = getattr(self.request, "empresa_activa", None)
+        has_wa_tpl = False
+        if empresa:
+            # ¿Hay plantillas WA activas para esta empresa?
+            has_wa_tpl = notif_selectors.plantillas_activas_whatsapp(
+                empresa.id).exists()
+
+        can_notify = (venta.estado == VentaEstado.TERMINADO) and has_wa_tpl
+        notify_url = reverse("notifications:send_from_sale",
+                             kwargs={"venta_id": str(venta.id)})
+
+        reasons = []
+        if venta.estado != VentaEstado.TERMINADO:
+            reasons.append("La venta no está en estado TERMINADO.")
+        if not has_wa_tpl:
+            reasons.append(
+                "No hay plantillas de WhatsApp activas en la empresa.")
+        ctx.update({
+            "has_whatsapp_templates": has_wa_tpl,
+            "can_notify": can_notify,
+            "notify_url": notify_url,
+            "notify_disabled_reason": " ".join(reasons) if reasons else "",
+        })
+
         return ctx
+
 
 # --------------------------------------------------
 # Ítems: agregar, actualizar, eliminar

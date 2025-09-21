@@ -117,6 +117,16 @@ class Comprobante(models.Model):
 
     Archivos:
       - `archivo_html` y `archivo_pdf` (opcional) se persisten en MEDIA_ROOT vía `invoice_upload_path`.
+
+    Acceso público (sin login):
+      - `public_key`: token UUID no adivinable para compartir el comprobante por link público.
+      - `public_revocado`: flag para invalidar el link si es necesario.
+      - `public_expires_at`: (opcional) fecha/hora de expiración del link público.
+
+    Helpers de URL:
+      - `get_public_path()` / `get_public_download_path()` → rutas relativas (reverse).
+      - `get_public_url(base_url=None)` / `get_public_download_url(base_url=None)` → URLs absolutas.
+        Usa `settings.SITE_BASE_URL` si `base_url` no se provee.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -149,8 +159,8 @@ class Comprobante(models.Model):
 
     tipo = models.CharField(
         max_length=16, choices=TipoComprobante.choices, default=TipoComprobante.TICKET)
-    punto_venta = models.CharField(max_length=4, validators=[
-                                   PUNTO_VENTA_VALIDATOR], default="1")
+    punto_venta = models.CharField(
+        max_length=4, validators=[PUNTO_VENTA_VALIDATOR], default="1")
     numero = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 
     moneda = models.CharField(max_length=8, default="ARS")
@@ -168,7 +178,7 @@ class Comprobante(models.Model):
     archivo_pdf = models.FileField(
         upload_to=invoice_upload_path, blank=True, null=True)
 
-    # Metadatos
+    # Metadatos de emisión
     emitido_en = models.DateTimeField(auto_now_add=True)
     emitido_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -176,6 +186,23 @@ class Comprobante(models.Model):
         null=True,
         blank=True,
         related_name="comprobantes_emitidos"
+    )
+
+    # -------- Acceso público por token (link sin login) --------
+    public_key = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        help_text="Token público no adivinable para compartir el comprobante sin login."
+    )
+    public_revocado = models.BooleanField(
+        default=False,
+        help_text="Si está en True, el link público queda inválido."
+    )
+    public_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Opcional: fecha/hora de expiración del link público."
     )
 
     class Meta:
@@ -186,6 +213,12 @@ class Comprobante(models.Model):
                 fields=("sucursal", "tipo", "punto_venta", "numero"),
                 name="uq_num_comprobante_por_sucursal_tipo_pv"
             )
+        ]
+        indexes = [
+            # Útiles para listados por empresa/fecha y búsquedas rápidas por token
+            models.Index(fields=["empresa", "emitido_en"],
+                         name="idx_inv_emp_fecha"),
+            models.Index(fields=["public_key"], name="idx_inv_public_key"),
         ]
 
     # -----------------------------------------
@@ -205,3 +238,22 @@ class Comprobante(models.Model):
 
     def get_absolute_url(self) -> str:
         return reverse("invoicing:detail", kwargs={"pk": str(self.id)})
+
+    # -------------------------
+    # URLs públicas (sin login)
+    # -------------------------
+    def get_public_path(self) -> str:
+        from django.urls import reverse
+        return reverse("invoicing:public_detail", kwargs={"key": str(self.public_key)})
+
+    def get_public_download_path(self) -> str:
+        from django.urls import reverse
+        return reverse("invoicing:public_download", kwargs={"key": str(self.public_key)})
+
+    def get_public_url(self, base_url: str | None = None) -> str:
+        base = (base_url or getattr(settings, "SITE_BASE_URL", "")).rstrip("/")
+        return f"{base}{self.get_public_path()}"
+
+    def get_public_download_url(self, base_url: str | None = None) -> str:
+        base = (base_url or getattr(settings, "SITE_BASE_URL", "")).rstrip("/")
+        return f"{base}{self.get_public_download_path()}"

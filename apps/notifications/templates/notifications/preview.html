@@ -1,0 +1,155 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Vista previa de plantilla{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h1 class="h3 mb-0">Vista previa de plantilla</h1>
+      <p class="text-muted mb-0">Probá cómo se vería el mensaje con datos reales o de muestra.</p>
+    </div>
+    <div>
+      <a href="{% url 'notifications:templates_list' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver a plantillas
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-5">
+      <form method="post" class="card shadow-sm" novalidate>
+        {% csrf_token %}
+        <div class="card-body">
+          {% if form.non_field_errors %}
+            <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+          {% endif %}
+
+          <div class="mb-3">
+            <label for="{{ form.plantilla.id_for_label }}" class="form-label fw-semibold">Plantilla</label>
+            {{ form.plantilla }}
+            {% if form.plantilla.errors %}
+              <div class="invalid-feedback d-block">{{ form.plantilla.errors|striptags }}</div>
+            {% else %}
+              <div class="form-text">Elegí cualquier plantilla (activa o inactiva) para previsualizar.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <label for="{{ form.venta_id.id_for_label }}" class="form-label fw-semibold">Venta (opcional)</label>
+            {{ form.venta_id }}
+            {% if form.venta_id.errors %}
+              <div class="invalid-feedback d-block">{{ form.venta_id.errors|striptags }}</div>
+            {% else %}
+              <div class="form-text">
+                Usá el UUID de una venta real para ver datos auténticos. Si lo dejás vacío, se usarán datos de ejemplo.
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <label for="{{ form.nota_extra.id_for_label }}" class="form-label fw-semibold">Nota adicional (opcional)</label>
+            {{ form.nota_extra }}
+            {% if form.nota_extra.errors %}
+              <div class="invalid-feedback d-block">{{ form.nota_extra.errors|striptags }}</div>
+            {% else %}
+              <div class="form-text">Se inserta en <code>{% verbatim %}{{nota_extra}}{% endverbatim %}</code>.</div>
+            {% endif %}
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-eye me-1"></i>Previsualizar
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div class="card shadow-sm mt-3">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-2">Variables disponibles</h2>
+          <div class="bg-light border rounded p-2 small">
+            <div><code>{% verbatim %}{{cliente.nombre}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{cliente.apellido}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{cliente.telefono}}{% endverbatim %}</code></div>
+            <div><code>{% verbatim %}{{vehiculo.patente}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{vehiculo.marca}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{vehiculo.modelo}}{% endverbatim %}</code></div>
+            <div><code>{% verbatim %}{{venta.id}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{venta.total}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{venta.estado}}{% endverbatim %}</code></div>
+            <div><code>{% verbatim %}{{empresa.nombre}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{sucursal.nombre}}{% endverbatim %}</code></div>
+            <div><code>{% verbatim %}{{venta.comprobante_url}}{% endverbatim %}</code>,
+                <code>{% verbatim %}{{nota_extra}}{% endverbatim %}</code></div>
+          </div>
+          <p class="small text-muted mt-2 mb-0">
+            El render es de texto plano (sin HTML). Los faltantes se reemplazan por “—”.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span class="fw-semibold">Resultado</span>
+          {% if plantilla %}
+            <span class="badge {% if plantilla.canal == 'email' %}text-bg-primary{% elif plantilla.canal == 'whatsapp' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {% if plantilla.canal == 'email' %}<i class="bi bi-envelope-fill me-1"></i>Email{% elif plantilla.canal == 'whatsapp' %}<i class="bi bi-whatsapp me-1"></i>WhatsApp{% else %}{{ plantilla.get_canal_display }}{% endif %}
+            </span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          {% if asunto_renderizado or cuerpo_renderizado %}
+            {% if asunto_renderizado %}
+              <div class="mb-2">
+                <span class="text-uppercase text-muted small fw-semibold">Asunto</span>
+                <div class="border rounded p-2 bg-light">{{ asunto_renderizado }}</div>
+              </div>
+            {% endif %}
+            <div>
+              <span class="text-uppercase text-muted small fw-semibold">Cuerpo</span>
+              <pre class="border rounded p-2 bg-light mb-0" style="white-space: pre-wrap;">{{ cuerpo_renderizado }}</pre>
+            </div>
+          {% else %}
+            <div class="text-center py-5">
+              <div class="display-6 mb-2"><i class="bi bi-eye"></i></div>
+              <p class="lead mb-2">Sin vista previa aún</p>
+              <p class="text-muted mb-0">Elegí una plantilla y presioná <strong>Previsualizar</strong>.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if contexto_usado %}
+      <div class="card shadow-sm mt-3">
+        <div class="card-header"><span class="fw-semibold">Contexto utilizado</span></div>
+        <div class="card-body">
+          <div class="row g-3">
+            {% for group, data in contexto_usado.items %}
+              <div class="col-12 col-md-6">
+                <div class="border rounded p-2 h-100">
+                  <div class="fw-semibold text-muted text-uppercase small mb-2">{{ group }}</div>
+                  {% if data.items %}
+                    <dl class="row mb-0 small">
+                      {% for k, v in data.items %}
+                        <dt class="col-5 text-muted">{{ k }}</dt>
+                        <dd class="col-7 mb-1">{{ v }}</dd>
+                      {% endfor %}
+                    </dl>
+                  {% else %}
+                    <div class="small text-muted">—</div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
