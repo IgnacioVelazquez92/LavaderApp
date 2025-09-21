@@ -3409,7 +3409,7 @@ apps/notifications/
 
 # Módulo 11 — `apps/cashbox` (Cierres de Caja)
 
-> **Objetivo del módulo:** Permitir el **cierre operativo de caja** por sucursal/usuario en un rango de tiempo (normalmente un turno o día). Consolidar ventas, pagos y propinas en totales por método de pago, registrar notas y garantizar trazabilidad.
+> **Objetivo del módulo:** Gestionar el **ciclo de caja** en cada sucursal: apertura obligatoria antes de operar, un único cierre abierto por sucursal a la vez, consolidación automática de pagos y propinas, y registro de notas y trazabilidad de usuarios.
 
 ---
 
@@ -3419,106 +3419,121 @@ apps/notifications/
 apps/cashbox/
 ├─ __init__.py
 ├─ apps.py                        # Config de la app (name="apps.cashbox")
-├─ admin.py                       # Registro de CierreCaja y CierreCajaTotal en admin
+├─ admin.py                       # Admin de CierreCaja y CierreCajaTotal (solo lectura/auditoría)
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                      # Modelos: CierreCaja, CierreCajaTotal
-├─ urls.py                        # Rutas: abrir, cerrar, listar, detalle
-├─ views.py                       # Vistas server-rendered (form de cierre, detalle, listado)
+├─ models.py                      # CierreCaja y CierreCajaTotal
+├─ urls.py                        # Endpoints: abrir, cerrar, detalle, listado
+├─ views.py                       # Vistas server-rendered CRUD (abrir/cerrar, detalle, listado)
 ├─ forms/
 │  ├─ __init__.py
-│  └─ closure.py                 # Formulario: notas, confirmaciones
+│  └─ closure.py                  # Validaciones de cierre (ej. notas obligatorias si hay diferencias)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ cashbox.py                 # Casos de uso: abrir_cierre(), cerrar_cierre()
-│  └─ totals.py                  # Calcular totales de pagos por método + propinas
-├─ selectors.py                   # Consultas: cierres por fecha/sucursal, detalle con totales
+│  ├─ cashbox.py                  # abrir_cierre(), cerrar_cierre() con reglas de negocio
+│  └─ totals.py                   # Calcular totales de pagos por método y propinas
+├─ selectors.py                   # Consultas optimizadas: cierres por rango, detalle con totales
 ├─ templates/
 │  └─ cashbox/
-│     ├─ list.html               # Listado de cierres (fecha, usuario, sucursal)
-│     ├─ form.html               # Form de apertura/cierre
-│     ├─ detail.html             # Detalle de cierre con totales
-│     └─ _totals_table.html      # Partial con desglose de métodos/propinas
+│     ├─ list.html                # Listado de cierres por sucursal
+│     ├─ form.html                # Form de apertura/cierre (notas, confirmación)
+│     ├─ detail.html              # Detalle de un cierre con desglose de totales
+│     └─ _totals_table.html       # Partial con tabla de métodos de pago/propinas
 └─ static/
    └─ cashbox/
-      ├─ cashbox.css             # Estilos propios
-      └─ cashbox.js              # UX: confirmación de cierre, reload de totales
+      ├─ cashbox.css              # Estilos propios
+      └─ cashbox.js               # UX: confirmación, recálculo de totales en vivo
 ```
 
-### Rol de cada componente
+---
 
-- **`models.py`**:
-  - `CierreCaja(empresa, sucursal, usuario, abierto_en, cerrado_en, notas)`.
-  - `CierreCajaTotal(cierre_caja, metodo, monto, propinas)`.
-- **`services/cashbox.py`**: controla apertura/cierre, evita solapamientos, registra timestamps.
-- **`services/totals.py`**: resume pagos (`apps/payments`) por método y propinas dentro del rango.
-- **`selectors.py`**: consultas para reportes históricos y detalle de un cierre.
-- **`forms/closure.py`**: validación mínima (no cerrar dos veces, notas obligatorias si hay diferencias).
+## 2) Modelos
+
+### `CierreCaja`
+
+- **Tenancy**: `empresa`, `sucursal`.
+- **Usuario**: `usuario` que abre, `cerrado_por` que cierra.
+- **Fechas**: `abierto_en` automático (now), `cerrado_en` al momento del cierre.
+- **Estado**: exactamente **un cierre abierto por sucursal** (constraint parcial).
+- **Notas**: comentarios, observaciones o diferencias.
+- **Helpers**: `esta_abierta`, `rango()`.
+
+### `CierreCajaTotal`
+
+- Relacionado a `CierreCaja`.
+- Campos: `medio` (forma de pago), `monto`, `propinas`.
+- Usado para almacenar el resumen generado por `services.totals`.
 
 ---
 
-## 2) Endpoints propuestos
+## 3) Servicios
 
-- `GET  /caja/` → Listado de cierres por sucursal (filtros por fecha).
-- `GET  /caja/abrir/` → Apertura de caja (marca `abierto_en`).
-- `POST /caja/abrir/` → Crear registro de apertura.
-- `GET  /caja/<uuid:id>/cerrar/` → Form para cierre (totales precargados).
-- `POST /caja/<uuid:id>/cerrar/` → Calcular totales, guardar `cerrado_en`, registrar `CierreCajaTotal`.
-- `GET  /caja/<uuid:id>/` → Detalle del cierre con desglose por método.
+### `services/cashbox.py`
 
----
+- **`abrir_cierre(empresa, sucursal, usuario)`**:
+  - Verifica que no exista cierre abierto en esa sucursal.
+  - Crea `CierreCaja(abierto_en=now)`.
+- **`cerrar_cierre(cierre, usuario, notas)`**:
+  - Calcula totales de pagos con `services.totals`.
+  - Marca `cerrado_en=now`, `cerrado_por=usuario`.
+  - Crea registros `CierreCajaTotal` por cada método de pago.
 
-## 3) Contratos de entrada/salida (conceptual)
+### `services/totals.py`
 
-### Apertura
-
-- **Input (POST)**: sucursal, usuario, notas opcionales.
-- **Proceso**: crear `CierreCaja(abierto_en=now, cerrado_en=null)`.
-- **Output**: redirect a `/caja/<id>/`.
-
-### Cierre
-
-- **Input (POST)**: notas, confirmación.
-- **Proceso**:
-  1. Calcular totales de pagos (`apps/payments`) desde `abierto_en` hasta `now`.
-  2. Guardar `cerrado_en`.
-  3. Crear `CierreCajaTotal` por método (`efectivo`, `tarjeta`, `mp`) + propinas.
-  4. Validar cuadratura (opcional, si hay caja física).
-- **Output**: cierre completado; render de detalle.
-
-### Detalle
-
-- **Input (GET)**: `cierre_id`.
-- **Proceso**: cargar totales.
-- **Output**: HTML con desglose.
+- Resume pagos (`apps.payments.Pago`) desde `abierto_en` hasta `cerrado_en`.
+- Devuelve {medio → monto, propinas}.
 
 ---
 
-## 4) Dependencias e integraciones
+## 4) Selectors
 
-- **Depende de `payments`**: obtiene pagos para resumir totales.
-- **Depende de `sales`**: contexto de ventas cerradas en el periodo.
-- **Depende de `org`**: sucursal/empresa.
-- **Usado en reporting**: dashboards financieros simples.
+- `cierres_por_rango(empresa, sucursal, desde, hasta)` → lista de cierres con filtros.
+- `detalle_con_totales(cierre_id)` → incluye `CierreCajaTotal`.
 
 ---
 
-## 5) Seguridad
+## 5) Vistas y URLs
 
-- Autenticación requerida.
-- Validar que el usuario pertenece a la **empresa activa**.
-- Solo rol `admin` o `cajero` puede abrir/cerrar cajas.
-- Evitar múltiples aperturas abiertas en una sucursal.
+### Rutas (`apps/cashbox/urls.py`)
+
+- `GET  /caja/` → listado de cierres por sucursal.
+- `GET  /caja/abrir/` → form de apertura.
+- `POST /caja/abrir/` → ejecutar apertura.
+- `GET  /caja/<uuid:id>/` → detalle de cierre.
+- `GET  /caja/<uuid:id>/cerrar/` → form de cierre con totales precargados.
+- `POST /caja/<uuid:id>/cerrar/` → confirmar cierre.
+
+### Integración
+
+- Al **iniciar sesión**, si no hay caja abierta → forzar apertura.
+- Al **cerrar sesión**, si hay caja abierta → forzar cierre.
 
 ---
 
-## 6) Roadmap inmediato
+## 6) Seguridad
 
-1. Modelo `CierreCaja` + `CierreCajaTotal`.
-2. Servicio `abrir_cierre()`.
-3. Servicio `cerrar_cierre()` que calcula totales con `totals.py`.
-4. Templates: listado, form de cierre y detalle con desglose.
-5. Conexión con `payments` para sumar pagos/propinas.
+- Autenticación obligatoria.
+- Validación multi-tenant: solo cierres de `empresa_activa`.
+- Solo roles **cajero** y **admin** pueden abrir/cerrar.
+- Constraints garantizan que solo haya **1 caja abierta por sucursal**.
+
+---
+
+## 7) Dependencias e integraciones
+
+- **payments**: origen de pagos para totales.
+- **sales**: contexto de ventas del rango.
+- **org**: empresa y sucursal para tenancy.
+- Integración en `sales`: bloquear ventas si no hay caja abierta en la sucursal del usuario.
+
+---
+
+## 8) Roadmap
+
+1. Automatizar apertura/cierre forzando flujo en login/logout.
+2. Dashboard con comparación “totales de sistema” vs. “efectivo contado”.
+3. Exportación de cierres a CSV/PDF para auditoría.
+4. Soporte a arqueo intermedio (cortes parciales de caja).
 
 # Módulo 12 — `apps/saas` (Planes y Suscripciones)
 
@@ -3945,6 +3960,199 @@ _(ver bloque de LOGGING en el settings del proyecto)_
 - **Tests**: cubrir que el servicio deja `success=True` y que `AuditLog` registra el diff esperado.
 
 ---
+
+# Módulo 15 — `apps/reporting` (Reportes Operativos)
+
+> **Objetivo del módulo:** Centralizar reportes de **ventas, pagos, propinas y cierres de caja**, con filtros por rango de fechas, sucursal y cliente. Proveer vistas server-rendered y exportes CSV/Excel.  
+> En MVP: reportes de lectura, sin edición ni cálculos complejos; todo basado en `selectors`.
+
+---
+
+## 1) Estructura de carpetas/archivos
+
+```
+apps/reporting/
+├─ __init__.py
+├─ apps.py                        # Config de la app (name="apps.reporting")
+├─ urls.py                        # Rutas de reportes
+├─ views.py                       # Vistas server-rendered (listados y exportes)
+├─ selectors.py                   # Consultas optimizadas a sales/payments/cashbox
+├─ services/
+│  ├─ __init__.py
+│  └─ exports.py                  # Generación de CSV/Excel con filtros aplicados
+├─ templates/
+│  └─ reporting/
+│     ├─ sales_by_client.html     # Ventas agrupadas por cliente
+│     ├─ payments_by_method.html  # Pagos agrupados por método y sucursal
+│     ├─ tips.html                # Reporte de propinas
+│     ├─ cash_closures.html       # Reporte de cierres de caja
+│     └─ _filters.html            # Partial con formulario de filtros comunes
+├─ static/
+│  └─ reporting/
+│     ├─ reporting.css            # Estilos propios (tablas, totales)
+│     └─ reporting.js             # UX: datepickers, exportar con confirmación
+└─ exports/
+   └─ storage_backend.md          # Notas sobre dónde se guardan los exportes (MEDIA_ROOT/S3)
+```
+
+### Rol de cada componente
+
+- **`selectors.py`**: consultas con `annotate`/`aggregate` sobre `sales.Venta`, `payments.Pago`, `cashbox.CierreCaja`.
+- **`views.py`**: vistas que renderizan reportes con filtros (`fecha_desde`, `fecha_hasta`, `sucursal`, `cliente`).
+- **`services/exports.py`**: utilidades para exportar datasets a CSV/Excel con nombres de columnas legibles.
+- **`templates/reporting/*`**: UI de reportes con tablas, totales y botones “Exportar”.
+- **`_filters.html`**: formulario reutilizable de filtros (fecha desde/hasta, sucursal, cliente).
+- **`static/reporting/*`**: mejoras UX mínimas (datepickers, mensajes de feedback).
+
+---
+
+## 2) Endpoints propuestos
+
+- `GET  /reportes/ventas-por-cliente/`  
+  → listado de ventas agrupadas por cliente, con totales.
+
+- `GET  /reportes/pagos-por-metodo/`  
+  → pagos agrupados por método de pago × sucursal.
+
+- `GET  /reportes/propinas/`  
+  → totales de propinas por fecha/sucursal.
+
+- `GET  /reportes/cierres-de-caja/`  
+  → listado de cierres con resumen de totales.
+
+- `GET  /reportes/export/<slug>/`  
+  → exporte CSV/Excel del reporte solicitado (ej. `ventas-por-cliente`, `pagos-por-metodo`).
+
+---
+
+## 3) Contratos de entrada/salida (conceptual)
+
+### Ventas por Cliente
+
+- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`, `cliente?`.
+- **Proceso**: sumar `ventas.total` agrupando por cliente.
+- **Output**: tabla `{cliente, cantidad_ventas, total}`.
+
+### Pagos por Método
+
+- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
+- **Proceso**: sumar `pagos.monto` agrupando por método × sucursal.
+- **Output**: tabla `{sucursal, metodo, total}`.
+
+### Propinas
+
+- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
+- **Proceso**: sumar `pagos.propina` o campo equivalente.
+- **Output**: tabla `{sucursal, fecha, propinas_total}`.
+
+### Cierres de Caja
+
+- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
+- **Proceso**: mostrar cierres de caja (abierto/cerrado, usuario, totales por método).
+- **Output**: tabla `{cierre_id, sucursal, usuario, abierto_en, cerrado_en, totales}`.
+
+---
+
+## 4) Dependencias e integraciones
+
+- **Depende de `sales`**: usa ventas para agrupar por cliente.
+- **Depende de `payments`**: suma montos y propinas por método.
+- **Depende de `cashbox`**: lista cierres y totales.
+- **Depende de `org`**: filtro por sucursal/empresa.
+- **Integración futura con `saas`**: limitar cantidad de exportes o accesos según plan.
+
+---
+
+## 5) Seguridad
+
+- Solo usuarios autenticados.
+- Validar **empresa activa** (tenancy).
+- Filtrar sucursales: usuario debe tener `SucursalMembership` en esa sucursal.
+- Exportes solo accesibles a roles `admin` / `auditor`.
+
+---
+
+## 6) Estado inicial del módulo
+
+- `selectors` con consultas básicas para ventas, pagos, propinas y cierres.
+- Vistas server-rendered con Bootstrap.
+- Exportes CSV simples (Excel opcional).
+- Plantillas con filtros de fechas y sucursal.
+- Sidebar con menú “Reportes” → enlaces a cada reporte.
+
+---
+
+## 7) Roadmap inmediato
+
+1. Implementar `selectors` optimizados.
+2. Vistas y templates de los 4 reportes base.
+3. Exportes CSV funcionales.
+4. Integración con permisos de `SucursalMembership`.
+5. Mejorar UX con filtros y datepickers.
+
+---
+
+## 8) Diagrama de relaciones (simplificado)
+
+```mermaid
+erDiagram
+    Empresa ||--o{ Sucursal : contiene
+    Empresa ||--o{ Cliente : tiene
+    Cliente ||--o{ Venta : realiza
+    Sucursal ||--o{ Venta : registra
+    Venta ||--o{ Pago : incluye
+    Sucursal ||--o{ CierreCaja : tiene
+    CierreCaja ||--o{ CierreCajaTotal : resume
+
+    Empresa {
+        int id
+        varchar nombre
+    }
+
+    Sucursal {
+        int id
+        varchar nombre
+        int empresa_id
+    }
+
+    Cliente {
+        int id
+        varchar nombre
+        int empresa_id
+    }
+
+    Venta {
+        int id
+        int cliente_id
+        int sucursal_id
+        decimal total
+        date fecha
+    }
+
+    Pago {
+        int id
+        int venta_id
+        varchar metodo
+        decimal monto
+        decimal propina
+        date fecha
+    }
+
+    CierreCaja {
+        int id
+        int sucursal_id
+        datetime abierto_en
+        datetime cerrado_en
+    }
+
+    CierreCajaTotal {
+        int id
+        int cierre_id
+        varchar medio
+        decimal monto
+        decimal propinas
+    }
+```
 
 # Integración `apps/saas` ↔ `apps/org` — Pasos para sincronizar planes/suscripciones con Lavadero y Sucursales
 

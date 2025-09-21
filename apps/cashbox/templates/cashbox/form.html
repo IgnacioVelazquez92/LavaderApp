@@ -1,0 +1,104 @@
+{# templates/cashbox/form.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}
+  {% if accion == "cerrar" %}Cerrar Caja{% else %}Abrir Caja{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container-xxl py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0">
+      {% if accion == "cerrar" %}Cerrar Caja{% else %}Abrir Caja{% endif %}
+    </h1>
+
+    <div class="d-flex gap-2">
+      {% if accion == "cerrar" and cierre %}
+        <a href="{% url 'cashbox:detail' id=cierre.id %}" class="btn btn-outline-secondary">Volver al detalle</a>
+      {% else %}
+        <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Volver al listado</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Preview de totales (solo al cerrar y si viene en contexto) #}
+  {% if accion == "cerrar" and preview_totales %}
+    <div class="card mb-3">
+      <div class="card-header">
+        <strong>Totales del turno (preview)</strong>
+        <span class="text-muted d-block small">Calculados desde la apertura hasta este momento.</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped mb-0">
+          <thead>
+            <tr>
+              <th>Método de pago</th>
+              <th class="text-end">Monto (sin propina)</th>
+              <th class="text-end">Propinas</th>
+              <th class="text-end">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in preview_totales %}
+              <tr>
+                <td>{{ t.medio.nombre }}</td>
+                <td class="text-end">{{ t.monto }}</td>
+                <td class="text-end">{{ t.propinas }}</td>
+                <td class="text-end">
+                  {# como es un DTO, sumamos en template sin filtros aritméticos: mostramos ambos con separador #}
+                  {{ t.monto }} + {{ t.propinas }}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="4" class="text-center text-muted">No hay pagos en el rango.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
+  <form method="post" class="card">
+    {% csrf_token %}
+    <div class="card-body">
+      {# errores globales #}
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">
+          {% for err in form.non_field_errors %}
+            <div>{{ err }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {# render de campos con Bootstrap #}
+      <div class="row g-3">
+        {% for field in form %}
+          <div class="col-12">
+            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+              <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
+            {% if field.errors %}
+              <div class="invalid-feedback d-block">
+                {% for e in field.errors %}{{ e }}{% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card-footer d-flex justify-content-between">
+      {% if accion == "cerrar" and cierre %}
+        <a href="{% url 'cashbox:detail' id=cierre.id %}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Confirmar cierre</button>
+      {% else %}
+        <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Abrir caja</button>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -27,6 +27,8 @@ urlpatterns = [
     ),
     path("", login_required(TemplateView.as_view(
         template_name="home_dashboard.html")), name="home"),
+
+    path("caja/", include(("apps.cashbox.urls", "cashbox"), namespace="cashbox")),
     # path("", TemplateView.as_view(template_name="marketing/home.html"), name="home"),
     path("post-login/", PostLoginRedirectView.as_view(), name="post_login"),
 ]
