@@ -1,11 +1,227 @@
 # apps/org/permissions.py
+from enum import Enum
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.utils.functional import cached_property
 
-from django.core.exceptions import PermissionDenied
 from apps.accounts.models import EmpresaMembership
+from apps.org.models import Empresa
 
 
-def require_empresa_admin(user, empresa):
-    if not EmpresaMembership.objects.filter(user=user, empresa=empresa, rol="admin").exists():
-        raise PermissionDenied(
-            "No tienes permisos de administrador en esta empresa")
-    return True
+SAFE_VIEWNAMES = {
+    "org:selector",        # nunca redirigir aquí (evita loops)
+    "account_login",       # y rutas de auth comunes
+    "account_logout",
+}
+
+
+class EmpresaContextMixin(LoginRequiredMixin):
+    """
+    Resuelve empresa_activa y membership para la empresa en sesión.
+
+    - No provoca redirect loop: si la petición es a una SAFE_VIEW, NO redirige.
+    - Expone .empresa_activa, .membership, .is_admin, .is_owner para uso en vistas.
+    """
+
+    @cached_property
+    def empresa_activa(self):
+        empresa_id = self.request.session.get("empresa_id")
+        if not empresa_id:
+            return None
+        try:
+            # Solo empresas activas cuentan como contexto válido
+            return Empresa.objects.get(pk=empresa_id, activo=True)
+        except Empresa.DoesNotExist:
+            return None
+
+    @cached_property
+    def membership(self):
+        if not self.request.user.is_authenticated or not self.empresa_activa:
+            return None
+        # select_related para evitar N+1 en acceso a usuario/empresa
+        return (
+            EmpresaMembership.objects
+            .select_related("user", "empresa", "sucursal_asignada")
+            .filter(user=self.request.user, empresa=self.empresa_activa)
+            .first()
+        )
+
+    @property
+    def is_admin(self) -> bool:
+        return bool(self.membership and self.membership.rol == EmpresaMembership.ROLE_ADMIN)
+
+    @property
+    def is_owner(self) -> bool:
+        return bool(self.membership and getattr(self.membership, "is_owner", False))
+
+    def _is_safe_view(self) -> bool:
+        try:
+            viewname = self.request.resolver_match.view_name  # más robusto que path
+        except Exception:
+            return False
+        return viewname in SAFE_VIEWNAMES
+
+    def _redirect_with_next(self, url_name: str):
+        """
+        Redirige preservando el destino original (?next=) para mejor UX.
+        """
+        target = reverse(url_name)
+        # Solo agregamos next si es GET (evita colisiones con POST)
+        if self.request.method == "GET":
+            next_url = self.request.get_full_path()
+            if next_url and next_url != target:
+                return redirect(f"{target}?next={next_url}")
+        return redirect(target)
+
+    def _precheck_or_redirect(self):
+        """
+        Devuelve:
+          - None si todo OK (seguir)
+          - HttpResponseRedirect si hay que redirigir
+
+        Reglas:
+          - Superuser/staff pueden saltar controles (útil para soporte).
+          - No redirige si ya estamos en una SAFE_VIEW (evita loops).
+        """
+        # Bypass de soporte (opcional pero útil)
+        if self.request.user.is_authenticated and (
+            self.request.user.is_superuser or self.request.user.is_staff
+        ):
+            return None
+
+        # Si ya estamos en una vista segura, no intervenimos
+        if self._is_safe_view():
+            return None
+
+        # Sin empresa activa → ir al selector
+        if not self.empresa_activa:
+            messages.error(self.request, "No tenés una empresa activa.")
+            return self._redirect_with_next("org:selector")
+
+        # Sin membership en esa empresa → limpiar sesión y selector
+        if not self.membership:
+            self.request.session.pop("empresa_id", None)
+            self.request.session.pop("sucursal_id", None)
+            messages.error(self.request, "No tenés acceso a esta empresa.")
+            return self._redirect_with_next("org:selector")
+
+        # Membership inactiva → bloquear (al home con mensaje)
+        if not self.membership.activo:
+            messages.error(
+                self.request, "Tu acceso a esta empresa está deshabilitado.")
+            return self._redirect_with_next("home")
+
+        return None
+
+
+class EmpresaMemberRequiredMixin(EmpresaContextMixin):
+    """
+    Requiere ser miembro ACTIVO de la empresa activa.
+    No exige rol admin.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        redir = self._precheck_or_redirect()
+        if redir:
+            return redir
+        return super().dispatch(request, *args, **kwargs)
+
+
+class EmpresaAdminRequiredMixin(EmpresaContextMixin):
+    """
+    Requiere ser ADMIN ACTIVO de la empresa activa.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        redir = self._precheck_or_redirect()
+        if redir:
+            return redir
+
+        if not self.is_admin:
+            messages.error(
+                self.request, "Se requieren permisos de administrador.")
+            return self._redirect_with_next("home")
+
+        return super().dispatch(request, *args, **kwargs)
+
+
+# === Permisos granulares por feature ===
+
+
+class Perm(str, Enum):
+    ORG_VIEW = "org.view"
+    ORG_EMPRESAS_MANAGE = "org.empresas.manage"
+    ORG_SUCURSALES_MANAGE = "org.sucursales.manage"
+    ORG_EMPLEADOS_MANAGE = "org.empleados.manage"
+
+    CATALOG_SERVICES_MANAGE = "catalog.services.manage"
+    CATALOG_PRICES_MANAGE = "catalog.prices.manage"
+
+    REPORTS_VIEW = "reports.view"
+
+
+# Matriz de permisos por rol (podés ajustarla sin tocar vistas)
+ROLE_POLICY = {
+    "admin": {
+        Perm.ORG_VIEW,
+        Perm.ORG_EMPRESAS_MANAGE,
+        Perm.ORG_SUCURSALES_MANAGE,
+        Perm.ORG_EMPLEADOS_MANAGE,
+        Perm.CATALOG_SERVICES_MANAGE,
+        Perm.CATALOG_PRICES_MANAGE,
+        Perm.REPORTS_VIEW,
+    },
+    # Operador: NO crea sucursales ni empleados, pero SÍ precios/servicios
+    "operador": {
+        Perm.ORG_VIEW,
+        Perm.CATALOG_SERVICES_MANAGE,
+        Perm.CATALOG_PRICES_MANAGE,
+        Perm.REPORTS_VIEW,
+    },
+    # Si mañana agregás 'supervisor', lo ponés acá
+    "supervisor": {
+        Perm.ORG_VIEW,
+        Perm.CATALOG_SERVICES_MANAGE,
+        Perm.CATALOG_PRICES_MANAGE,
+        Perm.REPORTS_VIEW,
+    },
+}
+
+
+def has_empresa_perm(user, empresa, perm: Perm) -> bool:
+    """Chequeo centralizado de permiso por rol/membership."""
+    if not user or not empresa:
+        return False
+    mem = (
+        EmpresaMembership.objects
+        .filter(user=user, empresa=empresa, activo=True)
+        .only("rol", "activo")
+        .first()
+    )
+    if not mem:
+        return False
+    allowed = ROLE_POLICY.get(mem.rol, set())
+    return perm in allowed
+
+
+class EmpresaPermRequiredMixin(EmpresaContextMixin):
+    """
+    Mixin para CBVs: la vista declara required_perms = (Perm.XXXX, ...)
+    y acá se valida todo (contexto + permisos).
+    """
+    required_perms = tuple()  # Ej: (Perm.CATALOG_PRICES_MANAGE,)
+
+    def dispatch(self, request, *args, **kwargs):
+        redir = self._precheck_or_redirect()
+        if redir:
+            return redir
+
+        emp = self.empresa_activa
+        for perm in self.required_perms:
+            if not has_empresa_perm(request.user, emp, perm):
+                messages.error(request, "No tenés permisos para esta acción.")
+                return self._redirect_with_next("home")
+
+        return super().dispatch(request, *args, **kwargs)

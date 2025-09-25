@@ -1,5 +1,7 @@
 {# templates/org/empresas.html #}
 {% extends "base_auth.html" %}
+{% load org_perms %} {# <-- importante: templatetag para permisos #}
+
 {% block title %}Mi lavadero — Lavaderos{% endblock %}
 {% block meta_description %}Datos de tu lavadero (marca). Podés editarlo y gestionar sus sucursales.{% endblock %}
 {% block og_title %}Mi lavadero{% endblock %}
@@ -18,12 +20,11 @@
       <p class="text-body-secondary mb-0">Información de tu marca. Desde acá podés editar y administrar sucursales.</p>
     </div>
     <div class="mt-3 mt-md-0">
-      {# Si querés permitir crear lavadero cuando no hay ninguno, el CTA aparece abajo en el estado vacío #}
+      {# CTA vacío a propósito; los accesos se muestran abajo #}
     </div>
   </div>
 
   {% if empresas %}
-    {# En este MVP hay una sola empresa por usuario; mostramos la primera #}
     {% with e=empresas.0 %}
     <div class="card border mb-3">
       <div class="card-body">
@@ -50,11 +51,16 @@
                   {% endif %}
                 </div>
               </div>
-              <div class="text-nowrap">
-                <a href="{% url 'org:empresa_editar' e.id %}" class="btn btn-outline-secondary btn-sm">
-                  <i class="bi bi-pencil-square me-1"></i> Editar lavadero
-                </a>
-              </div>
+
+              {# Editar lavadero: requiere org.empresas.manage #}
+              {% can "org.empresas.manage" as puede_editar_empresa %}
+              {% if puede_editar_empresa %}
+                <div class="text-nowrap">
+                  <a href="{% url 'org:empresa_editar' e.id %}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-pencil-square me-1"></i> Editar lavadero
+                  </a>
+                </div>
+              {% endif %}
             </div>
 
             <hr class="my-3">
@@ -63,9 +69,16 @@
               <div class="col-12 col-md-8">
                 <div class="small text-body-secondary mb-2">Accesos rápidos</div>
                 <div class="d-flex flex-wrap gap-2">
-                  <a class="btn btn-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
-                    <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
-                  </a>
+
+                  {# Nueva sucursal: requiere org.sucursales.manage #}
+                  {% can "org.sucursales.manage" as puede_crear_sucursal %}
+                  {% if puede_crear_sucursal %}
+                    <a class="btn btn-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
+                      <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+                    </a>
+                  {% endif %}
+
+                  {# Ver sucursales: con ORG_VIEW alcanza (esta vista ya lo exige) #}
                   <a class="btn btn-outline-primary btn-sm" href="{% url 'org:sucursales' %}">
                     <i class="bi bi-list-ul me-1"></i> Ver sucursales
                   </a>
@@ -88,6 +101,7 @@
     </div>
     {% endwith %}
   {% else %}
+    {# Estado vacío: normalmente es onboarding (usuario que se registró solo) #}
     <div class="alert alert-info border d-flex flex-column flex-md-row align-items-md-center justify-content-between">
       <div>
         <strong>Bienvenido 👋</strong> Aún no creaste tu lavadero. Empezá creando tu marca para continuar con el alta de la primera sucursal.

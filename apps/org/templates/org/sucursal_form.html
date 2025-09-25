@@ -1,4 +1,6 @@
+{# templates/org/sucursal_form.html #}
 {% extends "base_auth.html" %}
+{% load org_perms %}
 {% block title %}{% if object %}Editar sucursal — {{ object.nombre }}{% else %}Crear sucursal — Lavaderos{% endif %}{% endblock %}
 
 {% block content %}
@@ -88,13 +90,22 @@
       <a href="{% url 'org:sucursales' %}" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left"></i> Volver
       </a>
-      <button type="submit" class="btn btn-primary">
-        {% if object %}
-          <i class="bi bi-save me-1"></i> Guardar cambios
-        {% else %}
-          <i class="bi bi-plus-circle me-1"></i> Crear sucursal
-        {% endif %}
-      </button>
+
+      {% can "org.sucursales.manage" as puede_guardar %}
+      {% if puede_guardar %}
+        <button type="submit" class="btn btn-primary">
+          {% if object %}
+            <i class="bi bi-save me-1"></i> Guardar cambios
+          {% else %}
+            <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+          {% endif %}
+        </button>
+      {% else %}
+        {# fallback defensivo: si no hay permiso, ocultamos CTA #}
+        <button type="button" class="btn btn-primary" disabled title="No tenés permisos para esta acción">
+          {% if object %}Guardar cambios{% else %}Crear sucursal{% endif %}
+        </button>
+      {% endif %}
     </div>
   </form>
 {% endblock %}

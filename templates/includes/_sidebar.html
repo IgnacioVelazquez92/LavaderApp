@@ -116,9 +116,10 @@
           <a class="nav-link px-3 py-2 {% if ns == 'payments' %}active{% endif %}" href="{% url 'payments:medios_list' %}">
             Medios de pago
           </a>
+          <a class="nav-link px-3 py-2 {% if ns == 'org' and view_name == 'empleados' %}active{% endif %}" href="{% url 'org:empleados' %}">
+            Empleados
+          </a>
           <a class="nav-link px-3 py-2" href="/cuenta/membresias/">Membresías</a>
-          {# Quitamos Django Admin público #}
-          {# <a class="nav-link px-3 py-2" href="/admin/">Django Admin</a> #}
 
           <a class="nav-link px-3 py-2 {% if ns == 'notifications' %}active{% endif %}" 
             href="{% url 'notifications:templates_list' %}">
@@ -128,6 +129,5 @@
       </div>
     </div>
   </div>
-
 
 {% endwith %}

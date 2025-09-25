@@ -1,5 +1,6 @@
 {# templates/org/empresa_form.html #}
 {% extends "base_auth.html" %}
+{% load org_perms %}
 {% block title %}{% if object %}Editar lavadero — {{ object.nombre }}{% else %}Crear lavadero — Lavaderos{% endif %}{% endblock %}
 
 {% block content %}
@@ -128,13 +129,26 @@
       <a href="{% url 'org:empresas' %}" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left"></i> Volver
       </a>
-      <button type="submit" class="btn btn-primary">
-        {% if object %}
-          <i class="bi bi-save me-1"></i> Guardar cambios
-        {% else %}
+    
+      {# Crear: siempre permitir (no hay empresa ni rol aún) #}
+      {% if not object %}
+        <button type="submit" class="btn btn-primary">
           <i class="bi bi-plus-circle me-1"></i> Crear lavadero
+        </button>
+      {% else %}
+        {# Editar: exigir permiso org.empresas.manage #}
+        {% load org_perms %}
+        {% can "org.empresas.manage" as puede_gestionar %}
+        {% if puede_gestionar %}
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save me-1"></i> Guardar cambios
+          </button>
+        {% else %}
+          <button type="button" class="btn btn-primary" disabled title="No tenés permisos para esta acción">
+            Guardar cambios
+          </button>
         {% endif %}
-      </button>
+      {% endif %}
     </div>
   </form>
 {% endblock %}

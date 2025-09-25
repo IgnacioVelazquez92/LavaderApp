@@ -1,0 +1,159 @@
+{# templates/org/empleado_form.html #}
+{% extends "base_auth.html" %}
+{% load org_perms %}
+{% block title %}{% if editar %}Editar empleado{% else %}Nuevo empleado{% endif %} — Empleados{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+          <li class="breadcrumb-item"><a href="{% url 'home' %}">Inicio</a></li>
+          <li class="breadcrumb-item"><a href="{% url 'org:empresas' %}">Mi lavadero</a></li>
+          <li class="breadcrumb-item"><a href="{% url 'org:empleados' %}">Empleados</a></li>
+          <li class="breadcrumb-item active" aria-current="page">
+            {% if editar %}Editar{% else %}Nuevo{% endif %} empleado
+          </li>
+        </ol>
+      </nav>
+      <h1 class="h3 mb-1">{% if editar %}Editar empleado{% else %}Nuevo empleado{% endif %}</h1>
+      {% if editar %}
+        <p class="text-body-secondary mb-0">Actualizá el <strong>rol</strong> y la <strong>sucursal</strong>. Para cambiar la contraseña usá <em>Reset Pass</em> desde el listado.</p>
+      {% else %}
+        <p class="text-body-secondary mb-0">Ingresá el email del empleado, definí su rol, sucursal y una contraseña inicial (podrá cambiarla).</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% can "org.empleados.manage" as puede_gestionar %}
+  {% if not puede_gestionar %}
+    <div class="alert alert-warning border">
+      No tenés permisos para gestionar empleados.
+    </div>
+  {% else %}
+
+  {# —— ERRORES GLOBALES —— #}
+  {% if form.non_field_errors %}
+    <div class="alert alert-danger border">
+      <strong>No pudimos guardar los cambios.</strong>
+      <ul class="mb-0">
+        {% for err in form.non_field_errors %}
+          <li>{{ err }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="card border mb-3">
+      <div class="card-body">
+        <div class="row g-3">
+
+          {# --- Email --- #}
+          <div class="col-md-6">
+            <label for="{{ form.email.id_for_label }}" class="form-label">Email</label>
+            <input
+              type="email"
+              name="{{ form.email.html_name }}"
+              id="{{ form.email.id_for_label }}"
+              value="{{ form.email.value|default_if_none:'' }}"
+              class="form-control{% if form.email.errors %} is-invalid{% endif %}"
+              placeholder="empleado@empresa.com"
+              autocomplete="email"
+              {% if editar %}readonly aria-readonly="true"{% endif %}
+              required
+            >
+            {% if form.email.errors %}
+              <div class="invalid-feedback d-block">{{ form.email.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">
+                {% if editar %}El email no puede modificarse acá.{% else %}Será el usuario con el que iniciará sesión.{% endif %}
+              </div>
+            {% endif %}
+          </div>
+
+          {# --- Rol --- #}
+          <div class="col-md-3">
+            <label for="{{ form.rol.id_for_label }}" class="form-label">Rol</label>
+            <select
+              name="{{ form.rol.html_name }}"
+              id="{{ form.rol.id_for_label }}"
+              class="form-select{% if form.rol.errors %} is-invalid{% endif %}"
+              required
+            >
+              {% for val, lbl in form.fields.rol.choices %}
+                <option value="{{ val }}" {% if form.rol.value == val %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            {% if form.rol.errors %}
+              <div class="invalid-feedback d-block">{{ form.rol.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">Define el nivel de acceso del empleado.</div>
+            {% endif %}
+          </div>
+
+          {# --- Sucursal asignada --- #}
+          <div class="col-md-3">
+            <label for="{{ form.sucursal_asignada.id_for_label }}" class="form-label">Sucursal</label>
+            <select
+              name="{{ form.sucursal_asignada.html_name }}"
+              id="{{ form.sucursal_asignada.id_for_label }}"
+              class="form-select{% if form.sucursal_asignada.errors %} is-invalid{% endif %}"
+            >
+              <option value="">(Sin asignar)</option>
+              {% for s in form.fields.sucursal_asignada.queryset %}
+                <option value="{{ s.pk }}" {% if form.sucursal_asignada.value|stringformat:"s" == s.pk|stringformat:"s" %}selected{% endif %}>
+                  {{ s.nombre }}
+                </option>
+              {% endfor %}
+            </select>
+            {% if form.sucursal_asignada.errors %}
+              <div class="invalid-feedback d-block">{{ form.sucursal_asignada.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">Opcional. Si no asignás, el usuario deberá elegir una sucursal al ingresar.</div>
+            {% endif %}
+          </div>
+
+          {# --- Password inicial (solo crear) --- #}
+          {% if not editar %}
+          <div class="col-md-6">
+            <label for="{{ form.password_inicial.id_for_label }}" class="form-label">Contraseña inicial</label>
+            <input
+              type="password"
+              name="{{ form.password_inicial.html_name }}"
+              id="{{ form.password_inicial.id_for_label }}"
+              class="form-control{% if form.password_inicial.errors %} is-invalid{% endif %}"
+              placeholder="Mínimo 8 caracteres"
+              autocomplete="new-password"
+              required
+            >
+            {% if form.password_inicial.errors %}
+              <div class="invalid-feedback d-block">{{ form.password_inicial.errors|join:", " }}</div>
+            {% else %}
+              <div class="form-text">El empleado podrá cambiarla luego desde “Mi cuenta → Cambiar contraseña”.</div>
+            {% endif %}
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+      <a href="{% url 'org:empleados' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+      <button type="submit" class="btn btn-primary">
+        {% if editar %}
+          <i class="bi bi-save me-1"></i> Guardar cambios
+        {% else %}
+          <i class="bi bi-person-plus me-1"></i> Crear empleado
+        {% endif %}
+      </button>
+    </div>
+  </form>
+
+  {% endif %}
+{% endblock %}

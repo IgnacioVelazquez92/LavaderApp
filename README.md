@@ -1344,10 +1344,10 @@ ACCOUNT_FORMS = {
 
 > **Decisión registrada:** estilos centralizados en **forms**; overrides de templates en `templates/account/`; vistas delgadas con lógica en services/selectors. La selección de empresa vive en `org` y se invoca desde “Membresías”.
 
-# Módulo 2 — `apps/org` (Lavadero/Empresa, Sucursales y Contexto de Operación)
+# Módulo 2 — `apps/org` (Lavadero/Empresa, Sucursales, Empleados y Contexto)
 
-> **Objetivo:** Modelar el **Lavadero (Empresa)** y sus **Sucursales**, proveer el **onboarding** (crear lavadero → crear sucursal), y mantener el **contexto activo** (empresa/sucursal) en sesión para el resto del sistema.  
-> **Alcance:** Django server-rendered (sin DRF), vistas basadas en clases (CBV), Bootstrap 5 en templates.
+> **Objetivo:** Modelar **Lavadero (Empresa)** y **Sucursales**, proveer el **onboarding** (crear lavadero → crear sucursal), mantener el **contexto activo** (empresa/sucursal) y permitir a la empresa **gestionar empleados y permisos**.  
+> **Alcance:** Django server-rendered (sin DRF), CBVs, Bootstrap 5, permisos centralizados.
 
 ---
 
@@ -1356,217 +1356,241 @@ ACCOUNT_FORMS = {
 ```
 apps/org/
 ├─ __init__.py
-├─ apps.py                   # Config de la app (name="apps.org")
-├─ admin.py                  # Registro de Empresa y Sucursal en admin
+├─ apps.py
+├─ admin.py
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                 # Empresa, EmpresaConfig (opcional), Sucursal
-├─ urls.py                   # Rutas namespaced: /org/...
-├─ views.py                  # CBVs: listas, formularios, selector empresa/sucursal
+├─ urls.py                   # /org/...
+├─ views.py                  # CBVs: empresas, sucursales, empleados, selector, post-login
 ├─ forms/
 │  ├─ __init__.py
-│  └─ org.py                 # EmpresaForm, SucursalForm (Bootstrap desde HTML)
+│  └─ org.py                 # EmpresaForm, SucursalForm, EmpleadoForm
 ├─ services/
 │  ├─ __init__.py
-│  ├─ empresa.py             # (opcional) casos de uso de Empresa
-│  └─ sucursal.py            # (opcional) casos de uso de Sucursal
-├─ selectors.py              # Lecturas: empresas del usuario, sucursales de empresa
-├─ permissions.py            # Helpers de rol sobre Empresa/Sucursal
+│  ├─ empresa.py             # (opcional)
+│  └─ sucursal.py            # (opcional)
+├─ selectors.py              # empresas_para_usuario, etc.
+├─ permissions.py            # Perm, ROLE_POLICY, mixins (centraliza permisos)
+├─ templatetags/
+│  ├─ __init__.py
+│  └─ org_perms.py           # {% can "perm.code" %} en templates
 ├─ templates/
 │  └─ org/
-│     ├─ empresas.html       # “Mi Lavadero” (ficha + accesos rápidos)
-│     ├─ empresa_form.html   # Crear/editar lavadero
-│     ├─ sucursales.html     # Listado de sucursales
-│     ├─ sucursal_form.html  # Crear/editar sucursal
-│     └─ selector.html       # (planes >1 empresa) escoger empresa; selector sucursal via POST
+│     ├─ empresas.html
+│     ├─ empresa_form.html
+│     ├─ sucursales.html
+│     ├─ sucursal_form.html
+│     ├─ empleados.html
+│     └─ empleado_form.html
 ├─ static/
 │  └─ org/
-│     ├─ org.js              # helpers mínimos (ej. slugify subdominio)
-│     └─ org.css             # (reservado; no requerido en esta etapa)
+│     ├─ org.js
+│     └─ org.css
 └─ emails/
-   └─ empresa_created.txt    # (opcional) notificación al crear lavadero
+   └─ empresa_created.txt    # (opcional)
 ```
 
-**Notas clave de diseño**
+**Notas de diseño**
 
-- **CBVs** (CreateView/UpdateView/ListView) con redirecciones **explícitas** (no dependemos de `get_absolute_url`).
-- **Bootstrap** se aplica **en los templates** (clases en inputs). Los `forms` existen pero no inyectan CSS automáticamente.
-- **Onboarding guiado**: Crear lavadero → Crear primera sucursal → Panel.
-- **Plan estándar**: 1 empresa por usuario (configurable). Selector de **sucursal** visible; selector de **empresa** oculto salvo planes superiores.
+- **Vistas delgadas**: lógica de permisos en `permissions.py`; vistas solo declaran `required_perms`.
+- **Bootstrap** aplicado en templates; forms “limpios”.
+- **Onboarding** guiado (signup → crear empresa → crear primera sucursal).
+- **Plan estándar**: 1 empresa por usuario (configurable).
 
 ---
 
-## 2) Modelos (resumen funcional)
+## 2) Modelos (resumen)
 
 ### `Empresa`
 
-- **Campos**: `nombre`, `subdominio` (único, slug), `logo` (opcional `ImageField`), `activo` (bool), `creado/actualizado` (timestamps).
-- **Relaciones**: `memberships` (One-to-Many con `accounts.EmpresaMembership`), `sucursales` (One-to-Many con `Sucursal`), `configs` (opcional).
-- **Restricciones**: `subdominio` único.
-- **Uso**: representa el **lavadero**. Se fija en sesión como `empresa_id`.
+- Campos: `nombre`, `subdominio` (único), `logo`, `activo`, timestamps.
+- Relaciones: `memberships` (con `accounts.EmpresaMembership`), `sucursales`.
+- Uso: tenant raíz. Se fija en sesión como `empresa_id`.
 
 ### `Sucursal`
 
-- **Campos**: `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado**).
-- **Generación de `codigo_interno`**: se autocalcula si está vacío (p. ej. `S001`, `CABA1`). El campo **no** se pide en el form.
-- **Uso**: ubicación física para operar. Se fija en sesión como `sucursal_id`.
+- Campos: `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado**).
+- Uso: ubicación operativa. Se fija como `sucursal_id`.
 
-### `EmpresaConfig` (opcional/extendible)
+### `EmpresaConfig` (opcional)
 
-- **Campos**: `empresa` (FK), `data` (JSONField), timestamps.
-- **Uso**: banderas/ajustes extensibles por lavadero.
+- Clave/valor JSON por empresa para flags/ajustes.
+
+> Ver modelos en `apps/org/models.py` y `apps/accounts/models.py` (con `EmpresaMembership`, `rol`, `activo`, `is_owner`, `sucursal_asignada`).
 
 ---
 
 ## 3) Formularios (`forms/org.py`)
 
-- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en **alta**, `activo` se fuerza `True` por UX).  
-  Subdominio con ayuda JS (slugify desde nombre).
-- `SucursalForm`: `nombre`, `direccion`. **No** incluye `codigo_interno` (autogenerado en modelo).
+- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en alta forzado a `True` por UX).
+- `SucursalForm`: `nombre`, `direccion` (sin `codigo_interno`).
+- `EmpleadoForm` (MVP): `email`, `rol` (`admin`/`operador`), `sucursal_asignada`, `password_inicial` (solo al crear).
 
-> Las clases Bootstrap se ponen **en el template** (`form-control`, `is-invalid`, etc.), no mediante `Form.__init__`.
-
----
-
-## 4) Vistas (CBVs) y comportamiento
-
-- **`EmpresaListView`** (`/org/empresas/`)  
-  Muestra “Mi Lavadero”: logo/nombre/subdominio/estado + accesos rápidos (Nueva sucursal, Ver sucursales, Editar lavadero).
-
-- **`EmpresaCreateView`** (`/org/empresas/nueva/`)
-
-  - Guarda empresa, crea `EmpresaMembership` (rol `admin`) para el usuario.
-  - Fija `empresa_id` en sesión.
-  - **Redirect** → `/org/sucursales/nueva/` (onboarding paso 2).
-  - Mensajes de éxito/validación (Django messages).
-  - **No** usa `get_absolute_url`; redirige explícitamente.
-
-- **`EmpresaUpdateView`** (`/org/empresas/<id>/editar/`)
-
-  - Edita datos; `success_url` → `/org/empresas/`.
-  - Mensaje de “Cambios guardados”.
-
-- **`SucursalListView`** (`/org/sucursales/`)
-
-  - Lista sucursales de la **empresa activa** (de la sesión).
-  - CTA “Nueva sucursal”. Paginación mediante include.
-
-- **`SucursalCreateView`** (`/org/sucursales/nueva/`)
-
-  - Usa `empresa_id` en sesión (si no está, intenta fijar la **primera** del usuario).
-  - Guarda sucursal. Si es la **primera**, **redirect** → Panel (`/`) con mensaje “¡Listo para operar!”. Si no, **redirect** → `/org/sucursales/`.
-  - `form_invalid` muestra `non_field_errors` y marca campos con error.
-  - `success_url` definido para evitar `ImproperlyConfigured`.
-
-- **`SucursalUpdateView`** (`/org/sucursales/<id>/editar/`)
-
-  - Edita `nombre`/`direccion`. `success_url` → `/org/sucursales/`.
-
-- **`SelectorEmpresaView`** (`/org/seleccionar/`)
-  - **GET**: si no hay `empresa_id` en sesión, fija por defecto la **primera** empresa del usuario (si existe). Renderiza listado solo si hay múltiples (planes superiores).
-  - **POST (sucursal)**: recibe `sucursal=<id>`, valida que pertenezca a la **empresa activa**, fija `sucursal_id` y redirige (por defecto al Panel).
-  - **POST (empresa)**: recibe `empresa=<id>`, valida membresía, fija `empresa_id` y limpia `sucursal_id` si corresponde.
-  - Fallback: si no se envía nada, activa la **primera** empresa del usuario.
+> Estilos Bootstrap se aplican en templates, no en `__init__` del form.
 
 ---
 
-## 5) URLs (namespace `org`)
+## 4) Permisos centralizados (`permissions.py`)
 
-```
-/org/empresas/                    name="org:empresas"
-/org/empresas/nueva/              name="org:empresa_nueva"
-/org/empresas/<int:pk>/editar/    name="org:empresa_editar"
+**Objetivo:** evitar `if rol == "admin"` en múltiples lugares.
 
-/org/sucursales/                  name="org:sucursales"
-/org/sucursales/nueva/            name="org:sucursal_nueva"
-/org/sucursales/<int:pk>/editar/  name="org:sucursal_editar"
+- **Enum de permisos (`Perm`)**:
 
-/org/seleccionar/                 name="org:selector"    # POST sucursal / empresa
+  - `ORG_VIEW` → `"org.view"` (ver organización / listas básicas).
+  - `ORG_EMPRESAS_MANAGE` → `"org.empresas.manage"` (editar empresa).
+  - `ORG_SUCURSALES_MANAGE` → `"org.sucursales.manage"` (crear/editar sucursales).
+  - `ORG_EMPLEADOS_MANAGE` → `"org.empleados.manage"` (CRUD empleados).
+
+- **Política por rol (`ROLE_POLICY`)** (MVP):
+
+  - `admin`: `{ORG_VIEW, ORG_EMPRESAS_MANAGE, ORG_SUCURSALES_MANAGE, ORG_EMPLEADOS_MANAGE}`
+  - `operador`: `{ORG_VIEW}`  
+    _(Si mañana agregás “supervisor”, ajustás esta tabla y listo)_
+
+- **Resolución de contexto y membership**:
+
+  - `EmpresaPermRequiredMixin` hereda de un mixin con **pre-chequeos**:
+    - Debe existir `empresa_activa` en sesión y ser **activa**.
+    - Debe existir `membership` para `user` en esa empresa y estar **activa**.
+    - Evita **loops** con `/org/selector/` (no redirige si ya estás ahí).
+  - Chequea `required_perms` declarado en la vista.
+
+- **Helpers**:
+  - `has_empresa_perm(user, empresa, perm)` para lógica compartida (usada también por el templatetag).
+
+---
+
+## 5) Templatetag de permisos (`templatetags/org_perms.py`)
+
+Permite usar en templates:
+
+```django
+{% load org_perms %}
+{% can "org.sucursales.manage" as puede %}
+{% if puede %}
+  <!-- botón/CTA -->
+{% endif %}
 ```
 
-> El include en `lavaderos/urls.py` debe montar estas rutas bajo el prefijo `/org/` para que coincidan con el sidebar.
+- Usa `request.session["empresa_id"]` + `Perm` + `has_empresa_perm`.
+- Requiere:
+  - `TEMPLATES[0]["APP_DIRS"] = True` o loaders equivalentes.
+  - Context processor `"django.template.context_processors.request"` habilitado.
 
 ---
 
-## 6) Templates (UI/UX)
+## 6) Vistas (CBVs) y comportamiento
 
-- `org/empresas.html`  
-  Vista resumen del lavadero. Muestra badge “Activa” acorde a la sesión, subdominio en `<code>`, acciones claras.
-- `org/empresa_form.html`  
-  Formulario con ayuda de slug para subdominio (JS), `logo` opcional, switch de activo (oculto en alta). Navegación con breadcrumb y CTA coherentes.
-- `org/sucursales.html`  
-  Tabla responsiva: nombre, dirección (o “—”), código interno en `<code>`, acciones (editar). Alert informativa si no hay sucursales.
-- `org/sucursal_form.html`  
-  Form sin código interno, con mensajes de error globales (`non_field_errors`) y `is-invalid` por campo. Sugerencias/ayuda en placeholders.
-- `org/selector.html`  
-  En plan estándar (1 empresa) casi no se usa; en planes con múltiples, permite activar empresa. **El selector de sucursal** está en el **sidebar** global.
+- **`EmpresaListView`** (`/org/empresas/`): `required_perms = (ORG_VIEW,)`  
+  “Mi Lavadero” + accesos rápidos (condicionados por permisos).
 
-**Integración con layouts**
+- **`EmpresaCreateView`** (`/org/empresas/nueva/`): onboarding  
+  Crea empresa y **membresía OWNER + ADMIN + ACTIVA** para el creador. Setea `empresa_id` en sesión. Redirect a crear primera sucursal.
 
-- Todas extienden `base_auth.html` (sidebar, mensajes).
-- Breadcrumbs y títulos consistentes con Bootstrap.
+- **`EmpresaUpdateView`** (`/org/empresas/<id>/editar/`): `ORG_EMPRESAS_MANAGE`  
+  Edita y vuelve a `/org/empresas/`.
 
----
+- **`SucursalListView`** (`/org/sucursales/`): `ORG_VIEW`  
+  Lista sucursales de la empresa activa. CTA “Nueva sucursal” solo si `ORG_SUCURSALES_MANAGE`.
 
-## 7) Sidebar y selector de sucursal (parcial global)
+- **`SucursalCreateView`** (`/org/sucursales/nueva/`): `ORG_SUCURSALES_MANAGE`  
+  Usa `empresa_id` en sesión. Si es la primera, redirige a Panel `/`; en caso contrario a `/org/sucursales/`.
 
-- En `templates/includes/_sidebar.html`:
-  - **Encabezado Lavadero**: nombre de `request.empresa_activa`.
-  - **Selector de Sucursal**: `<select name="sucursal" onchange="this.form.submit()">` que hace **POST** a `org:selector`.
-  - Si no hay sucursales, alerta con link a “Crear sucursal”.
-- El **sidebar** es la **navegación principal** estando autenticado (navbar queda minimalista).
+- **`SucursalUpdateView`** (`/org/sucursales/<id>/editar/`): `ORG_SUCURSALES_MANAGE`.
 
----
+- **`EmpleadoListView`** (`/org/empleados/`): `ORG_EMPLEADOS_MANAGE`  
+  Muestra miembros (badge owner, rol, sucursal, último ingreso).
 
-## 8) Sesión y Middleware (Tenancy)
+- **`EmpleadoCreateView`** (`/org/empleados/nuevo/`): `ORG_EMPLEADOS_MANAGE`  
+  Crea/actualiza usuario y membresía (no marca owner). Setea `password_inicial`. Si ya existía el usuario, actualiza membresía.
 
-- **Claves de sesión**:
-  - `empresa_id`: lavadero activo.
-  - `sucursal_id`: sucursal activa de ese lavadero.
-- **`TenancyMiddleware`** (`lavaderos/middleware.py`):
-  - Inyecta `request.empresa_activa` y `request.sucursal_activa` en **todas** las vistas autenticadas.
-  - Si falta `empresa_id` y el usuario tiene empresas, fija la **primera** automáticamente.
-  - Limpia `sucursal_id` si no pertenece a la empresa activa.
-- **Uso transversal**: plantillas y vistas pueden asumir que `request.empresa_activa`/`request.sucursal_activa` existen (o son `None` sin romper).
+- **`EmpleadoUpdateView`** (`/org/empleados/<id>/editar/`): `ORG_EMPLEADOS_MANAGE`  
+  Cambia rol y sucursal. **No** permite editar miembros `owner`.
 
----
+- **`EmpleadoResetPasswordView`** (`POST /org/empleados/<id>/reset-pass/`): `ORG_EMPLEADOS_MANAGE`  
+  Resetea a una clave temporal (TODO: generar aleatoria, enviar correo).
 
-## 9) Contratos de entrada/salida (actualizados)
+- **`EmpleadoToggleActivoView`** (`POST /org/empleados/<id>/toggle/`): `ORG_EMPLEADOS_MANAGE`  
+  Habilita/deshabilita la membresía. Si queda inactivo y **no tiene otras empresas activas**, se marca `user.is_active = False` (bloquea login). Si se rehabilita, se vuelve a `True`.
 
-### Crear Empresa
+- **`EmpleadoDestroyUserView`** (`POST /org/empleados/<id>/eliminar/usuario/`): `ORG_EMPLEADOS_MANAGE`  
+  Elimina **el `User`** del sistema (no solo la membresía) y revoca **todas sus sesiones**. Protecciones:
 
-- **Input**: `nombre` (str), `subdominio` (slug único), `logo` (opcional).  
-  Subdominio se sugiere con JS a partir del nombre.
-- **Proceso**:
-  1. `Empresa` + `EmpresaMembership(user, rol=admin)`
-  2. `empresa_id` a sesión.
-- **Output**: redirect → `/org/sucursales/nueva/` + mensaje de éxito.
+  - No se puede eliminar al `owner`.
+  - No te podés eliminar a vos mismo.
 
-### Crear Sucursal
+- **`SelectorEmpresaView`** (`/org/seleccionar/`): sin mixin  
+  Vista segura que **sanea sesión** (si empresa/membresía inválida), permite activar empresa y sucursal (valida membresía activa) y **evita loops** (cuando no hay acceso redirige a `/` con mensaje).
 
-- **Input**: `nombre` (str), `direccion` (opcional). **No** se pide `codigo_interno`.
-- **Proceso**: `empresa_id` desde sesión; `codigo_interno` se autogenera si falta.
-- **Output**:
-  - **Primera** sucursal: redirect → Panel `/` (“¡Listo para operar!”).
-  - Otras: redirect → `/org/sucursales/` (“Sucursal creada con éxito”).
-
-### Selector (empresa/sucursal)
-
-- **Input (POST)**: `sucursal=<id>` **o** `empresa=<id>`.
-- **Proceso**: valida pertenencia; setea en sesión (`sucursal_id`/`empresa_id`).
-- **Output**: redirect → `next` o Panel `/` con mensaje de confirmación.
+- **`PostLoginRedirectView`** (`/post-login/`): sin mixin  
+  Si **sin membresías** → onboarding (crear empresa).  
+  Si **con membresía activa** → setea `empresa_id`/`sucursal_id` y:
+  - Si rol admin y sin sucursales → redirige a crear primera.
+  - Si no → al Panel `/`.  
+    Si **todas inactivas** → aviso y `/`.
 
 ---
 
-## 10) Seguridad y permisos
+## 7) URLs (namespace `org`) — **incluye empleados**
 
-- **Membresía** (`apps.accounts.EmpresaMembership`): relación `User ↔ Empresa` con `rol` (`admin`, `operador`, `auditor`).
-- **Reglas**:
-  - Solo miembros pueden activar/usar una empresa.
-  - Solo `admin` puede crear/editar Empresa y Sucursales (en UI se muestran acciones acorde).
-- **Validaciones**:
-  - El selector de sucursal verifica que la sucursal pertenezca a la `empresa_id` activa.
-  - El middleware evita inconsistencias limpiando `sucursal_id` inválidos.
+```
+/org/empresas/                      name="org:empresas"
+/org/empresas/nueva/                name="org:empresa_nueva"
+/org/empresas/<int:pk>/editar/      name="org:empresa_editar"
+
+# Sucursales
+/org/sucursales/                    name="org:sucursales"
+/org/sucursales/nueva/              name="org:sucursal_nueva"
+/org/sucursales/<int:pk>/editar/    name="org:sucursal_editar"
+
+# Empleados
+/org/empleados/                     name="org:empleados"
+/org/empleados/nuevo/               name="org:empleado_nuevo"
+/org/empleados/<int:pk>/editar/     name="org:empleado_editar"
+# Acciones POST-only
+/org/empleados/<int:pk>/reset-pass/ name="org:empleado_reset_pass"
+/org/empleados/<int:pk>/toggle/     name="org:empleado_toggle"
+/org/empleados/<int:pk>/eliminar/usuario/  name="org:empleado_eliminar_usuario"
+
+# Selector
+/org/seleccionar/                   name="org:selector"
+```
+
+> Asegurá `lavaderos/urls.py` incluya `apps.org.urls` bajo `/org/`.
+
+---
+
+## 8) Templates (UI/UX + permisos)
+
+- Cargar siempre `{% load org_perms %}` cuando haya CTAs condicionados.
+- Usar: `{% can "org.sucursales.manage" as puede %}` y envolver botones/links.
+- Mantener Bootstrap 5, alerts con `django.messages`, formularios accesibles.
+
+**Ejemplos principales**:
+
+- `org/empresas.html` → Editar lavadero y “Nueva sucursal” condicionados.
+- `org/sucursales.html` → Botón “Nueva sucursal” y “Editar” condicionados.
+- `org/empleados.html` → Acciones (editar, reset, toggle, eliminar usuario) **POST-only con modales**.
+
+---
+
+## 9) Sesión y Middleware (Tenancy)
+
+- **Claves**: `empresa_id`, `sucursal_id`.
+- **`TenancyMiddleware`**: inyecta `request.empresa_activa`/`request.sucursal_activa`.  
+  Limpia `sucursal_id` inválida si no pertenece a `empresa_id`.
+- **SelectorEmpresaView** sanea sesión y evita loops (si no hay acceso, redirige a `/` con mensaje).
+
+---
+
+## 10) Seguridad y reglas
+
+- Solo **miembros activos** pueden operar en una empresa.
+- **Owner**: no puede ser deshabilitado, editado ni eliminado vía UI de empleados.
+- **Propio usuario**: no puede auto-deshabilitarse ni auto-eliminarse.
+- Acciones destructivas son **POST-only** + **CSRF** + **modales** (sin `confirm()` nativo).
+- Deshabilitar membresía puede deshabilitar `user.is_active` si no hay otras empresas activas (bloquea login).
 
 ---
 
@@ -1608,49 +1632,44 @@ sequenceDiagram
 
 ---
 
-## 12) Configuración de plan (límite de empresas)
+## 12) Planes (SaaS)
 
-- **`SAAS_MAX_EMPRESAS_POR_USUARIO`** (en settings): por defecto `1`.
-  - En **plan estándar**: oculta opción de crear más empresas y autoactiva la primera.
-  - En **plan superior**: permite múltiples y hace útil `selector.html` para cambiar empresa.
+- `SAAS_MAX_EMPRESAS_POR_USUARIO = 1` por defecto.
+- Más adelante: límites por plan (ej. cantidad de empleados, sucursales), guardas en `EmpresaConfig` o app `apps/saas`.
 
 ---
 
-## 13) Admin
+## 13) Auditoría y datos históricos
 
-- `admin.py` registra **Empresa** y **Sucursal** con list_display y filtros básicos (empresa, activo).
-- Útil para soporte: activar/desactivar, revisar subdominios, ver sucursales.
+- Al **eliminar usuario**, solo se borra el `User` y sus `EmpresaMembership`.  
+  **Registros de negocio** (ventas, etc.) deben quedar ligados a la **empresa/sucursal**, no al usuario, o con FK `SET_NULL` + campos de “autor” denormalizados (ej. `autor_email`, `autor_nombre`).  
+  → Recomendado para MVP: usar FK `SET_NULL` y denormalizar autor en entidades críticas para preservar historial.
 
 ---
 
 ## 14) Errores comunes (y cómo se evitaron)
 
-- **`ImproperlyConfigured: No URL to redirect to`**:  
-  Solucionado usando **`success_url`** o **`redirect(...)`** en `form_valid` (no dependemos de `get_absolute_url`).
-
-- **Form “no pasa nada”** al enviar:  
-  Templates muestran **`non_field_errors`**, marcan `is-invalid` por campo y se emiten mensajes (`messages.error`).
-
-- **404 en `/org/...`**:  
-  Asegurar que `lavaderos/urls.py` incluya `apps.org.urls` bajo el **prefijo `/org/`**.
+- **Loops en `/org/selector/`**: saneo de sesión + no redirigir si ya estás en el selector.
+- **403 inesperados**: vistas declaran `required_perms`; revisar `ROLE_POLICY`.
+- **Acciones GET peligrosas**: todas las destructivas/toggle/reset son **POST-only** con CSRF.
+- **Template tags no cargan**: crear `apps/org/templatetags/` con `__init__.py` y `org_perms.py`. Reiniciar server.
 
 ---
 
 ## 15) Extensiones previstas
 
-- Configuración ampliada por `EmpresaConfig` (horarios, formatos de comprobantes, etc.).
-- Estados y aforos por sucursal.
-- Webhooks/Notificaciones al crear lavadero/sucursal.
-- Lógica SaaS (trial/billing) en `apps/saas` integrada con el onboarding.
+- Nuevos permisos: `CATALOG_SERVICIOS_MANAGE`, `CATALOG_PRECIOS_MANAGE` (para permitir operadores que gestionen catálogo pero no sucursales/empleados).
+- Invitaciones por correo con token (alta de empleados sin setear password directo).
+- Auditoría (quién hizo qué/cuándo) y logs por empresa.
 
 ---
 
 ### Resumen ejecutivo
 
-- **Empresa** y **Sucursal** modeladas con mínimos sensatos (subdominio, logo, código interno autogenerado).
-- **Onboarding** en 2 pasos, mensajes claros y redirecciones consistentes.
-- **Contexto activo** (empresa/sucursal) centralizado en sesión + middleware, y **selector de sucursal** en el sidebar.
-- **CBVs** con redirects explícitos; templates con **Bootstrap** puro; vistas delgadas listas para crecer con `services/selectors`.
+- **Permisos centralizados** (`Perm`, `ROLE_POLICY`, mixins, templatetag) → escalable y mantenible.
+- **Empleados**: CRUD completo, acciones seguras (POST+CSRF), control de login por `is_active` cuando corresponde.
+- **UX**: Bootstrap puro, modales en vez de `confirm()`, CTAs condicionados por permisos.
+- **Tenancy** robusto: contexto en sesión, saneo y anti-loop en selector.
 
 # Módulo 3 — `apps/customers` (Clientes)
 

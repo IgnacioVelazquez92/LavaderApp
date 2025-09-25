@@ -18,4 +18,18 @@ urlpatterns = [
 
     # ⬇️ Antes apuntaba a la FBV seleccionar_empresa (que ya no existe)
     path("seleccionar/", views.SelectorEmpresaView.as_view(), name="selector"),
+
+    path("empleados/", views.EmpleadoListView.as_view(), name="empleados"),
+    path("empleados/nuevo/", views.EmpleadoCreateView.as_view(),
+         name="empleado_nuevo"),
+    path("empleados/<int:pk>/editar/",
+         views.EmpleadoUpdateView.as_view(), name="empleado_editar"),
+
+    # Acciones sensibles: POST-only
+    path("empleados/<int:pk>/reset-pass/",
+         views.EmpleadoResetPasswordView.as_view(), name="empleado_reset_pass"),
+    path("empleados/<int:pk>/toggle/",
+         views.EmpleadoToggleActivoView.as_view(), name="empleado_toggle"),
+    path("empleados/<int:pk>/eliminar/",
+         views.EmpleadoDestroyUserView.as_view(), name="empleado_eliminar"),
 ]

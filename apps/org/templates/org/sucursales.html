@@ -1,5 +1,7 @@
 {# templates/org/sucursales.html #}
 {% extends "base_auth.html" %}
+{% load org_perms %}
+
 {% block title %}Sucursales — Lavaderos{% endblock %}
 
 {% block content %}
@@ -21,11 +23,16 @@
         <p class="text-body-secondary mb-0">Primero creá tu lavadero para administrar sucursales.</p>
       {% endif %}
     </div>
-    <div class="mt-3 mt-md-0">
-      <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary">
-        <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
-      </a>
-    </div>
+
+    {# Botón "Nueva sucursal" solo si tiene permiso org.sucursales.manage #}
+    {% can "org.sucursales.manage" as puede_crear_sucursal %}
+    {% if puede_crear_sucursal %}
+      <div class="mt-3 mt-md-0">
+        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary">
+          <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+        </a>
+      </div>
+    {% endif %}
   </div>
 
   {% if not sucursales %}
@@ -35,9 +42,12 @@
           <h2 class="h6 mb-1">Aún no tenés sucursales</h2>
           <p class="mb-0 text-body-secondary">Creá tu primera sucursal para empezar a operar.</p>
         </div>
-        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
-          <i class="bi bi-plus-circle me-1"></i> Crear sucursal
-        </a>
+
+        {% if puede_crear_sucursal %}
+          <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
+            <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+          </a>
+        {% endif %}
       </div>
     </div>
   {% endif %}
@@ -62,9 +72,15 @@
                   <td class="text-body-secondary">{{ s.direccion|default:"—" }}</td>
                   <td><code>{{ s.codigo_interno }}</code></td>
                   <td class="text-end">
-                    <a href="{% url 'org:sucursal_editar' s.id %}" class="btn btn-outline-secondary btn-sm">
-                      <i class="bi bi-pencil-square"></i> Editar
-                    </a>
+                    {# Editar sucursal: también requiere org.sucursales.manage #}
+                    {% can "org.sucursales.manage" as puede_editar_sucursal %}
+                    {% if puede_editar_sucursal %}
+                      <a href="{% url 'org:sucursal_editar' s.id %}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-pencil-square"></i> Editar
+                      </a>
+                    {% else %}
+                      <span class="text-body-secondary small">—</span>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}
