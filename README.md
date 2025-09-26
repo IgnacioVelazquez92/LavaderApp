@@ -1347,7 +1347,8 @@ ACCOUNT_FORMS = {
 # Módulo 2 — `apps/org` (Lavadero/Empresa, Sucursales, Empleados y Contexto)
 
 > **Objetivo:** Modelar **Lavadero (Empresa)** y **Sucursales**, proveer el **onboarding** (crear lavadero → crear sucursal), mantener el **contexto activo** (empresa/sucursal) y permitir a la empresa **gestionar empleados y permisos**.  
-> **Alcance:** Django server-rendered (sin DRF), CBVs, Bootstrap 5, permisos centralizados.
+> **Alcance:** Django server-rendered (sin DRF), CBVs, Bootstrap 5, permisos centralizados.  
+> **Integración SaaS:** límites y suscripciones se resuelven vía `apps.saas` (`limits.py`, `services/subscriptions.py`).
 
 ---
 
@@ -1370,7 +1371,7 @@ apps/org/
 │  ├─ __init__.py
 │  ├─ empresa.py             # (opcional)
 │  └─ sucursal.py            # (opcional)
-├─ selectors.py              # empresas_para_usuario, etc.
+├─ selectors.py              # empresas_para_usuario, etc. (sin hardcode de límites)
 ├─ permissions.py            # Perm, ROLE_POLICY, mixins (centraliza permisos)
 ├─ templatetags/
 │  ├─ __init__.py
@@ -1393,10 +1394,10 @@ apps/org/
 
 **Notas de diseño**
 
-- **Vistas delgadas**: lógica de permisos en `permissions.py`; vistas solo declaran `required_perms`.
-- **Bootstrap** aplicado en templates; forms “limpios”.
-- **Onboarding** guiado (signup → crear empresa → crear primera sucursal).
-- **Plan estándar**: 1 empresa por usuario (configurable).
+- **Vistas delgadas**: permisos en `permissions.py`; vistas declaran `required_perms`.
+- **Bootstrap** en templates; forms “limpios”.
+- **Onboarding** guiado (signup → empresa → primera sucursal).
+- **Límites por plan**: ya **no** se usan constantes en `settings`. Todo gating pasa por `apps.saas.limits` y la suscripción activa de la empresa.
 
 ---
 
@@ -1404,193 +1405,128 @@ apps/org/
 
 ### `Empresa`
 
-- Campos: `nombre`, `subdominio` (único), `logo`, `activo`, timestamps.
-- Relaciones: `memberships` (con `accounts.EmpresaMembership`), `sucursales`.
-- Uso: tenant raíz. Se fija en sesión como `empresa_id`.
+- `nombre`, `subdominio` (único), `logo`, `activo`, timestamps.
+- Relaciones: `memberships` (`accounts.EmpresaMembership`), `sucursales`, **`suscripcion` (OneToOne con `saas.SuscripcionSaaS`)**.
+- Se fija en sesión como `empresa_id`.
 
 ### `Sucursal`
 
-- Campos: `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado**).
-- Uso: ubicación operativa. Se fija como `sucursal_id`.
+- `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado en `save()`**).
+- Se fija como `sucursal_id`.
 
 ### `EmpresaConfig` (opcional)
 
-- Clave/valor JSON por empresa para flags/ajustes.
-
-> Ver modelos en `apps/org/models.py` y `apps/accounts/models.py` (con `EmpresaMembership`, `rol`, `activo`, `is_owner`, `sucursal_asignada`).
+- Par `clave/valor` JSON por empresa.
 
 ---
 
 ## 3) Formularios (`forms/org.py`)
 
-- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en alta forzado a `True` por UX).
+- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en alta, forzado a `True`).
 - `SucursalForm`: `nombre`, `direccion` (sin `codigo_interno`).
-- `EmpleadoForm` (MVP): `email`, `rol` (`admin`/`operador`), `sucursal_asignada`, `password_inicial` (solo al crear).
-
-> Estilos Bootstrap se aplican en templates, no en `__init__` del form.
+- `EmpleadoForm`: `email`, `rol` (`admin`/`operador`), `sucursal_asignada`, `password_inicial` (solo crear).
 
 ---
 
 ## 4) Permisos centralizados (`permissions.py`)
 
-**Objetivo:** evitar `if rol == "admin"` en múltiples lugares.
-
-- **Enum de permisos (`Perm`)**:
-
-  - `ORG_VIEW` → `"org.view"` (ver organización / listas básicas).
-  - `ORG_EMPRESAS_MANAGE` → `"org.empresas.manage"` (editar empresa).
-  - `ORG_SUCURSALES_MANAGE` → `"org.sucursales.manage"` (crear/editar sucursales).
-  - `ORG_EMPLEADOS_MANAGE` → `"org.empleados.manage"` (CRUD empleados).
-
-- **Política por rol (`ROLE_POLICY`)** (MVP):
-
-  - `admin`: `{ORG_VIEW, ORG_EMPRESAS_MANAGE, ORG_SUCURSALES_MANAGE, ORG_EMPLEADOS_MANAGE}`
-  - `operador`: `{ORG_VIEW}`  
-    _(Si mañana agregás “supervisor”, ajustás esta tabla y listo)_
-
-- **Resolución de contexto y membership**:
-
-  - `EmpresaPermRequiredMixin` hereda de un mixin con **pre-chequeos**:
-    - Debe existir `empresa_activa` en sesión y ser **activa**.
-    - Debe existir `membership` para `user` en esa empresa y estar **activa**.
-    - Evita **loops** con `/org/selector/` (no redirige si ya estás ahí).
-  - Chequea `required_perms` declarado en la vista.
-
-- **Helpers**:
-  - `has_empresa_perm(user, empresa, perm)` para lógica compartida (usada también por el templatetag).
+- **`Perm`**:
+  - `ORG_VIEW`, `ORG_EMPRESAS_MANAGE`, `ORG_SUCURSALES_MANAGE`, `ORG_EMPLEADOS_MANAGE`
+  - (extensibles: `CATALOG_SERVICES_MANAGE`, `CATALOG_PRICES_MANAGE`, etc.)
+- **`ROLE_POLICY`** define permisos por rol (admin/operador/…).
+- **Mixins**:
+  - `EmpresaPermRequiredMixin` resuelve **contexto** y **membership** y valida `required_perms`.
+  - Evita loops con `SAFE_VIEWNAMES`.
+- **Helper**:
+  - `has_empresa_perm(user, empresa, perm)`.
 
 ---
 
-## 5) Templatetag de permisos (`templatetags/org_perms.py`)
+## 5) Gating por Plan (integración con `apps.saas`)
 
-Permite usar en templates:
-
-```django
-{% load org_perms %}
-{% can "org.sucursales.manage" as puede %}
-{% if puede %}
-  <!-- botón/CTA -->
-{% endif %}
-```
-
-- Usa `request.session["empresa_id"]` + `Perm` + `has_empresa_perm`.
-- Requiere:
-  - `TEMPLATES[0]["APP_DIRS"] = True` o loaders equivalentes.
-  - Context processor `"django.template.context_processors.request"` habilitado.
+- Consultas de límite vía **`apps.saas.limits`**:
+  - `can_create_empresa(user)`
+  - `can_create_sucursal(empresa)`
+  - `can_add_usuario_a_empresa(empresa)`
+  - `can_add_empleado(sucursal)`
+- **Enforcement**:
+  - **Soft** (por defecto): se **muestra mensaje** y se **deshabilitan CTAs** en UI; el `POST` valida y devuelve alerta si no corresponde.
+  - **Hard** (`settings.SAAS_ENFORCE_LIMITS = True`): además del mensaje, **se bloquean las creaciones** en los `POST`.
+- **Suscripción por defecto**:
+  - Tras crear empresa, se llama a `ensure_default_subscription_for_empresa(empresa)` para asignar plan default (con trial si corresponde).
 
 ---
 
 ## 6) Vistas (CBVs) y comportamiento
 
 - **`EmpresaListView`** (`/org/empresas/`): `required_perms = (ORG_VIEW,)`  
-  “Mi Lavadero” + accesos rápidos (condicionados por permisos).
+  Muestra “Mi Lavadero”. Contexto incluye `puede_crear_empresa` y `gate_empresa_msg` (desde `can_create_empresa(user)`).
 
 - **`EmpresaCreateView`** (`/org/empresas/nueva/`): onboarding  
-  Crea empresa y **membresía OWNER + ADMIN + ACTIVA** para el creador. Setea `empresa_id` en sesión. Redirect a crear primera sucursal.
+  Valida con `can_create_empresa(user)`. Crea `Empresa` + `EmpresaMembership` (**OWNER/ADMIN/ACTIVA**), setea sesión y ejecuta `ensure_default_subscription_for_empresa`. Redirige a crear primera sucursal.
 
-- **`EmpresaUpdateView`** (`/org/empresas/<id>/editar/`): `ORG_EMPRESAS_MANAGE`  
-  Edita y vuelve a `/org/empresas/`.
+- **`EmpresaUpdateView`**: `ORG_EMPRESAS_MANAGE`.
 
-- **`SucursalListView`** (`/org/sucursales/`): `ORG_VIEW`  
-  Lista sucursales de la empresa activa. CTA “Nueva sucursal” solo si `ORG_SUCURSALES_MANAGE`.
+- **`SucursalListView`**: `ORG_VIEW`  
+  Lista sucursales y pasa `puede_crear_sucursal` / `gate_sucursal_msg` desde `can_create_sucursal(empresa)`.
 
-- **`SucursalCreateView`** (`/org/sucursales/nueva/`): `ORG_SUCURSALES_MANAGE`  
-  Usa `empresa_id` en sesión. Si es la primera, redirige a Panel `/`; en caso contrario a `/org/sucursales/`.
+- **`SucursalCreateView`**: `ORG_SUCURSALES_MANAGE`  
+  Valida con `can_create_sucursal(empresa)`; primera sucursal → redirige a `/` con “Listo para operar”; si no, vuelve a `/org/sucursales/`.
 
-- **`SucursalUpdateView`** (`/org/sucursales/<id>/editar/`): `ORG_SUCURSALES_MANAGE`.
+- **`SucursalUpdateView`**: `ORG_SUCURSALES_MANAGE`.
 
-- **`EmpleadoListView`** (`/org/empleados/`): `ORG_EMPLEADOS_MANAGE`  
-  Muestra miembros (badge owner, rol, sucursal, último ingreso).
+- **`EmpleadoListView`**: `ORG_EMPLEADOS_MANAGE`  
+  Pasa `puede_agregar_empleado` / `gate_empleado_msg` (empresa).
 
-- **`EmpleadoCreateView`** (`/org/empleados/nuevo/`): `ORG_EMPLEADOS_MANAGE`  
-  Crea/actualiza usuario y membresía (no marca owner). Setea `password_inicial`. Si ya existía el usuario, actualiza membresía.
+- **`EmpleadoCreateView`**: `ORG_EMPLEADOS_MANAGE`  
+  GET: calcula `can_add_usuario_a_empresa(empresa)` para la UI.  
+  POST: valida `can_add_usuario_a_empresa(empresa)` y, si hay sucursal, `can_add_empleado(sucursal)`. Crea/actualiza `User` + `EmpresaMembership`.
 
-- **`EmpleadoUpdateView`** (`/org/empleados/<id>/editar/`): `ORG_EMPLEADOS_MANAGE`  
-  Cambia rol y sucursal. **No** permite editar miembros `owner`.
+- **`EmpleadoUpdateView`**: `ORG_EMPLEADOS_MANAGE` (no edita `owner`).
 
-- **`EmpleadoResetPasswordView`** (`POST /org/empleados/<id>/reset-pass/`): `ORG_EMPLEADOS_MANAGE`  
-  Resetea a una clave temporal (TODO: generar aleatoria, enviar correo).
+- **`EmpleadoResetPasswordView` / `EmpleadoToggleActivoView` / `EmpleadoDestroyUserView`**: `ORG_EMPLEADOS_MANAGE` (con protecciones: no `owner`, no auto-eliminarse, etc.).
 
-- **`EmpleadoToggleActivoView`** (`POST /org/empleados/<id>/toggle/`): `ORG_EMPLEADOS_MANAGE`  
-  Habilita/deshabilita la membresía. Si queda inactivo y **no tiene otras empresas activas**, se marca `user.is_active = False` (bloquea login). Si se rehabilita, se vuelve a `True`.
+- **`SelectorEmpresaView`**: segura, sanea sesión, activa empresa/sucursal.
 
-- **`EmpleadoDestroyUserView`** (`POST /org/empleados/<id>/eliminar/usuario/`): `ORG_EMPLEADOS_MANAGE`  
-  Elimina **el `User`** del sistema (no solo la membresía) y revoca **todas sus sesiones**. Protecciones:
-
-  - No se puede eliminar al `owner`.
-  - No te podés eliminar a vos mismo.
-
-- **`SelectorEmpresaView`** (`/org/seleccionar/`): sin mixin  
-  Vista segura que **sanea sesión** (si empresa/membresía inválida), permite activar empresa y sucursal (valida membresía activa) y **evita loops** (cuando no hay acceso redirige a `/` con mensaje).
-
-- **`PostLoginRedirectView`** (`/post-login/`): sin mixin  
-  Si **sin membresías** → onboarding (crear empresa).  
-  Si **con membresía activa** → setea `empresa_id`/`sucursal_id` y:
-  - Si rol admin y sin sucursales → redirige a crear primera.
-  - Si no → al Panel `/`.  
-    Si **todas inactivas** → aviso y `/`.
+- **`PostLoginRedirectView`**: decide onboarding o panel según membership/sucursales.
 
 ---
 
-## 7) URLs (namespace `org`) — **incluye empleados**
+## 7) URLs (namespace `org`)
 
-```
-/org/empresas/                      name="org:empresas"
-/org/empresas/nueva/                name="org:empresa_nueva"
-/org/empresas/<int:pk>/editar/      name="org:empresa_editar"
-
-# Sucursales
-/org/sucursales/                    name="org:sucursales"
-/org/sucursales/nueva/              name="org:sucursal_nueva"
-/org/sucursales/<int:pk>/editar/    name="org:sucursal_editar"
-
-# Empleados
-/org/empleados/                     name="org:empleados"
-/org/empleados/nuevo/               name="org:empleado_nuevo"
-/org/empleados/<int:pk>/editar/     name="org:empleado_editar"
-# Acciones POST-only
-/org/empleados/<int:pk>/reset-pass/ name="org:empleado_reset_pass"
-/org/empleados/<int:pk>/toggle/     name="org:empleado_toggle"
-/org/empleados/<int:pk>/eliminar/usuario/  name="org:empleado_eliminar_usuario"
-
-# Selector
-/org/seleccionar/                   name="org:selector"
-```
-
-> Asegurá `lavaderos/urls.py` incluya `apps.org.urls` bajo `/org/`.
+_(sin cambios; ver listado original)_
 
 ---
 
-## 8) Templates (UI/UX + permisos)
+## 8) Templates (UI/UX + permisos + límites)
 
-- Cargar siempre `{% load org_perms %}` cuando haya CTAs condicionados.
-- Usar: `{% can "org.sucursales.manage" as puede %}` y envolver botones/links.
-- Mantener Bootstrap 5, alerts con `django.messages`, formularios accesibles.
-
-**Ejemplos principales**:
-
-- `org/empresas.html` → Editar lavadero y “Nueva sucursal” condicionados.
-- `org/sucursales.html` → Botón “Nueva sucursal” y “Editar” condicionados.
-- `org/empleados.html` → Acciones (editar, reset, toggle, eliminar usuario) **POST-only con modales**.
+- Siempre cargar `{% load org_perms %}` cuando haya CTAs condicionados.
+- Mostrar **mensajes** con `{% include "includes/_messages.html" %}` (ya en `base_auth.html`).
+- Variables de gating usadas por UI (cuando la vista las provee):
+  - `puede_crear_empresa`, `gate_empresa_msg`
+  - `puede_crear_sucursal`, `gate_sucursal_msg`
+  - `puede_agregar_empleado`, `gate_empleado_msg`
+- Ejemplos:
+  - `org/empresas.html`: “Nueva sucursal” visible si permiso y si `puede_crear_sucursal`.
+  - `org/sucursales.html`: banner informativo cuando no se puede crear más.
+  - `org/empleados.html` / `org/empleado_form.html`: botón “Nuevo/Crear empleado” deshabilitado si no se puede.
 
 ---
 
 ## 9) Sesión y Middleware (Tenancy)
 
-- **Claves**: `empresa_id`, `sucursal_id`.
-- **`TenancyMiddleware`**: inyecta `request.empresa_activa`/`request.sucursal_activa`.  
-  Limpia `sucursal_id` inválida si no pertenece a `empresa_id`.
-- **SelectorEmpresaView** sanea sesión y evita loops (si no hay acceso, redirige a `/` con mensaje).
+- Claves: `empresa_id`, `sucursal_id`.
+- `TenancyMiddleware` inyecta `request.empresa_activa` / `request.sucursal_activa`; limpia inconsistencias.
+- `SelectorEmpresaView` evita loops.
 
 ---
 
 ## 10) Seguridad y reglas
 
-- Solo **miembros activos** pueden operar en una empresa.
-- **Owner**: no puede ser deshabilitado, editado ni eliminado vía UI de empleados.
-- **Propio usuario**: no puede auto-deshabilitarse ni auto-eliminarse.
-- Acciones destructivas son **POST-only** + **CSRF** + **modales** (sin `confirm()` nativo).
-- Deshabilitar membresía puede deshabilitar `user.is_active` si no hay otras empresas activas (bloquea login).
+- Solo **miembros activos** operan en una empresa.
+- `owner`: no editable/deshabilitable/eliminable desde UI de empleados.
+- Acciones destructivas: **POST-only** + **CSRF** + **modales**.
+- Si una membresía queda inactiva y el usuario no tiene otras activas, se marca `user.is_active=False`.
 
 ---
 
@@ -1632,44 +1568,50 @@ sequenceDiagram
 
 ---
 
-## 12) Planes (SaaS)
+## 12) Planes (SaaS) — **(actualizado)**
 
-- `SAAS_MAX_EMPRESAS_POR_USUARIO = 1` por defecto.
-- Más adelante: límites por plan (ej. cantidad de empleados, sucursales), guardas en `EmpresaConfig` o app `apps/saas`.
+- **Límites por plan** en `saas.PlanSaaS` (p. ej., `max_sucursales_por_empresa`, `max_usuarios_por_empresa`, `max_empleados_por_sucursal`, etc.).
+- **Gating centralizado** en `saas/limits.py`:
+  - `can_create_empresa(user)`
+  - `can_create_sucursal(empresa)`
+  - `can_add_usuario_a_empresa(empresa)`
+  - `can_add_empleado(sucursal)`
+  - Cada función retorna un objeto con `message` y `should_block()`.
+- **Enforcement**:
+  - `SAAS_ENFORCE_LIMITS = False` (default “soft”: solo avisos, la vista decide).
+  - Si `True`: los `POST` deben **bloquear** creaciones cuando `should_block()` sea `True`.
+- **Suscripciones**:
+  - `SuscripcionSaaS` (1:1 con Empresa) define `estado`, `payment_status`, `vigente`, `is_trialing`, etc.
+  - Onboarding llama `ensure_default_subscription_for_empresa(empresa)` para asignar plan **default** (con `trial_days` si corresponde).
+
+> **Eliminado:** `SAAS_MAX_EMPRESAS_POR_USUARIO`. No se usa más hardcode; todo sale del **Plan vigente**.
 
 ---
 
 ## 13) Auditoría y datos históricos
 
-- Al **eliminar usuario**, solo se borra el `User` y sus `EmpresaMembership`.  
-  **Registros de negocio** (ventas, etc.) deben quedar ligados a la **empresa/sucursal**, no al usuario, o con FK `SET_NULL` + campos de “autor” denormalizados (ej. `autor_email`, `autor_nombre`).  
-  → Recomendado para MVP: usar FK `SET_NULL` y denormalizar autor en entidades críticas para preservar historial.
+_(sin cambios)_
 
 ---
 
-## 14) Errores comunes (y cómo se evitaron)
+## 14) Errores comunes
 
-- **Loops en `/org/selector/`**: saneo de sesión + no redirigir si ya estás en el selector.
-- **403 inesperados**: vistas declaran `required_perms`; revisar `ROLE_POLICY`.
-- **Acciones GET peligrosas**: todas las destructivas/toggle/reset son **POST-only** con CSRF.
-- **Template tags no cargan**: crear `apps/org/templatetags/` con `__init__.py` y `org_perms.py`. Reiniciar server.
+- **No se ven avisos de límites** → asegurarse de incluir `_messages.html` y de pasar las variables `puede_*`/`gate_*` desde las vistas (ya contemplado en nuestras vistas).
+- **Se puede crear más allá del plan** → verificar `SAAS_ENFORCE_LIMITS` y que los `POST` llamen a `limits.*` (hecho).
 
 ---
 
 ## 15) Extensiones previstas
 
-- Nuevos permisos: `CATALOG_SERVICIOS_MANAGE`, `CATALOG_PRECIOS_MANAGE` (para permitir operadores que gestionen catálogo pero no sucursales/empleados).
-- Invitaciones por correo con token (alta de empleados sin setear password directo).
-- Auditoría (quién hizo qué/cuándo) y logs por empresa.
+_(sin cambios, sumando que nuevos límites se agregan en `PlanSaaS` y `limits.py`)_
 
 ---
 
 ### Resumen ejecutivo
 
-- **Permisos centralizados** (`Perm`, `ROLE_POLICY`, mixins, templatetag) → escalable y mantenible.
-- **Empleados**: CRUD completo, acciones seguras (POST+CSRF), control de login por `is_active` cuando corresponde.
-- **UX**: Bootstrap puro, modales en vez de `confirm()`, CTAs condicionados por permisos.
-- **Tenancy** robusto: contexto en sesión, saneo y anti-loop en selector.
+- **Gating por plan 100% centralizado** en `apps.saas` (nada hardcodeado en `org`).
+- **UI consciente de límites**: muestra banners y deshabilita CTAs cuando corresponde.
+- **Enforcement conmutable** (`SAAS_ENFORCE_LIMITS`) sin tocar vistas.
 
 # Módulo 3 — `apps/customers` (Clientes)
 
@@ -3556,130 +3498,203 @@ apps/cashbox/
 
 # Módulo 12 — `apps/saas` (Planes y Suscripciones)
 
-> **Objetivo del módulo:** Administrar **planes** del SaaS y **suscripciones** de cada Empresa. Controlar límites (soft) y estado de facturación a nivel MVP sin pasarela de pago.
+> **Objetivo del módulo:** Administrar **planes** del SaaS y **suscripciones** de cada Empresa. Controlar límites (soft) y estado de facturación en un **MVP sin pasarela**.  
+> **UX actual:**
+>
+> - El usuario ve su **panel** con plan/estado/uso y un **catálogo de planes** para solicitar upgrade.
+> - **Toda** la administración real de Planes y Suscripciones se hace en **Django Admin** (no hay CRUD público).
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura de carpetas/archivos (viva)
 
 ```
 apps/saas/
 ├─ __init__.py
 ├─ apps.py                       # Config de la app (name="apps.saas")
-├─ admin.py                      # Registro de PlanSaaS y SuscripcionSaaS en admin
+├─ admin.py                      # Admin de PlanSaaS y SuscripcionSaaS
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                     # Modelos: PlanSaaS, SuscripcionSaaS
-├─ urls.py                       # Rutas propias (planes, suscripciones)
-├─ views.py                      # Vistas server-rendered CRUD y panel simple
+├─ models.py                     # PlanSaaS, SuscripcionSaaS
+├─ urls.py                       # /saas/panel/, /saas/planes/, /saas/upgrade/
+├─ views.py                      # Panel empresa + catálogo público + acción POST upgrade
 ├─ forms/
 │  ├─ __init__.py
-│  ├─ plan.py                   # Form de Plan (límites, precio_mensual, activo)
-│  └─ subscription.py           # Form de Suscripción (empresa, plan, fechas, estado)
+│  ├─ plan.py                    # ModelForm (uso en admin/soporte si se necesitara)
+│  └─ subscription.py            # ModelForm (idem)
 ├─ services/
-│  ├─ __init__.py
-│  ├─ plans.py                  # Alta/edición de planes; helpers de límites
-│  └─ subscriptions.py          # Alta/cambio de plan; cálculo de estado (activa/vencida)
-├─ selectors.py                  # Lecturas: planes activos, suscripciones por empresa/estado
-├─ limits.py                     # Funciones para chequear límites del plan (sucursales/usuarios/storage)
+│  ├─ __init__.py                # ServiceError, ServiceResult
+│  ├─ plans.py                   # create/update/set_default (planes)
+│  └─ subscriptions.py           # ensure_default, change_plan, confirm_paid_cycle, etc.
+├─ selectors.py                  # planes_activos, suscripcion_snapshot, ...
+├─ limits.py                     # gating soft: can_create_* y snapshots de uso
 ├─ templates/
 │  └─ saas/
-│     ├─ plans_list.html        # Listado de planes (admin interno)
-│     ├─ plan_form.html         # Alta/edición de plan
-│     ├─ subs_list.html         # Suscripciones (admin interno) / o “mi suscripción”
-│     ├─ sub_form.html          # Alta/edición de suscripción
-│     └─ panel.html             # Panel de empresa: muestra plan vigente y límites
-├─ static/
-│  └─ saas/
-│     ├─ saas.css               # Estilos propios
-│     └─ saas.js                # UX mínimo
+│     ├─ panel.html              # Panel de la empresa (plan vigente + uso + CTA)
+│     └─ planes_public.html      # Catálogo público de planes (usuarios logueados)
 └─ policies/
-   └─ gating.md                 # Notas de “gating” por plan (qué features se habilitan)
+   └─ gating.md                  # Lineamientos de “gating” por plan (referencial)
 ```
 
-### Rol de cada componente
-
-- **`models.py`**:
-  - `PlanSaaS(nombre, max_sucursales, max_usuarios, max_storage_mb, precio_mensual, activo)`.
-  - `SuscripcionSaaS(empresa, plan, estado, inicio, fin)` con `estado ∈ {activa, vencida, suspendida}` (MVP: activa/vencida).
-- **`limits.py`**: checkers para límites blandos (ej. `check_max_sucursales(empresa)`).
-- **`services/plans.py`**: CRUD de planes; cambio de atributos.
-- **`services/subscriptions.py`**: crear/renovar/cambiar plan; `compute_estado(sub)` por fechas.
-- **`selectors.py`**: lecturas para paneles y listados.
-- **`views.py`**: UI server-rendered de administración y panel básico para la empresa.
+> **Eliminados** del árbol (ya no se usan): `plans_list.html`, `plan_form.html`, `subs_list.html`, `sub_form.html` y las vistas CRUD públicas.
 
 ---
 
-## 2) Endpoints propuestos
+## 2) Endpoints (actuales)
 
-- `GET  /saas/planes/` → Listado de planes (admin interno).
-- `GET  /saas/planes/nuevo/` → Alta plan.
-- `POST /saas/planes/nuevo/` → Crear plan.
-- `GET  /saas/planes/<uuid:id>/editar/` → Edición plan.
-- `POST /saas/planes/<uuid:id>/editar/` → Actualizar plan.
+- `GET  /saas/panel/` → **Panel** de la empresa activa: plan, estado (vigente/trial/suspendida), y **uso vs límites** (sucursales, usuarios, empleados de sucursal activa).
+- `GET  /saas/planes/` → **Catálogo público** de planes (todo usuario autenticado). Muestra precio, límites y badges “recomendado/trial”.
+- `POST /saas/upgrade/` → Acción de **“Solicitar upgrade”** (MVP: registra intención con mensaje; no cambia plan ni cobra).
 
-- `GET  /saas/suscripciones/` → Listado de suscripciones (admin interno) o “mi suscripción” si filtra por empresa activa.
-- `GET  /saas/suscripciones/nueva/` → Alta suscripción.
-- `POST /saas/suscripciones/nueva/` → Crear suscripción.
-- `GET  /saas/suscripciones/<uuid:id>/editar/` → Edición suscripción (cambio de plan/fechas/estado).
-- `POST /saas/suscripciones/<uuid:id>/editar/` → Actualizar suscripción.
-
-- `GET  /saas/panel/` → Panel de la empresa activa: muestra plan, estado y uso de límites (sucursales/usuarios).
+> **Backoffice real** (crear/editar Planes y Suscripciones): **Django Admin**.
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 3) Contratos (conceptual)
 
-### Plan
+### Plan (`PlanSaaS`)
 
-- **Input (POST)**: `nombre`, `max_sucursales`, `max_usuarios`, `max_storage_mb`, `precio_mensual`, `activo`.
-- **Proceso**: crear/editar plan.
-- **Output**: plan listo para asignar en suscripciones.
+- **Campos clave:** `nombre`, `descripcion`, `activo`, `default`, `trial_days`,  
+  `max_empresas_por_usuario`, `max_sucursales_por_empresa`,  
+  `max_usuarios_por_empresa`, `max_empleados_por_sucursal`, `max_storage_mb`,  
+  `precio_mensual`, `external_plan_id`.
+- **Salida típica (UI):** nombre, precio, límites y badges (default/trial).
 
-### Suscripción
+### Suscripción (`SuscripcionSaaS`)
 
-- **Input (POST)**: `empresa_id`, `plan_id`, `inicio`, `fin` (opcional), `estado`.
-- **Proceso**: validar solapamientos; setear `estado` por fechas (`activa` si `hoy ∈ [inicio, fin]` o `fin=NULL`).
-- **Output**: suscripción persistida.
+- **Relación:** `empresa (OneToOne) → plan (FK)`.
+- **Estado funcional (`estado`):** `activa | vencida | suspendida`.
+- **Pago (`payment_status`):** `trial | paid | unpaid | past_due` (informativo en MVP).
+- **Fechas:** `inicio`, `fin` (vigencia funcional).
+- **Cálculos:** `vigente`, `trial_ends_at`, `is_trialing`.
 
 ### Panel (empresa)
 
-- **Input (GET)**: empresa activa por sesión.
-- **Proceso**: obtener suscripción vigente; computar uso de límites (contar sucursales/usuarios actuales).
-- **Output**: vista con **plan** + **estado** + **uso** (y avisos si se supera un límite).
+- **Input:** empresa activa (de sesión/middleware).
+- **Proceso:** `suscripcion_snapshot(empresa)` + `get_usage_snapshot(empresa, sucursal)`.
+- **Output:** plan/estado/fechas + uso vs límites y **CTA** de upgrade.
 
 ---
 
 ## 4) Dependencias e integraciones
 
-- **Depende de `org`**: para contar sucursales de la empresa.
-- **Depende de `accounts`**: para contar usuarios/membresías.
-- **Transversal**: `limits.py` puede ser invocado por otras apps para “gating” de features (soft block en MVP).
+- **`apps/org`**:
+
+  - **Onboarding** de empresa debe invocar
+    ```python
+    ensure_default_subscription_for_empresa(empresa=empresa)
+    ```
+    para asignar automáticamente el **plan default** (con trial si corresponde).
+  - Los flujos de **crear sucursal** / **invitar empleado** pueden llamar a `limits.can_create_sucursal(empresa)` y `limits.can_add_empleado(sucursal)` para mostrar **avisos** (o bloquear si activás enforcement duro).
+
+- **`apps/accounts`**:
+
+  - Para contar usuarios/membresías activas en `limits.py`.
+
+- **Tenancy middleware**:
+  - Expone `request.empresa_activa` y `request.sucursal_activa` (requeridos por el panel y algunos contadores).
 
 ---
 
 ## 5) Seguridad
 
-- Administración de **planes/suscripciones** restringida a **admin interno**.
-- `panel` accesible a usuarios con membresía en la **empresa activa**.
-- Validar que la suscripción creada/actualizada corresponde a empresas existentes.
+- **Panel `/saas/panel/`**: requiere usuario autenticado y empresa activa.
+- **Catálogo `/saas/planes/`**: requiere usuario autenticado (no requiere empresa activa).
+- **Upgrade `/saas/upgrade/`**: `POST` y requiere empresa activa.
+- **Admin Django**: restringe Planes/Suscripciones a staff/superuser.
 
 ---
 
-## 6) Consideraciones clave (MVP)
+## 6) Límites (gating)
 
-- **Sin pasarela** en MVP: solo estado lógico por fechas.
-- **Límites** aplican como **avisos** (no bloqueantes) para no frenar operación inicial.
-- Habilitar hooks sencillos para, en el futuro, **enforce** de cuotas (p. ej. al crear sucursales/usuarios).
+- Implementados en **`limits.py`** como **“soft”** por defecto:
+  - `can_create_empresa(user)` → usa plan **default** como política global (L1).
+  - `can_create_sucursal(empresa)` (L2).
+  - `can_add_empleado(sucursal)` (L3).
+  - `can_add_usuario_a_empresa(empresa)` (opcional).
+- **Snapshot** de uso: `get_usage_snapshot(empresa, sucursal)` → alimenta UI del panel.
+- **Enforcement duro (opcional):**
+  ```python
+  # settings.py
+  SAAS_ENFORCE_LIMITS = True
+  ```
+  Si está `True`, los `GateResult.should_block()` permiten bloquear creaciones en los servicios/vistas de `org`.
 
 ---
 
-## 7) Roadmap inmediato
+## 7) Flujo de upgrades (MVP y escalabilidad)
 
-1. Modelos `PlanSaaS` y `SuscripcionSaaS`.
-2. Servicios de alta/edición y cálculo de estado.
-3. Panel de empresa mostrando plan/estado/uso.
-4. Hooks de límites (avisos) en creación de sucursales/usuarios.
+- **MVP (actual):**
+
+  - El usuario ve `/saas/planes/` y **POST** `/saas/upgrade/`.
+  - Mostramos **mensaje** de interés; **no** cambiamos plan ni cobramos.
+  - Vos cambiás plan desde **Admin** o, si querés, podemos activar en el POST:
+    ```python
+    change_plan(empresa=empresa, nuevo_plan=plan, keep_window=True)
+    ```
+    (deshabilitado por ahora para no sorprender).
+
+- **Trial 30 días (listo):**
+
+  - `PlanSaaS.trial_days` + `SuscripcionSaaS.payment_status="trial"` al crear la suscripción default.
+  - `trial_ends_at` se muestra en el panel.
+
+- **Pasarela (futuro, p. ej. Mercado Pago):**
+  - POST `/saas/upgrade/` inicia checkout → al **webhook de pago**:  
+    `confirm_paid_cycle(empresa=empresa, months=1, external_subscription_id=..., ...)`  
+    que actualiza `payment_status="paid"`, fechas y `fin`.
+
+---
+
+## 8) Integración con `org` (puntos de anclaje)
+
+- **Onboarding Empresa** → después de `EmpresaCreateView` exitoso:
+  ```python
+  from apps.saas.services.subscriptions import ensure_default_subscription_for_empresa
+  ensure_default_subscription_for_empresa(empresa=empresa)
+  ```
+- **Crear Sucursal (Org)** → previo a persistir:
+  ```python
+  from apps.saas.limits import can_create_sucursal
+  gate = can_create_sucursal(empresa)
+  # mostrar gate.message como warning; si SAAS_ENFORCE_LIMITS=True y gate.should_block(): abortar
+  ```
+- **Crear/Invitar Empleado (Org)** → previo a persistir:
+  ```python
+  from apps.saas.limits import can_add_empleado, can_add_usuario_a_empresa
+  gate1 = can_add_usuario_a_empresa(empresa)
+  gate2 = can_add_empleado(sucursal)
+  ```
+- **Navbar** → link visible a `/saas/panel/` para usuarios autenticados.
+
+---
+
+## 9) Verificación rápida
+
+1. **Crear planes** en **Admin** (marcar uno como **default**).
+2. Crear una **empresa** → se asigna suscripción automáticamente (trial si aplica).
+3. **Panel `/saas/panel/`**: se visualiza plan/estado/uso.
+4. **Catálogo `/saas/planes/`**: cards con precios y límites; botón de **Solicitar upgrade** (POST).
+5. Probar límites (crear sucursales/usuarios) y recibir **avisos** (soft).
+6. (Opcional) Activar `SAAS_ENFORCE_LIMITS=True` y validar **bloqueo** en flows de `org`.
+
+---
+
+## 10) Decisiones y razones
+
+- **CRUD público eliminado**: administración real via **Django Admin** (más simple y seguro).
+- **Catálogo público** y **Panel** separados: UX clara (info + upsell).
+- **States separados**: `estado` (funcional) vs. `payment_status` (pago); necesario para pasarela.
+- **Gating en `limits.py`**: centralizado y **conmutable** (soft → hard) por `settings`.
+
+---
+
+## 11) Roadmap corto
+
+1. Hook de **backfill**: script para `ensure_default_subscription_for_empresa` sobre empresas legadas.
+2. Conectar **gating** en `org` (views de sucursales/empleados) con mensajes Bootstrap.
+3. (Opcional) Habilitar que `/saas/upgrade/` haga `change_plan` automático en entornos de demo.
+4. Integrar **pasarela** (Mercado Pago): checkout + webhooks → `confirm_paid_cycle`.
 
 # Módulo 13 — `apps/audit` (Auditoría de Cambios y Accesos)
 

@@ -4,6 +4,9 @@
 {% block title %}{% if object %}Editar sucursal — {{ object.nombre }}{% else %}Crear sucursal — Lavaderos{% endif %}{% endblock %}
 
 {% block content %}
+  {# Mensajes globales (success/warning/error) #}
+  {% include "includes/_messages.html" %}
+
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
     <div>
       <nav aria-label="breadcrumb">
@@ -25,6 +28,19 @@
       </p>
     </div>
   </div>
+
+  {# Alerta de límite de plan (solo en creación) si la vista pasó 'puede_crear_sucursal' #}
+  {% if not object and puede_crear_sucursal is not None and not puede_crear_sucursal %}
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        <strong>Límite del plan:</strong> {{ gate_sucursal_msg|default:"Tu plan no permite crear más sucursales." }}
+        <div class="small mt-1">
+          ¿Necesitás más? Revisá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   {# —— ALERTA DE ERRORES DEL FORM —— #}
   {% if form.non_field_errors %}
@@ -91,17 +107,27 @@
         <i class="bi bi-arrow-left"></i> Volver
       </a>
 
-      {% can "org.sucursales.manage" as puede_guardar %}
-      {% if puede_guardar %}
-        <button type="submit" class="btn btn-primary">
-          {% if object %}
-            <i class="bi bi-save me-1"></i> Guardar cambios
-          {% else %}
+      {% can "org.sucursales.manage" as tiene_perm_guardar %}
+      {% if tiene_perm_guardar %}
+        {# Si estamos creando y el plan bloquea, deshabilitar submit con tooltip #}
+        {% if not object and puede_crear_sucursal is not None and not puede_crear_sucursal %}
+          <button type="button"
+                  class="btn btn-primary"
+                  disabled
+                  title="{{ gate_sucursal_msg|default:'Tu plan no permite crear más sucursales.' }}">
             <i class="bi bi-plus-circle me-1"></i> Crear sucursal
-          {% endif %}
-        </button>
+          </button>
+        {% else %}
+          <button type="submit" class="btn btn-primary">
+            {% if object %}
+              <i class="bi bi-save me-1"></i> Guardar cambios
+            {% else %}
+              <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+            {% endif %}
+          </button>
+        {% endif %}
       {% else %}
-        {# fallback defensivo: si no hay permiso, ocultamos CTA #}
+        {# fallback defensivo: sin permiso #}
         <button type="button" class="btn btn-primary" disabled title="No tenés permisos para esta acción">
           {% if object %}Guardar cambios{% else %}Crear sucursal{% endif %}
         </button>

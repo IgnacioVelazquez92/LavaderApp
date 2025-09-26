@@ -11,9 +11,12 @@ from apps.org.models import Empresa
 
 
 SAFE_VIEWNAMES = {
-    "org:selector",        # nunca redirigir aquí (evita loops)
-    "account_login",       # y rutas de auth comunes
-    "account_logout",
+    "org:selector",
+    "account_login", "account_logout",
+    "account_signup",
+    "account_reset_password", "account_reset_password_done",
+    "account_reset_password_from_key", "account_reset_password_from_key_done",
+    "account_change_password", "account_change_password_done",
 }
 
 
@@ -191,9 +194,10 @@ ROLE_POLICY = {
 
 
 def has_empresa_perm(user, empresa, perm: Perm) -> bool:
-    """Chequeo centralizado de permiso por rol/membership."""
     if not user or not empresa:
         return False
+    if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
+        return True
     mem = (
         EmpresaMembership.objects
         .filter(user=user, empresa=empresa, activo=True)

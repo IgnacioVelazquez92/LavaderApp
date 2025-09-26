@@ -4,6 +4,9 @@
 {% block title %}{% if editar %}Editar empleado{% else %}Nuevo empleado{% endif %} — Empleados{% endblock %}
 
 {% block content %}
+  {# Mensajes globales #}
+  {% include "includes/_messages.html" %}
+
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
     <div>
       <nav aria-label="breadcrumb">
@@ -23,6 +26,8 @@
         <p class="text-body-secondary mb-0">Ingresá el email del empleado, definí su rol, sucursal y una contraseña inicial (podrá cambiarla).</p>
       {% endif %}
     </div>
+
+    {# CTA alternativo (no se muestra acá; el submit está abajo) #}
   </div>
 
   {% can "org.empleados.manage" as puede_gestionar %}
@@ -31,6 +36,19 @@
       No tenés permisos para gestionar empleados.
     </div>
   {% else %}
+
+  {# Aviso de límite del plan si la vista pasó estos flags #}
+  {% if not editar and (puede_agregar_empleado is not None) and (not puede_agregar_empleado) and gate_empleado_msg %}
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        <strong>Límite del plan:</strong> {{ gate_empleado_msg }}
+        <div class="small mt-1">
+          ¿Necesitás más usuarios? Mirá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   {# —— ERRORES GLOBALES —— #}
   {% if form.non_field_errors %}
@@ -112,7 +130,11 @@
             {% if form.sucursal_asignada.errors %}
               <div class="invalid-feedback d-block">{{ form.sucursal_asignada.errors|join:", " }}</div>
             {% else %}
-              <div class="form-text">Opcional. Si no asignás, el usuario deberá elegir una sucursal al ingresar.</div>
+              <div class="form-text">
+                Opcional. Si no asignás, el usuario deberá elegir una sucursal al ingresar.
+                <br>
+                <span class="text-body-secondary">Nota: tu plan puede limitar la cantidad de empleados por sucursal.</span>
+              </div>
             {% endif %}
           </div>
 
@@ -145,13 +167,24 @@
       <a href="{% url 'org:empleados' %}" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left"></i> Volver
       </a>
-      <button type="submit" class="btn btn-primary">
-        {% if editar %}
-          <i class="bi bi-save me-1"></i> Guardar cambios
+
+      {# Submit: respeta gating si está disponible #}
+      {% if not editar %}
+        {% if puede_agregar_empleado is not None and not puede_agregar_empleado %}
+          <button type="button" class="btn btn-primary" disabled
+                  title="{{ gate_empleado_msg|default:'Tu plan no permite agregar más usuarios.' }}">
+            <i class="bi bi-person-plus me-1"></i> Crear empleado
+          </button>
         {% else %}
-          <i class="bi bi-person-plus me-1"></i> Crear empleado
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-person-plus me-1"></i> Crear empleado
+          </button>
         {% endif %}
-      </button>
+      {% else %}
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-save me-1"></i> Guardar cambios
+        </button>
+      {% endif %}
     </div>
   </form>
 

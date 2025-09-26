@@ -3,6 +3,9 @@
 {% block title %}Seleccionar empresa — Lavaderos{% endblock %}
 
 {% block content %}
+  {# Mensajes globales #}
+  {% include "includes/_messages.html" %}
+
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
     <div>
       <nav aria-label="breadcrumb">
@@ -14,7 +17,7 @@
       <h1 class="h3 mb-1">Seleccionar empresa</h1>
       <p class="text-body-secondary mb-0">
         Elegí con qué empresa vas a operar. En el plan estándar se administra <strong>una sola empresa</strong>.
-        Si necesitás más, podés <a href="#" class="link-primary">consultar por planes superiores</a>.
+        Si necesitás más, podés <a href="{% url 'saas:planes_public' %}" class="link-primary">consultar planes</a>.
       </p>
     </div>
 
@@ -24,10 +27,28 @@
           <i class="bi bi-building-add me-1"></i> Crear empresa
         </a>
       {% else %}
-        <span class="badge text-bg-secondary align-middle">Plan: 1 empresa</span>
+        <button class="btn btn-primary disabled" disabled
+                title="{{ gate_empresa_msg|default:'Tu plan actual permite una sola empresa.' }}">
+          <i class="bi bi-building-add me-1"></i> Crear empresa
+        </button>
+        <div class="small text-body-secondary mt-1">
+          {{ gate_empresa_msg|default:"Tu plan actual permite una sola empresa." }}
+        </div>
       {% endif %}
     </div>
   </div>
+
+  {% if not puede_crear_empresa and gate_empresa_msg %}
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        <strong>Límite del plan:</strong> {{ gate_empresa_msg }}
+        <div class="small mt-1">
+          ¿Necesitás más empresas? Mirá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   {% if empresas %}
     <div class="card border mb-3">
@@ -74,7 +95,6 @@
             </div>
 
             <div class="card-footer d-flex justify-content-between">
-              {# Mostrar "Usar" solo si hay más de una empresa y esta no es la activa #}
               {% if empresas|length > 1 and request.session.empresa_id != e.id %}
                 <form method="post" action="{% url 'org:selector' %}" class="me-2">
                   {% csrf_token %}
@@ -99,7 +119,7 @@
         {% if puede_crear_empresa %}
           Creá tu lavadero para comenzar.
         {% else %}
-          Tu plan actual admite una sola empresa.
+          {{ gate_empresa_msg|default:"Tu plan actual admite una sola empresa." }}
         {% endif %}
       </div>
       {% if puede_crear_empresa %}

@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.app_log",
     "apps.notifications",
     "apps.cashbox",
+    "apps.saas",
 ]
 
 SITE_ID = 1  # requerido por allauth
@@ -286,9 +287,11 @@ LOGGING = {
         },
     },
 }
-
-
-SAAS_MAX_EMPRESAS_POR_USUARIO = 1
+"""
+Si está False → los límites de plan solo se muestran como avisos soft en la UI (no bloquean).
+Si está True → se aplican como bloqueo duro: no podés crear más empresas, sucursales o empleados que los permitidos por el plan.
+"""
+SAAS_ENFORCE_LIMITS = True
 
 
 AUDIT_TRACKED_MODELS = [

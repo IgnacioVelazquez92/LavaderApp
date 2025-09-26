@@ -1,6 +1,6 @@
 {# templates/org/empresas.html #}
 {% extends "base_auth.html" %}
-{% load org_perms %} {# <-- importante: templatetag para permisos #}
+{% load org_perms %}
 
 {% block title %}Mi lavadero — Lavaderos{% endblock %}
 {% block meta_description %}Datos de tu lavadero (marca). Podés editarlo y gestionar sus sucursales.{% endblock %}
@@ -8,6 +8,9 @@
 {% block og_description %}Gestioná los datos de tu lavadero y accedé a las sucursales.{% endblock %}
 
 {% block content %}
+  {# Mensajes globales #}
+  {% include "includes/_messages.html" %}
+
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
     <div>
       <nav aria-label="breadcrumb">
@@ -65,20 +68,40 @@
 
             <hr class="my-3">
 
+            {# Alerta de límite del plan para sucursales (si la vista pasó las variables) #}
+            {% if puede_crear_sucursal is not None and not puede_crear_sucursal and gate_sucursal_msg %}
+              <div class="alert alert-warning d-flex align-items-start mb-3" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <div>
+                  <strong>Límite del plan:</strong> {{ gate_sucursal_msg }}
+                  <div class="small mt-1">
+                    ¿Necesitás más sucursales? Mirá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+
             <div class="row g-3">
               <div class="col-12 col-md-8">
                 <div class="small text-body-secondary mb-2">Accesos rápidos</div>
                 <div class="d-flex flex-wrap gap-2">
 
-                  {# Nueva sucursal: requiere org.sucursales.manage #}
-                  {% can "org.sucursales.manage" as puede_crear_sucursal %}
-                  {% if puede_crear_sucursal %}
-                    <a class="btn btn-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
-                      <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
-                    </a>
+                  {# Nueva sucursal: requiere permiso y además no estar bloqueado por plan #}
+                  {% can "org.sucursales.manage" as tiene_perm_crear_suc %}
+                  {% if tiene_perm_crear_suc %}
+                    {% if puede_crear_sucursal is not None and not puede_crear_sucursal %}
+                      <button class="btn btn-primary btn-sm" disabled
+                              title="{{ gate_sucursal_msg|default:'Tu plan no permite crear más sucursales.' }}">
+                        <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+                      </button>
+                    {% else %}
+                      <a class="btn btn-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
+                        <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+                      </a>
+                    {% endif %}
                   {% endif %}
 
-                  {# Ver sucursales: con ORG_VIEW alcanza (esta vista ya lo exige) #}
+                  {# Ver sucursales #}
                   <a class="btn btn-outline-primary btn-sm" href="{% url 'org:sucursales' %}">
                     <i class="bi bi-list-ul me-1"></i> Ver sucursales
                   </a>
@@ -101,7 +124,7 @@
     </div>
     {% endwith %}
   {% else %}
-    {# Estado vacío: normalmente es onboarding (usuario que se registró solo) #}
+    {# Estado vacío: onboarding #}
     <div class="alert alert-info border d-flex flex-column flex-md-row align-items-md-center justify-content-between">
       <div>
         <strong>Bienvenido 👋</strong> Aún no creaste tu lavadero. Empezá creando tu marca para continuar con el alta de la primera sucursal.

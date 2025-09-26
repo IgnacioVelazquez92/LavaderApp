@@ -5,6 +5,9 @@
 {% block title %}Sucursales — Lavaderos{% endblock %}
 
 {% block content %}
+  {# Avisos globales de Django messages #}
+  {% include "includes/_messages.html" %}
+
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
     <div>
       <nav aria-label="breadcrumb">
@@ -24,16 +27,39 @@
       {% endif %}
     </div>
 
-    {# Botón "Nueva sucursal" solo si tiene permiso org.sucursales.manage #}
-    {% can "org.sucursales.manage" as puede_crear_sucursal %}
-    {% if puede_crear_sucursal %}
-      <div class="mt-3 mt-md-0">
-        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary">
-          <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
-        </a>
-      </div>
-    {% endif %}
+    {# Permiso funcional para ver el botón #}
+    {% can "org.sucursales.manage" as puede_perm_crear %}
+    <div class="mt-3 mt-md-0">
+      {% if puede_perm_crear %}
+        {# Si el gate de plan bloquea, deshabilitamos el botón y mostramos tooltip #}
+        {% if puede_crear_sucursal %}
+          <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary">
+            <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+          </a>
+        {% else %}
+          <button type="button"
+                  class="btn btn-primary disabled"
+                  disabled
+                  title="{{ gate_sucursal_msg|default:'Tu plan no permite crear más sucursales.' }}">
+            <i class="bi bi-pin-map-fill me-1"></i> Nueva sucursal
+          </button>
+        {% endif %}
+      {% endif %}
+    </div>
   </div>
+
+  {# Aviso visible si el plan bloquea (además del tooltip) #}
+  {% if puede_perm_crear and not puede_crear_sucursal and gate_sucursal_msg %}
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        <strong>Límite del plan:</strong> {{ gate_sucursal_msg }}
+        <div class="small mt-1">
+          ¿Necesitás más sucursales? Consultá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   {% if not sucursales %}
     <div class="card border mb-3">
@@ -43,10 +69,15 @@
           <p class="mb-0 text-body-secondary">Creá tu primera sucursal para empezar a operar.</p>
         </div>
 
-        {% if puede_crear_sucursal %}
+        {% if puede_perm_crear and puede_crear_sucursal %}
           <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
             <i class="bi bi-plus-circle me-1"></i> Crear sucursal
           </a>
+        {% elif puede_perm_crear and not puede_crear_sucursal %}
+          <button class="btn btn-primary mt-3 mt-md-0 disabled" disabled
+                  title="{{ gate_sucursal_msg|default:'Tu plan no permite crear más sucursales.' }}">
+            <i class="bi bi-plus-circle me-1"></i> Crear sucursal
+          </button>
         {% endif %}
       </div>
     </div>
@@ -72,7 +103,6 @@
                   <td class="text-body-secondary">{{ s.direccion|default:"—" }}</td>
                   <td><code>{{ s.codigo_interno }}</code></td>
                   <td class="text-end">
-                    {# Editar sucursal: también requiere org.sucursales.manage #}
                     {% can "org.sucursales.manage" as puede_editar_sucursal %}
                     {% if puede_editar_sucursal %}
                       <a href="{% url 'org:sucursal_editar' s.id %}" class="btn btn-outline-secondary btn-sm">

@@ -1,0 +1,67 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Planes disponibles{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="d-flex flex-wrap align-items-end justify-content-between mb-3">
+    <div>
+      <h1 class="h3 mb-1">Planes disponibles</h1>
+      <p class="text-muted mb-0">Elegí el plan que mejor se ajuste a tu lavadero. Podés solicitar un upgrade y te contactamos.</p>
+    </div>
+    <div class="mt-2 mt-sm-0">
+      <a class="btn btn-outline-secondary" href="{% url 'saas:panel' %}">Volver a mi plan</a>
+    </div>
+  </div>
+
+  {% if not planes %}
+    <div class="alert alert-warning">No hay planes activos por el momento.</div>
+  {% else %}
+    <div class="row g-3">
+      {% for plan in planes %}
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="card shadow-sm h-100">
+            <div class="card-body d-flex flex-column">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <h5 class="card-title mb-0">{{ plan.nombre }}</h5>
+                <div>
+                  {% if plan.default %}<span class="badge bg-primary">Recomendado</span>{% endif %}
+                  {% if plan.trial_days > 0 %}<span class="badge bg-success">Trial {{ plan.trial_days }} días</span>{% endif %}
+                </div>
+              </div>
+
+              <p class="text-muted small mb-3">{{ plan.descripcion|default:"" }}</p>
+
+              <div class="mb-3">
+                <div class="fs-4 fw-bold">${{ plan.precio_mensual }}</div>
+                <div class="text-muted small">/mes</div>
+              </div>
+
+              <ul class="list-unstyled mb-3 small">
+                <li class="mb-1">• Hasta <strong>{{ plan.max_empresas_por_usuario }}</strong> empresa(s) por usuario</li>
+                <li class="mb-1">• Hasta <strong>{{ plan.max_sucursales_por_empresa }}</strong> sucursal(es) por empresa</li>
+                <li class="mb-1">• Hasta <strong>{{ plan.max_usuarios_por_empresa }}</strong> usuario(s) por empresa</li>
+                <li class="mb-1">• Hasta <strong>{{ plan.max_empleados_por_sucursal }}</strong> empleado(s) por sucursal</li>
+                <li class="mb-1">• <strong>{{ plan.max_storage_mb }} MB</strong> de almacenamiento</li>
+              </ul>
+
+              <div class="mt-auto pt-2">
+                {% if current_plan_id and current_plan_id == plan.id|stringformat:"s" %}
+                  <button class="btn btn-outline-secondary w-100" disabled>Plan actual</button>
+                {% else %}
+                  <form method="post" action="{% url 'saas:solicitar_upgrade' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                    <button class="btn btn-primary w-100" type="submit">Solicitar upgrade</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
