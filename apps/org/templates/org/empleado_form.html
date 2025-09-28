@@ -38,16 +38,18 @@
   {% else %}
 
   {# Aviso de límite del plan si la vista pasó estos flags #}
-  {% if not editar and (puede_agregar_empleado is not None) and (not puede_agregar_empleado) and gate_empleado_msg %}
-    <div class="alert alert-warning d-flex align-items-start" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>
-      <div>
-        <strong>Límite del plan:</strong> {{ gate_empleado_msg }}
-        <div class="small mt-1">
-          ¿Necesitás más usuarios? Mirá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+  {% if not editar %}
+    {% if puede_agregar_empleado is not None and not puede_agregar_empleado and gate_empleado_msg %}
+      <div class="alert alert-warning d-flex align-items-start" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <div>
+          <strong>Límite del plan:</strong> {{ gate_empleado_msg }}
+          <div class="small mt-1">
+            ¿Necesitás más usuarios? Mirá <a href="{% url 'saas:planes_public' %}">planes y precios</a>.
+          </div>
         </div>
       </div>
-    </div>
+    {% endif %}
   {% endif %}
 
   {# —— ERRORES GLOBALES —— #}

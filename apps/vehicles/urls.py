@@ -34,4 +34,6 @@ urlpatterns = [
          views.TipoVehiculoActivateView.as_view(), name="types_activate"),
     path("tipos-vehiculo/<int:pk>/desactivar/",
          views.TipoVehiculoDeactivateView.as_view(), name="types_deactivate"),
+    path("tipos-vehiculo/<int:pk>/eliminar/",
+         views.VehicleTypeDeleteView.as_view(), name="types_delete"),
 ]

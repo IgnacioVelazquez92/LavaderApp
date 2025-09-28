@@ -1492,9 +1492,30 @@ apps/org/
 
 ---
 
-## 7) URLs (namespace `org`)
+## 7) URLs (namespace `org`) — **incluye empleados**
 
-_(sin cambios; ver listado original)_
+```
+/org/empresas/                      name="org:empresas"
+/org/empresas/nueva/                name="org:empresa_nueva"
+/org/empresas/<int:pk>/editar/      name="org:empresa_editar"
+
+# Sucursales
+/org/sucursales/                    name="org:sucursales"
+/org/sucursales/nueva/              name="org:sucursal_nueva"
+/org/sucursales/<int:pk>/editar/    name="org:sucursal_editar"
+
+# Empleados
+/org/empleados/                     name="org:empleados"
+/org/empleados/nuevo/               name="org:empleado_nuevo"
+/org/empleados/<int:pk>/editar/     name="org:empleado_editar"
+# Acciones POST-only
+/org/empleados/<int:pk>/reset-pass/ name="org:empleado_reset_pass"
+/org/empleados/<int:pk>/toggle/     name="org:empleado_toggle"
+/org/empleados/<int:pk>/eliminar/usuario/  name="org:empleado_eliminar_usuario"
+
+# Selector
+/org/seleccionar/                   name="org:selector"
+```
 
 ---
 
@@ -1590,9 +1611,9 @@ sequenceDiagram
 
 ## 13) Auditoría y datos históricos
 
-_(sin cambios)_
-
----
+- Al **eliminar usuario**, solo se borra el `User` y sus `EmpresaMembership`.  
+  **Registros de negocio** (ventas, etc.) deben quedar ligados a la **empresa/sucursal**, no al usuario, o con FK `SET_NULL` + campos de “autor” denormalizados (ej. `autor_email`, `autor_nombre`).  
+  → Recomendado para MVP: usar FK `SET_NULL` y denormalizar autor en entidades críticas para preservar historial.
 
 ## 14) Errores comunes
 
@@ -1603,7 +1624,9 @@ _(sin cambios)_
 
 ## 15) Extensiones previstas
 
-_(sin cambios, sumando que nuevos límites se agregan en `PlanSaaS` y `limits.py`)_
+- Nuevos permisos: `CATALOG_SERVICIOS_MANAGE`, `CATALOG_PRECIOS_MANAGE` (para permitir operadores que gestionen catálogo pero no sucursales/empleados).
+- Invitaciones por correo con token (alta de empleados sin setear password directo).
+- Auditoría (quién hizo qué/cuándo) y logs por empresa.
 
 ---
 

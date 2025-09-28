@@ -1,82 +1,44 @@
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.urls import reverse_lazy
 from django.utils.functional import cached_property
 from django.views.generic import ListView, CreateView, UpdateView, DetailView
 
+from django.db.models import Prefetch, Q, Count
+
 from .models import Cliente
 from apps.vehicles.models import Vehiculo
 from .forms import CustomerForm
 from apps.vehicles import selectors as vehicle_selectors
-from django.db.models import Prefetch, Q, Count
+
+# ✅ permisos/mixins según tu diseño
+from apps.org.permissions import Perm, has_empresa_perm, EmpresaPermRequiredMixin
+
+
 # =============================================================================
 # Mixins
 # =============================================================================
-
 
 class TenancyMixin:
     """
     Requiere que TenancyMiddleware haya seteado:
       - request.empresa_activa  (FK a org.Empresa o None)
-      - request.sucursal_activa (opcional; no se usa aquí)
-
-    Provee helper para recuperar la empresa del contexto.
     """
 
     @cached_property
     def empresa(self):
         empresa = getattr(self.request, "empresa_activa", None)
         if not empresa:
-            # Si no hay empresa en contexto, el flujo del sistema no debe continuar.
-            # Podés redirigir al selector de empresa si lo preferís.
             raise PermissionDenied("No hay empresa activa en el contexto.")
         return empresa
-
-
-class RoleRequiredMixin(UserPassesTestMixin):
-    """
-    Chequeo básico de rol contra la Empresa activa.
-    Pensado para integrarse con tu modelo EmpresaMembership (apps.accounts).
-
-    Por defecto permite: admin y operador (lectura/escritura),
-    y deniega a roles no reconocidos. El auditor queda habilitado para lectura
-    si la vista no redefine 'allowed_roles'.
-
-    Si tu proyecto ya tiene helpers en apps.accounts.permissions, podés
-    reemplazar 'test_func' por una consulta directa.
-    """
-    allowed_roles = (
-        "admin", "operador")  # por defecto para vistas de escritura
-
-    def get_user_role(self):
-        """
-        Recupera el rol del usuario en la empresa activa.
-        Debe concordar con tu implementación de memberships.
-        """
-        # Ejemplo sin acoplar: si tenés un related_name "memberships" en Empresa:
-        memb = self.empresa.memberships.filter(user=self.request.user).first()
-        return getattr(memb, "rol", None)
-
-    def test_func(self):
-        rol = self.get_user_role()
-        return bool(rol and (rol in self.allowed_roles))
-
-    def handle_no_permission(self):
-        # Si está autenticado pero sin permisos → 403
-        if self.request.user.is_authenticated:
-            raise PermissionDenied("No tenés permisos para esta acción.")
-        # Si no está autenticado → delega a LoginRequiredMixin
-        return super().handle_no_permission()
 
 
 # =============================================================================
 # Vistas
 # =============================================================================
 
-
-class CustomerListView(LoginRequiredMixin, TenancyMixin, ListView):
+class CustomerListView(EmpresaPermRequiredMixin, TenancyMixin, ListView):
     """
     Listado paginado de clientes del tenant (empresa) con búsqueda y filtros.
 
@@ -88,6 +50,9 @@ class CustomerListView(LoginRequiredMixin, TenancyMixin, ListView):
     model = Cliente
     context_object_name = "items"
     paginate_by = 20
+
+    # 🔐 permiso requerido
+    required_perms = [Perm.CUSTOMERS_VIEW]
 
     def get_queryset(self):
         qs = (
@@ -107,7 +72,6 @@ class CustomerListView(LoginRequiredMixin, TenancyMixin, ListView):
         # 'todos' no filtra por activo
 
         if q:
-            # Búsqueda sobre varios campos (incluye tel_busqueda para matches laxos)
             qs = qs.filter(
                 Q(nombre__icontains=q)
                 | Q(apellido__icontains=q)
@@ -124,14 +88,18 @@ class CustomerListView(LoginRequiredMixin, TenancyMixin, ListView):
         ctx = super().get_context_data(**kwargs)
         ctx["q"] = self.request.GET.get("q", "")
         ctx["estado"] = self.request.GET.get("estado", "activos").lower()
+
+        # Flags de UI por permiso (usando has_empresa_perm)
+        ctx["puede_crear_cliente"] = has_empresa_perm(
+            self.request.user, self.empresa, Perm.CUSTOMERS_CREATE)
         return ctx
 
 
-class CustomerCreateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, CreateView):
+class CustomerCreateView(EmpresaPermRequiredMixin, TenancyMixin, CreateView):
     """
     Alta de cliente scoped por empresa.
 
-    - En 'get_form_kwargs' inyectamos request para que el form setee empresa/creado_por
+    - Inyectamos request al form para que el form setee empresa/creado_por
       y aplique normalizaciones (tel E.164, lower(email), etc.).
     - Redirige al listado con mensaje de éxito.
     """
@@ -139,11 +107,13 @@ class CustomerCreateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, Cr
     model = Cliente
     form_class = CustomerForm
     success_url = reverse_lazy("customers:list")
-    allowed_roles = ("admin", "operador")  # escritura
+
+    # 🔐 permiso requerido
+    required_perms = [Perm.CUSTOMERS_CREATE]
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        # para que el form acceda a empresa_activa/user
+        # para que el form acceda a empresa/user
         kwargs["request"] = self.request
         return kwargs
 
@@ -153,7 +123,7 @@ class CustomerCreateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, Cr
         return resp
 
 
-class CustomerUpdateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, UpdateView):
+class CustomerUpdateView(EmpresaPermRequiredMixin, TenancyMixin, UpdateView):
     """
     Edición de cliente. Se asegura de que el objeto pertenezca a la empresa activa.
     """
@@ -161,12 +131,13 @@ class CustomerUpdateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, Up
     model = Cliente
     form_class = CustomerForm
     success_url = reverse_lazy("customers:list")
-    allowed_roles = ("admin", "operador")  # escritura
+
+    # 🔐 permiso requerido
+    required_perms = [Perm.CUSTOMERS_EDIT]
 
     def get_object(self, queryset=None):
         obj = super().get_object(queryset)
         if obj.empresa_id != self.empresa.id:
-            # Evitamos acceder a registros de otra empresa
             raise Http404("Cliente no encontrado en esta empresa.")
         return obj
 
@@ -181,21 +152,24 @@ class CustomerUpdateView(LoginRequiredMixin, TenancyMixin, RoleRequiredMixin, Up
         return resp
 
 
-class CustomerDetailView(LoginRequiredMixin, DetailView):
+class CustomerDetailView(EmpresaPermRequiredMixin, TenancyMixin, DetailView):
     model = Cliente
     template_name = "customers/detail.html"
     context_object_name = "obj"
 
-    def get_queryset(self):
-        empresa = self.request.empresa_activa
-        qs = super().get_queryset().filter(empresa=empresa)
+    # 🔐 permiso requerido
+    required_perms = [Perm.CUSTOMERS_VIEW]
 
-        # Filtros que ya tengas (q, estado, etc.)…
+    def get_queryset(self):
+        qs = super().get_queryset().filter(empresa=self.empresa)
 
         # Prefetch de vehículos activos (para mostrar en listado)
-        vehiculos_activos_qs = Vehiculo.objects.filter(empresa=empresa, activo=True).only(
-            "id", "patente", "marca", "modelo", "tipo_id"
-        ).select_related("tipo")
+        vehiculos_activos_qs = (
+            Vehiculo.objects
+            .filter(empresa=self.empresa, activo=True)
+            .only("id", "patente", "marca", "modelo", "tipo_id")
+            .select_related("tipo")
+        )
         qs = qs.prefetch_related(
             Prefetch("vehiculos", queryset=vehiculos_activos_qs,
                      to_attr="vehiculos_activos")
@@ -203,14 +177,18 @@ class CustomerDetailView(LoginRequiredMixin, DetailView):
             vehiculos_activos_count=Count(
                 "vehiculos", filter=Q(vehiculos__activo=True))
         )
-
         return qs
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        empresa = self.request.empresa_activa
-        cliente = self.object
         ctx["vehiculos"] = vehicle_selectors.vehiculos_de_cliente(
-            empresa=empresa, cliente=cliente, solo_activos=False
+            empresa=self.empresa, cliente=self.object, solo_activos=False
         )
+        # Flags de UI por permiso
+        ctx["puede_editar"] = has_empresa_perm(
+            self.request.user, self.empresa, Perm.CUSTOMERS_EDIT)
+        ctx["puede_desactivar"] = has_empresa_perm(
+            self.request.user, self.empresa, Perm.CUSTOMERS_DEACTIVATE)
+        ctx["puede_eliminar"] = has_empresa_perm(
+            self.request.user, self.empresa, Perm.CUSTOMERS_DELETE)
         return ctx

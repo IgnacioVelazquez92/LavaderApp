@@ -152,7 +152,6 @@ class EmpresaAdminRequiredMixin(EmpresaContextMixin):
 
 # === Permisos granulares por feature ===
 
-
 class Perm(str, Enum):
     ORG_VIEW = "org.view"
     ORG_EMPRESAS_MANAGE = "org.empresas.manage"
@@ -163,6 +162,27 @@ class Perm(str, Enum):
     CATALOG_PRICES_MANAGE = "catalog.prices.manage"
 
     REPORTS_VIEW = "reports.view"
+
+    # CUSTOMERS
+    CUSTOMERS_VIEW = "CUSTOMERS_VIEW"
+    CUSTOMERS_CREATE = "CUSTOMERS_CREATE"
+    CUSTOMERS_EDIT = "CUSTOMERS_EDIT"
+    CUSTOMERS_DEACTIVATE = "CUSTOMERS_DEACTIVATE"
+    CUSTOMERS_DELETE = "CUSTOMERS_DELETE"
+
+    # VEHICLES (nuevo)
+    VEHICLES_VIEW = "VEHICLES_VIEW"
+    VEHICLES_CREATE = "VEHICLES_CREATE"
+    VEHICLES_EDIT = "VEHICLES_EDIT"
+    VEHICLES_DEACTIVATE = "VEHICLES_DEACTIVATE"
+    VEHICLES_DELETE = "VEHICLES_DELETE"
+
+    # VEHICLE TYPES (nuevo)
+    VEHICLE_TYPES_VIEW = "VEHICLE_TYPES_VIEW"
+    VEHICLE_TYPES_CREATE = "VEHICLE_TYPES_CREATE"
+    VEHICLE_TYPES_EDIT = "VEHICLE_TYPES_EDIT"
+    VEHICLE_TYPES_DEACTIVATE = "VEHICLE_TYPES_DEACTIVATE"
+    VEHICLE_TYPES_DELETE = "VEHICLE_TYPES_DELETE"
 
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
@@ -175,15 +195,48 @@ ROLE_POLICY = {
         Perm.CATALOG_SERVICES_MANAGE,
         Perm.CATALOG_PRICES_MANAGE,
         Perm.REPORTS_VIEW,
+
+        Perm.CUSTOMERS_VIEW,
+        Perm.CUSTOMERS_CREATE,
+        Perm.CUSTOMERS_EDIT,
+        Perm.CUSTOMERS_DEACTIVATE,
+        Perm.CUSTOMERS_DELETE,
+
+        # Vehicles
+        Perm.VEHICLES_VIEW,
+        Perm.VEHICLES_CREATE,
+        Perm.VEHICLES_EDIT,
+        Perm.VEHICLES_DEACTIVATE,
+        Perm.VEHICLES_DELETE,
+
+        # Vehicle Types
+        Perm.VEHICLE_TYPES_VIEW,
+        Perm.VEHICLE_TYPES_CREATE,
+        Perm.VEHICLE_TYPES_EDIT,
+        Perm.VEHICLE_TYPES_DEACTIVATE,
+        Perm.VEHICLE_TYPES_DELETE,
     },
-    # Operador: NO crea sucursales ni empleados, pero SÍ precios/servicios
+
+    # Operador: puede gestionar vehículos (crear/editar), pero NO crear/editar tipos.
     "operador": {
         Perm.ORG_VIEW,
         Perm.CATALOG_SERVICES_MANAGE,
         Perm.CATALOG_PRICES_MANAGE,
         Perm.REPORTS_VIEW,
+
+        Perm.CUSTOMERS_VIEW,
+        Perm.CUSTOMERS_CREATE,
+        Perm.CUSTOMERS_EDIT,
+
+        # Vehicles
+        Perm.VEHICLES_VIEW,
+        Perm.VEHICLES_CREATE,
+        Perm.VEHICLES_EDIT,
+
+        # Vehicle Types (solo ver)
+        Perm.VEHICLE_TYPES_VIEW,
     },
-    # Si mañana agregás 'supervisor', lo ponés acá
+
     "supervisor": {
         Perm.ORG_VIEW,
         Perm.CATALOG_SERVICES_MANAGE,
