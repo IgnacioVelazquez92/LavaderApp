@@ -192,6 +192,12 @@ class Perm(str, Enum):
     CATALOG_ACTIVATE = "CATALOG_ACTIVATE"
     CATALOG_DELETE = "CATALOG_DELETE"
 
+    PRICING_VIEW = "PRICING_VIEW"
+    PRICING_CREATE = "PRICING_CREATE"
+    PRICING_EDIT = "PRICING_EDIT"
+    PRICING_DEACTIVATE = "PRICING_DEACTIVATE"
+    PRICING_DELETE = "PRICING_DELETE"
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -232,6 +238,13 @@ ROLE_POLICY = {
         Perm.CATALOG_DEACTIVATE,
         Perm.CATALOG_ACTIVATE,
         Perm.CATALOG_DELETE,
+
+        # === PRICING (nuevo) ===
+        Perm.PRICING_VIEW,
+        Perm.PRICING_CREATE,
+        Perm.PRICING_EDIT,
+        Perm.PRICING_DEACTIVATE,
+        Perm.PRICING_DELETE,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -256,6 +269,8 @@ ROLE_POLICY = {
 
         # Catalog
         Perm.CATALOG_VIEW,
+        # === PRICING  ===
+        Perm.PRICING_VIEW,
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.

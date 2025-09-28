@@ -1,17 +1,22 @@
 # apps/pricing/views.py
 from __future__ import annotations
-
+from django.utils.timezone import localdate
 from dataclasses import asdict
 from datetime import date
-from typing import Iterable, Optional
-
+from typing import Optional
+from django.shortcuts import get_object_or_404, redirect
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import HttpResponseRedirect
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.generic import ListView, CreateView, UpdateView
+from django.views import View
+from apps.org.permissions import (
+    EmpresaPermRequiredMixin,
+    has_empresa_perm,
+    Perm,
+)
 
 from .forms.price import PriceForm
 from .models import PrecioServicio
@@ -23,45 +28,11 @@ from .services.pricing import PrecioCmd, create_or_replace, update_price
 # Utilidades de vistas
 # ============================================================
 
-class EmpresaRoleRequiredMixin(UserPassesTestMixin):
-    """
-    Chequeo de rol por empresa activa (muy liviano para MVP).
-    Permite: superuser SIEMPRE. Si no, verifica membresía en la empresa activa
-    con rol dentro de `allowed_roles`.
-
-    - Se asume un modelo accounts.EmpresaMembership con campos:
-        user (FK a User), empresa (FK a org.Empresa), rol (str)
-      y roles esperados: 'admin', 'operador', 'auditor' (al menos).
-    - Si tu proyecto centraliza permisos en otro lugar (p.ej. lavaderos.permissions),
-      podés reemplazar test_func para delegar ahí.
-    """
-
-    allowed_roles: Iterable[str] = ()
-
-    def test_func(self) -> bool:
-        user = self.request.user
-        if not user.is_authenticated:
-            return False
-        if user.is_superuser:
-            return True
-
-        empresa = getattr(self.request, "empresa_activa", None)
-        if not empresa:
-            return False
-
-        # Import local para evitar dependencias circulares al cargar apps
-        from apps.accounts.models import EmpresaMembership  # type: ignore
-
-        return EmpresaMembership.objects.filter(
-            user=user, empresa=empresa, rol__in=self.allowed_roles
-        ).exists()
-
-
 class BackUrlMixin:
     """
     Provee soporte de retorno consistente:
     - Prioriza querystring `?next=...`
-    - Fallback configurable vía `default_url`
+    - Fallback configurable vía `default_url_name`
     """
     default_url_name: Optional[str] = None  # e.g. "pricing:list"
 
@@ -79,7 +50,7 @@ class BackUrlMixin:
 # Listado
 # ============================================================
 
-class PriceListView(LoginRequiredMixin, EmpresaRoleRequiredMixin, ListView):
+class PriceListView(EmpresaPermRequiredMixin, ListView):
     """
     Listado de precios con filtros opcionales:
     - sucursal (id)
@@ -92,13 +63,17 @@ class PriceListView(LoginRequiredMixin, EmpresaRoleRequiredMixin, ListView):
     template_name = "pricing/list.html"
     context_object_name = "precios"
     paginate_by = 25
-    allowed_roles = ("admin", "operador")
     default_url_name = "pricing:list"
+    required_perms = (Perm.PRICING_VIEW,)
+
+    @property
+    def empresa(self):
+        # Tenancy: provisto por middleware/contexto
+        return getattr(self, "empresa_activa", None) or getattr(self.request, "empresa_activa", None)
 
     def get_queryset(self):
-        empresa = getattr(self.request, "empresa_activa", None)
+        empresa = self.empresa
         if not empresa:
-            # Sin empresa activa, queryset vacío.
             return PrecioServicio.objects.none()
 
         # Parseo de filtros GET
@@ -142,19 +117,20 @@ class PriceListView(LoginRequiredMixin, EmpresaRoleRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        empresa = getattr(self.request, "empresa_activa", None)
+        empresa = self.empresa
         if empresa:
             from apps.org.models import Sucursal
             from apps.catalog.models import Servicio
             from apps.vehicles.models import TipoVehiculo
             ctx["sucursales"] = Sucursal.objects.filter(
-                empresa=empresa,).order_by("nombre")
+                empresa=empresa).order_by("nombre")
             ctx["servicios"] = Servicio.objects.filter(
                 empresa=empresa, activo=True).order_by("nombre")
             ctx["tipos"] = TipoVehiculo.objects.filter(
                 empresa=empresa, activo=True).order_by("nombre")
         else:
             ctx["sucursales"] = ctx["servicios"] = ctx["tipos"] = []
+
         # Mantener filtros actuales
         ctx["filters"] = {
             "sucursal": self.request.GET.get("sucursal") or "",
@@ -163,6 +139,18 @@ class PriceListView(LoginRequiredMixin, EmpresaRoleRequiredMixin, ListView):
             "vigentes_en": self.request.GET.get("vigentes_en") or "",
             "activos": self.request.GET.get("activos") or "",
         }
+
+        # === Flags UI (no seguridad; solo UX) ===
+        user = self.request.user
+        ctx["puede_crear"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_CREATE)
+        ctx["puede_editar"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_EDIT)
+        ctx["puede_eliminar"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_DELETE)
+        ctx["puede_desactivar"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_DEACTIVATE)
+
         return ctx
 
 
@@ -170,7 +158,7 @@ class PriceListView(LoginRequiredMixin, EmpresaRoleRequiredMixin, ListView):
 # Alta
 # ============================================================
 
-class PriceCreateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin, CreateView):
+class PriceCreateView(EmpresaPermRequiredMixin, BackUrlMixin, CreateView):
     """
     Alta de precio. **No** persiste directamente el ModelForm, sino que delega
     la creación a `services.pricing.create_or_replace` para:
@@ -181,19 +169,23 @@ class PriceCreateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
     model = PrecioServicio
     form_class = PriceForm
     template_name = "pricing/form.html"
-    allowed_roles = ("admin",)
     default_url_name = "pricing:list"
+    required_perms = (Perm.PRICING_CREATE,)
+
+    @property
+    def empresa(self):
+        return getattr(self, "empresa_activa", None) or getattr(self.request, "empresa_activa", None)
 
     def get_form_kwargs(self):
         """
         Inyecta `empresa` al formulario para limitar querysets y asignar empresa en save().
         """
         kwargs = super().get_form_kwargs()
-        kwargs["empresa"] = getattr(self.request, "empresa_activa", None)
+        kwargs["empresa"] = self.empresa
         return kwargs
 
     def form_valid(self, form: PriceForm):
-        empresa = getattr(self.request, "empresa_activa", None)
+        empresa = self.empresa
         if not empresa:
             messages.error(
                 self.request, "No hay una empresa activa seleccionada.")
@@ -222,7 +214,7 @@ class PriceCreateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
     def get_initial(self):
         initial = super().get_initial()
         rq = self.request
-        # Prefiere querystring; si no hay, usa sucursal activa
+        # Prefiere querystring; si no hay, usa sucursal activa si tu Tenancy la expone
         if 'sucursal' in rq.GET:
             initial['sucursal'] = rq.GET.get('sucursal')
         elif getattr(rq, 'sucursal_activa', None):
@@ -233,12 +225,22 @@ class PriceCreateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
             initial['tipo_vehiculo'] = rq.GET.get('tipo')
         return initial
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        empresa = self.empresa
+        user = self.request.user
+        ctx["puede_crear"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_CREATE)
+        # por claridad, en create no mostramos editar; pero lo dejamos en False explícito
+        ctx["puede_editar"] = False
+        return ctx
+
+
 # ============================================================
 # Edición
 # ============================================================
 
-
-class PriceUpdateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin, UpdateView):
+class PriceUpdateView(EmpresaPermRequiredMixin, BackUrlMixin, UpdateView):
     """
     Edición de precio. Usa `update_price` para centralizar validaciones y
     permitir cambios de fechas/estado de forma segura.
@@ -246,14 +248,18 @@ class PriceUpdateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
     model = PrecioServicio
     form_class = PriceForm
     template_name = "pricing/form.html"
-    allowed_roles = ("admin",)
     default_url_name = "pricing:list"
+    required_perms = (Perm.PRICING_EDIT,)
+
+    @property
+    def empresa(self):
+        return getattr(self, "empresa_activa", None) or getattr(self.request, "empresa_activa", None)
 
     def get_queryset(self):
         """
         Restringe edición a objetos de la empresa activa (multi-tenant).
         """
-        empresa = getattr(self.request, "empresa_activa", None)
+        empresa = self.empresa
         base = super().get_queryset()
         if not empresa:
             return base.none()
@@ -264,7 +270,7 @@ class PriceUpdateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
         Inyecta `empresa` al formulario para limitar FKs al tenant activo.
         """
         kwargs = super().get_form_kwargs()
-        kwargs["empresa"] = getattr(self.request, "empresa_activa", None)
+        kwargs["empresa"] = self.empresa
         return kwargs
 
     def form_valid(self, form: PriceForm):
@@ -284,3 +290,41 @@ class PriceUpdateView(LoginRequiredMixin, EmpresaRoleRequiredMixin, BackUrlMixin
             f"Cambios guardados: {obj.servicio} × {obj.tipo_vehiculo} @ {obj.sucursal} - {obj.moneda} {obj.precio} ({obj.periodo_str})."
         )
         return HttpResponseRedirect(self.get_success_url())
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        empresa = self.empresa
+        user = self.request.user
+        ctx["puede_editar"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_EDIT)
+        # opcional: si querés mostrar un botón "Duplicar como nuevo" que use crear
+        ctx["puede_crear"] = has_empresa_perm(
+            user, empresa, Perm.PRICING_CREATE)
+        return ctx
+
+
+class PriceDeactivateView(EmpresaPermRequiredMixin, View):
+    """
+    Soft-delete: marca inactivo y cierra vigencia (si está abierta).
+    POST-only.
+    """
+    required_perms = (Perm.PRICING_DEACTIVATE,)
+
+    @property
+    def empresa(self):
+        return getattr(self, "empresa_activa", None) or getattr(self.request, "empresa_activa", None)
+
+    def post(self, request, pk: int):
+        empresa = self.empresa
+        obj = get_object_or_404(PrecioServicio, pk=pk, empresa=empresa)
+
+        # Cerrar vigencia si está abierta
+        if obj.vigencia_fin is None:
+            obj.vigencia_fin = localdate()
+
+        obj.activo = False
+        obj.save(update_fields=["vigencia_fin", "activo"])
+
+        messages.success(request, "Precio desactivado y vigencia cerrada.")
+        next_url = request.POST.get("next") or reverse("pricing:list")
+        return redirect(next_url)

@@ -39,11 +39,11 @@ class PriceForm(forms.ModelForm):
         for name, field in self.fields.items():
             w = field.widget
             if isinstance(w, forms.CheckboxInput):
-                w.attrs.update({"class": "form-check-input"})
+                w.attrs.setdefault("class", "form-check-input")
             elif isinstance(w, (forms.Select, forms.SelectMultiple)):
-                w.attrs.update({"class": "form-select"})
+                w.attrs.setdefault("class", "form-select")
             else:
-                w.attrs.update({"class": "form-control"})
+                w.attrs.setdefault("class", "form-control")
 
         # Calendario HTML5
         for fname in ("vigencia_inicio", "vigencia_fin"):
@@ -56,10 +56,11 @@ class PriceForm(forms.ModelForm):
 
         self.fields["precio"].widget.attrs.setdefault("placeholder", "0,00")
 
+        # Valor por defecto para vigencia_inicio
         if not self.initial.get("vigencia_inicio"):
             self.initial["vigencia_inicio"] = timezone.localdate()
 
-        # ⬇️ FILTROS MULTI-TENANT (clave del bug)
+        # ⬇️ FILTROS MULTI-TENANT
         if empresa is not None:
             # Si tenés flag de activo en estos modelos, podés sumar activo=True
             self.fields["sucursal"].queryset = (
@@ -74,6 +75,16 @@ class PriceForm(forms.ModelForm):
                     empresa=empresa, activo=True).order_by("nombre")
             )
 
+        # ⬇️ En edición: bloquear cambio de combinación (clave lógica)
+        if self.instance and self.instance.pk:
+            for fld in ("sucursal", "servicio", "tipo_vehiculo"):
+                if fld in self.fields:
+                    self.fields[fld].disabled = True
+                    # Aviso UX
+                    self.fields[fld].help_text = (
+                        "Este campo no puede editarse. Usá “Duplicar como nuevo” para cambiar la combinación."
+                    )
+
     def clean(self):
         cleaned = super().clean()
 
@@ -81,7 +92,9 @@ class PriceForm(forms.ModelForm):
         fin = cleaned.get("vigencia_fin")
         if ini and fin and fin < ini:
             self.add_error(
-                "vigencia_fin", "La fecha 'vigente hasta' no puede ser anterior al 'vigente desde'.")
+                "vigencia_fin",
+                "La fecha 'vigente hasta' no puede ser anterior al 'vigente desde'.",
+            )
 
         empresa = self._empresa_ctx or (
             self.instance and self.instance.empresa)
@@ -114,7 +127,8 @@ class PriceForm(forms.ModelForm):
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
                 raise ValidationError(
-                    "Ya existe un precio con la misma combinación y 'vigente desde' en esa fecha.")
+                    "Ya existe un precio con la misma combinación y 'vigente desde' en esa fecha."
+                )
 
         return cleaned
 
@@ -123,6 +137,7 @@ class PriceForm(forms.ModelForm):
         if self._empresa_ctx is not None:
             obj.empresa = self._empresa_ctx
         if commit:
+            # full_clean invoca validadores de modelo (seguros ante formularios incompletos)
             obj.full_clean()
             obj.save()
         return obj

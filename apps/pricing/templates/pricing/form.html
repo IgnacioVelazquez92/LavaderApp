@@ -46,9 +46,30 @@
     {% include "pricing/_form_fields.html" %}
 
     <div class="d-flex gap-2 mt-3">
-      <button type="submit" class="btn btn-primary">
-        {% if view.object %}Guardar cambios{% else %}Crear precio{% endif %}
-      </button>
+      {# Botón principal según permiso #}
+      {% if view.object %}
+        {# Editar #}
+        {% if puede_editar %}
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        {% else %}
+          <button type="button" class="btn btn-primary" disabled
+                  data-bs-toggle="tooltip" data-bs-placement="left"
+                  title="No tenés permisos para editar precios">
+            Guardar cambios
+          </button>
+        {% endif %}
+      {% else %}
+        {# Crear #}
+        {% if puede_crear %}
+          <button type="submit" class="btn btn-primary">Crear precio</button>
+        {% else %}
+          <button type="button" class="btn btn-primary" disabled
+                  data-bs-toggle="tooltip" data-bs-placement="left"
+                  title="No tenés permisos para crear precios">
+            Crear precio
+          </button>
+        {% endif %}
+      {% endif %}
 
       {% if request.GET.next %}
         <a class="btn btn-outline-secondary" href="{{ request.GET.next }}">Cancelar</a>
@@ -58,4 +79,15 @@
     </div>
   </form>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    // Inicializa tooltips de Bootstrap si no estuvieran inicializados globalmente
+    document.addEventListener('DOMContentLoaded', function () {
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      tooltipTriggerList.forEach(function (el) { new bootstrap.Tooltip(el) })
+    });
+  </script>
 {% endblock %}

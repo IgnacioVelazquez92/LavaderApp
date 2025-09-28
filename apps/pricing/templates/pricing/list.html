@@ -11,9 +11,16 @@
       <div class="text-muted">Filtrá por Sucursal, Servicio, Tipo y Vigencia</div>
     </div>
     <div>
-      <a class="btn btn-primary" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">
-        Nuevo precio
-      </a>
+      {% if puede_crear %}
+        <a class="btn btn-primary" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">
+          Nuevo precio
+        </a>
+      {% else %}
+        <button type="button" class="btn btn-primary" disabled data-bs-toggle="tooltip" data-bs-placement="left"
+                title="No tenés permisos para crear precios">
+          Nuevo precio
+        </button>
+      {% endif %}
     </div>
   </div>
 
@@ -114,11 +121,34 @@
                 <span class="badge text-bg-secondary">Inactivo</span>
               {% endif %}
             </td>
+
             <td class="text-end">
-              <a class="btn btn-sm btn-outline-primary"
-                 href="{% url 'pricing:edit' p.pk %}?next={{ request.get_full_path|urlencode }}">
-                Editar
-              </a>
+              {% if puede_editar %}
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{% url 'pricing:edit' p.pk %}?next={{ request.get_full_path|urlencode }}">
+                   <i class="bi bi-pencil-square"></i>
+                </a>
+              {% else %}
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled
+                        data-bs-toggle="tooltip" data-bs-placement="left"
+                        title="No tenés permisos para editar precios">
+                        <i class="bi bi-pencil-square"></i>
+                </button>
+              {% endif %}
+
+              {% if puede_desactivar and p.activo %}
+                <form id="deact-form-{{ p.pk }}" method="post" action="{% url 'pricing:deactivate' p.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path|urlencode }}">
+                  <button type="button" class="btn btn-sm btn-outline-danger"
+                          data-bs-toggle="modal"
+                          data-bs-target="#confirmDeactivateModal"
+                          data-form-id="deact-form-{{ p.pk }}"
+                          data-entity="{{ p.servicio.nombre }} × {{ p.tipo_vehiculo.nombre }} @ {{ p.sucursal.nombre }}">
+                          <i class="bi bi-x-square-fill"></i>
+                  </button>
+                </form>
+              {% endif %}
             </td>
           </tr>
         {% empty %}
@@ -126,7 +156,9 @@
             <td colspan="8">
               <div class="alert alert-info mb-0">
                 No hay precios para los filtros seleccionados.
-                <a class="alert-link" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">Crear el primero</a>.
+                {% if puede_crear %}
+                  <a class="alert-link" href="{% url 'pricing:create' %}?next={{ request.get_full_path|urlencode }}">Crear el primero</a>.
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -137,4 +169,72 @@
 
   {% include "includes/_pagination.html" %}
 </div>
+
+{# Modal Bootstrap para confirmar desactivación (soft-delete) #}
+<div class="modal fade" id="confirmDeactivateModal" tabindex="-1" aria-labelledby="confirmDeactivateLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmDeactivateLabel">Desactivar precio</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">Vas a desactivar el precio <strong class="js-entity">—</strong>.</p>
+        <ul class="mb-0">
+          <li>Se cerrará su vigencia (si está abierta) con fecha de hoy.</li>
+          <li>Quedará marcado como inactivo para nuevas operaciones.</li>
+          <li>Las ventas históricas no se ven afectadas.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="confirmDeactivateBtn">Desactivar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    // Inicializa tooltips de Bootstrap si no estuvieran inicializados globalmente
+    document.addEventListener('DOMContentLoaded', function () {
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        new bootstrap.Tooltip(tooltipTriggerEl)
+      })
+    });
+
+    // Modal de confirmación de desactivación (Bootstrap 5)
+    (function () {
+      var modalEl = document.getElementById('confirmDeactivateModal');
+      if (!modalEl) return;
+
+      var confirmBtn = document.getElementById('confirmDeactivateBtn');
+
+      modalEl.addEventListener('show.bs.modal', function (event) {
+        var button = event.relatedTarget;
+        if (!button) return;
+
+        var formId = button.getAttribute('data-form-id');
+        var entity = button.getAttribute('data-entity') || '—';
+
+        // Setear el nombre de la entidad en el modal
+        var entitySpan = modalEl.querySelector('.js-entity');
+        if (entitySpan) entitySpan.textContent = entity;
+
+        // Guardar el form-id en el botón de confirmar
+        confirmBtn.setAttribute('data-form-id', formId);
+      });
+
+      confirmBtn.addEventListener('click', function () {
+        var formId = this.getAttribute('data-form-id');
+        if (formId) {
+          var form = document.getElementById(formId);
+          if (form) form.submit();
+        }
+      });
+    })();
+  </script>
 {% endblock %}

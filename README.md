@@ -2219,7 +2219,7 @@ apps/pricing/
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                  # Modelo PrecioServicio (con vigencias)
-├─ urls.py                    # Rutas propias (listado, alta, edición)
+├─ urls.py                    # Rutas propias (listado, alta, edición, desactivación)
 ├─ views.py                   # Vistas server-rendered CRUD y consulta
 ├─ forms/
 │  ├─ __init__.py
@@ -2229,10 +2229,10 @@ apps/pricing/
 │  ├─ pricing.py              # Comandos: crear/actualizar precio; cerrar vigencias
 │  └─ resolver.py             # Resolver: obtener precio vigente dado (srv, tipo, suc)
 ├─ selectors.py               # Lecturas: listar precios por filtros/estado
-├─ validators.py              # Reglas: solapamiento de vigencias, monto > 0, moneda válida
+├─ validators.py              # Reglas: solapamiento de vigencias, consistencia de empresa, moneda válida
 ├─ templates/
 │  └─ pricing/
-│     ├─ list.html            # Listado con filtros y tabla responsive
+│     ├─ list.html            # Listado con filtros, tabla responsive y acciones (editar/desactivar)
 │     ├─ form.html            # Alta/edición de precio
 │     └─ _form_fields.html    # Partial del formulario (Bootstrap)
 └─ static/
@@ -2248,12 +2248,12 @@ apps/pricing/
   - valida montos y fechas,
   - fuerza `vigencia_inicio` y `vigencia_fin` como `<input type="date">` (calendario HTML5),
   - integra Bootstrap (`form-control`, `form-select`).
-- **`validators.py`**: chequea **solapamientos** de vigencias para la misma combinación (srv×tipo×suc).
-- **`services/pricing.py`**: mutaciones seguras (cierre automático de vigencias previas y alta del nuevo precio).
+- **`validators.py`**: chequea **solapamientos** de vigencias y consistencia de pertenencia a empresa (sucursal, servicio, tipo).
+- **`services/pricing.py`**: mutaciones seguras (cierre automático de vigencias previas, alta de nuevo precio, actualización).
 - **`services/resolver.py`**: API interna para ventas: `get_precio_vigente(empresa, sucursal, servicio, tipo, fecha=None)`.
 - **`selectors.py`**: consultas para listados y filtros (por sucursal, servicio, estado, fecha).
 - **`templates/*`**: interfaz Bootstrap 5:
-  - `list.html`: filtros amigables con `<select>` en vez de IDs,
+  - `list.html`: filtros amigables, tabla con botones de acción y modal de confirmación para desactivar,
   - `form.html` + `_form_fields.html`: alta/edición con selects dinámicos y calendarios.
 
 ---
@@ -2265,6 +2265,7 @@ apps/pricing/
 - `POST /precios/nuevo/` → crear precio (cierra/ajusta vigencias previas si aplica).
 - `GET /precios/<id>/editar/` → edición de precio.
 - `POST /precios/<id>/editar/` → actualizar precio (opcional: finalizar vigencia).
+- `POST /precios/<id>/desactivar/` → desactivar (soft-delete) y cerrar vigencia.
 
 > Nota: el **resolver** de precios **no expone vista**; es consumido por `sales` vía `services.resolver`.
 
@@ -2274,12 +2275,19 @@ apps/pricing/
 
 ### Alta/Edición de Precio
 
-- **Input (POST)**: `sucursal`, `servicio`, `tipo_vehiculo` (elegidos desde `<select>` con nombres claros), `precio` (decimal), `moneda` (str), `vigencia_inicio` (date con calendario), `vigencia_fin` (opcional).
+- **Input (POST)**: `sucursal`, `servicio`, `tipo_vehiculo`, `precio`, `moneda`, `vigencia_inicio`, `vigencia_fin` (opcional).
 - **Proceso**:
   - Validar que **no haya solapamiento** de vigencias para la misma combinación.
+  - Validar consistencia: sucursal, servicio y tipo de vehículo deben pertenecer a la empresa activa.
   - Si existe un precio vigente que choca, **cerrar** su `vigencia_fin` al día anterior.
   - Persistir nuevo registro “activo”.
 - **Output**: creación/actualización exitosa; redirect a `/precios/` con mensaje.
+
+### Desactivación de Precio
+
+- **Input (POST)**: id del precio a desactivar.
+- **Proceso**: marcar como `activo=False` y, si corresponde, cerrar `vigencia_fin` con fecha de hoy.
+- **Output**: redirect a `/precios/` con mensaje de éxito.
 
 ### Resolución de Precio (uso interno)
 
@@ -2300,19 +2308,30 @@ apps/pricing/
 
 ## 5) Seguridad
 
-- Todas las vistas requieren autenticación.
-- Solo usuarios con rol **`admin`** en la empresa pueden **crear/editar** precios.
-- Usuarios **`operador`** pueden **listar/consultar**.
-- Validación multi-tenant: solo se listan/gestionan precios de la empresa activa (`request.empresa_activa`).
+- **Tenancy:** todas las vistas filtran por `empresa=self.empresa` (provista por `TenancyMiddleware`).
+- **Permisos granulares:** definidos en `apps.org.permissions.Perm` y asignados en `ROLE_POLICY`.
+  - Admin: `PRICING_VIEW`, `PRICING_CREATE`, `PRICING_EDIT`, `PRICING_DEACTIVATE`, `PRICING_DELETE`.
+  - Operador: solo `PRICING_VIEW`.
+  - Supervisor (opcional): solo `PRICING_VIEW`.
+- **Enforcement backend:** las vistas usan `EmpresaPermRequiredMixin` + `required_perms`.
+  - List: `(Perm.PRICING_VIEW,)`
+  - Create: `(Perm.PRICING_CREATE,)`
+  - Edit: `(Perm.PRICING_EDIT,)`
+  - Deactivate: `(Perm.PRICING_DEACTIVATE,)`
+- **UI/UX:** flags `puede_crear`, `puede_editar`, `puede_eliminar`, `puede_desactivar` para mostrar/ocultar botones.
+  - La acción de desactivar se confirma con un **modal Bootstrap**, no con alert JS.
+- **Validaciones:** `validators.py` asegura consistencia de empresa y no solapamiento de vigencias.
 
 ---
 
 ## 6) Estado actual del módulo
 
 - Modelo `PrecioServicio` migrado y en uso.
-- Formularios con selects dinámicos (no IDs manuales) y `<input type="date">` para vigencias.
+- Formularios con selects dinámicos y `<input type="date">` para vigencias.
 - Validaciones de solapamiento y de pertenencia a empresa activa funcionando.
-- Vistas CRUD limpias con CBVs y redirecciones controladas (`?next`).
+- Vistas CRUD limpias con CBVs y permisos granulares.
+- Vista de desactivación implementada como soft-delete con confirmación modal.
+- Redirecciones controladas (`?next`) para mejor UX.
 - Templates Bootstrap 5: UX consistente con sidebar y otros módulos.
 - Admin: registro de `PrecioServicio` con filtros por empresa, servicio, sucursal y vigencia.
 
@@ -2325,6 +2344,7 @@ apps/pricing/
 3. Exportar precios (CSV/Excel) con filtros aplicados.
 4. Agregar historial de cambios (auditoría).
 5. Integración de notificaciones cuando se actualicen precios.
+6. Evaluar si corresponde implementar eliminación definitiva (hard delete) o mantener siempre soft-delete.
 
 ---
 

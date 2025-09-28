@@ -7,6 +7,7 @@ from .views import (
     PriceListView,
     PriceCreateView,
     PriceUpdateView,
+    PriceDeactivateView
 )
 
 app_name = "pricing"
@@ -20,4 +21,5 @@ urlpatterns = [
 
     # Edición
     path("<int:pk>/editar/", PriceUpdateView.as_view(), name="edit"),
+    path("<int:pk>/desactivar/", PriceDeactivateView.as_view(), name="deactivate"),
 ]
