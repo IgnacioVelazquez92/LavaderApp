@@ -184,6 +184,14 @@ class Perm(str, Enum):
     VEHICLE_TYPES_DEACTIVATE = "VEHICLE_TYPES_DEACTIVATE"
     VEHICLE_TYPES_DELETE = "VEHICLE_TYPES_DELETE"
 
+    # Catálogo de servicios
+    CATALOG_VIEW = "CATALOG_VIEW"
+    CATALOG_CREATE = "CATALOG_CREATE"
+    CATALOG_EDIT = "CATALOG_EDIT"
+    CATALOG_DEACTIVATE = "CATALOG_DEACTIVATE"
+    CATALOG_ACTIVATE = "CATALOG_ACTIVATE"
+    CATALOG_DELETE = "CATALOG_DELETE"
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -196,6 +204,7 @@ ROLE_POLICY = {
         Perm.CATALOG_PRICES_MANAGE,
         Perm.REPORTS_VIEW,
 
+        # Customers
         Perm.CUSTOMERS_VIEW,
         Perm.CUSTOMERS_CREATE,
         Perm.CUSTOMERS_EDIT,
@@ -215,15 +224,24 @@ ROLE_POLICY = {
         Perm.VEHICLE_TYPES_EDIT,
         Perm.VEHICLE_TYPES_DEACTIVATE,
         Perm.VEHICLE_TYPES_DELETE,
+
+        # Catalog (nuevo)
+        Perm.CATALOG_VIEW,
+        Perm.CATALOG_CREATE,
+        Perm.CATALOG_EDIT,
+        Perm.CATALOG_DEACTIVATE,
+        Perm.CATALOG_ACTIVATE,
+        Perm.CATALOG_DELETE,
     },
 
-    # Operador: puede gestionar vehículos (crear/editar), pero NO crear/editar tipos.
+    # Operador: solo puede ver catálogo (no crear/editar/borrar).
     "operador": {
         Perm.ORG_VIEW,
         Perm.CATALOG_SERVICES_MANAGE,
         Perm.CATALOG_PRICES_MANAGE,
         Perm.REPORTS_VIEW,
 
+        # Customers
         Perm.CUSTOMERS_VIEW,
         Perm.CUSTOMERS_CREATE,
         Perm.CUSTOMERS_EDIT,
@@ -235,13 +253,20 @@ ROLE_POLICY = {
 
         # Vehicle Types (solo ver)
         Perm.VEHICLE_TYPES_VIEW,
+
+        # Catalog
+        Perm.CATALOG_VIEW,
     },
 
+    # Supervisor: perfil de solo consulta, también puede ver catálogo.
     "supervisor": {
         Perm.ORG_VIEW,
         Perm.CATALOG_SERVICES_MANAGE,
         Perm.CATALOG_PRICES_MANAGE,
         Perm.REPORTS_VIEW,
+
+        # Catalog
+        Perm.CATALOG_VIEW,
     },
 }
 

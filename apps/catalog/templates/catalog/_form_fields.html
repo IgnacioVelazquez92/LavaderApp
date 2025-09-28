@@ -1,34 +1,51 @@
 {# apps/catalog/templates/catalog/_form_fields.html #}
 {% load i18n %}
 
-<div class="mb-3">
-  <label for="{{ form.nombre.id_for_label }}" class="form-label">Nombre</label>
-  {{ form.nombre }}
-  {% if form.nombre.errors %}
-    <div class="invalid-feedback">
-      {{ form.nombre.errors|striptags }}
-    </div>
-  {% else %}
-    <div class="form-text">Nombre visible del servicio (ej. Lavado exterior).</div>
-  {% endif %}
-</div>
+{# Errores generales del formulario (no de un campo en particular) #}
+{% if form.non_field_errors %}
+  <div class="alert alert-danger" role="alert">
+    {{ form.non_field_errors|striptags }}
+  </div>
+{% endif %}
 
-<div class="mb-3">
-  <label for="{{ form.descripcion.id_for_label }}" class="form-label">Descripción</label>
-  {{ form.descripcion }}
-  {% if form.descripcion.errors %}
-    <div class="invalid-feedback">
-      {{ form.descripcion.errors|striptags }}
-    </div>
-  {% else %}
-    <div class="form-text">Detalles opcionales del servicio.</div>
-  {% endif %}
-</div>
+{# NOMBRE #}
+{% with field=form.nombre help_id=form.nombre.auto_id|add:"-help" err_id=form.nombre.auto_id|add:"-error" %}
+  <div class="mb-3">
+    <label for="{{ field.id_for_label }}" class="form-label">Nombre</label>
+    {{ field.as_widget|safe }}
+    {% if field.errors %}
+      <div id="{{ err_id }}" class="invalid-feedback">
+        {{ field.errors|striptags }}
+      </div>
+    {% else %}
+      <div id="{{ help_id }}" class="form-text">
+        Nombre visible del servicio (ej. Lavado exterior).
+      </div>
+    {% endif %}
+  </div>
+{% endwith %}
 
-{# Campo slug oculto (ya viene HiddenInput desde el form) #}
+{# DESCRIPCIÓN #}
+{% with field=form.descripcion help_id=form.descripcion.auto_id|add:"-help" err_id=form.descripcion.auto_id|add:"-error" %}
+  <div class="mb-3">
+    <label for="{{ field.id_for_label }}" class="form-label">Descripción</label>
+    {{ field.as_widget|safe }}
+    {% if field.errors %}
+      <div id="{{ err_id }}" class="invalid-feedback">
+        {{ field.errors|striptags }}
+      </div>
+    {% else %}
+      <div id="{{ help_id }}" class="form-text">
+        Detalles opcionales del servicio.
+      </div>
+    {% endif %}
+  </div>
+{% endwith %}
+
+{# SLUG oculto (HiddenInput desde el form) #}
 {{ form.slug }}
 
-{# Campo activo: en creación está disabled, en edición se muestra como switch #}
+{# ACTIVO: en creación va disabled desde el form; en edición mostrar switch #}
 {% if form.fields.activo and not form.fields.activo.disabled %}
   <div class="form-check form-switch mb-3">
     {{ form.activo }}

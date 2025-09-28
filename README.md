@@ -1904,7 +1904,13 @@ apps/vehicles/
 - Validación multi-tenant:
   - Solo se listan/gestionan vehículos de la empresa activa.
   - Las vistas de edición comprueban que el objeto pertenezca a la empresa activa.
-- Acciones de alta/edición/activación restringidas a roles habilitados (`admin` / `operador`).
+- **Permisos declarados en `apps.org.permissions.Perm`:**
+  - `VEHICLES_VIEW`, `VEHICLES_CREATE`, `VEHICLES_EDIT`, `VEHICLES_DEACTIVATE`, `VEHICLES_DELETE`
+  - `VEHICLE_TYPES_VIEW`, `VEHICLE_TYPES_CREATE`, `VEHICLE_TYPES_EDIT`, `VEHICLE_TYPES_DEACTIVATE`, `VEHICLE_TYPES_DELETE`
+- **Matriz de roles (`ROLE_POLICY`):**
+  - **Admin**: todos los permisos de vehículos y tipos.
+  - **Operador**: puede ver/crear/editar vehículos. Solo puede **ver** tipos de vehículo, sin crearlos ni editarlos.
+- Control en backend con `EmpresaPermRequiredMixin` y `has_empresa_perm`. Los botones de UI se muestran/deshabilitan según los flags en contexto.
 
 ---
 
@@ -1917,6 +1923,7 @@ apps/vehicles/
 - Listado de clientes muestra un resumen de sus vehículos (hasta 3 patentes, badge “+N” si hay más).
 - Si el cliente no tiene vehículos → botón directo **Agregar vehículo** (lleva al form con `?cliente=<id>&next=<listado>`).
 - En el form de vehículo, botón “+ Crear tipo” abre el alta de tipo con `next` apuntando al form actual → al guardar vuelve a la edición/alta del vehículo.
+- En listados y formularios, los botones se muestran u ocultan según permisos calculados en `get_context_data`.
 
 ---
 
@@ -1925,7 +1932,7 @@ apps/vehicles/
 - Modelos y migraciones completas (`Vehiculo`, `TipoVehiculo`).
 - Formularios con validaciones (patente única por empresa).
 - Services y Selectors implementados (mutaciones y lecturas).
-- CBVs CRUD funcionales, integradas con `BackUrlMixin`.
+- CBVs CRUD funcionales, integradas con `BackUrlMixin` y `EmpresaPermRequiredMixin`.
 - Templates `list`, `form`, `detail`, `types_list`, `type_form` listos y probados.
 - Integración con `customers.detail.html` y `customers.list.html`.
 - Sidebar actualizado: enlace directo a **Vehículos** en sección **Maestros**.
@@ -2009,7 +2016,7 @@ apps/catalog/
 │  └─ service.py             # Formulario de alta/edición de servicio
 ├─ services/
 │  ├─ __init__.py
-│  └─ services.py            # Casos de uso: crear, editar, desactivar servicio
+│  └─ services.py            # Casos de uso: crear, editar, activar, desactivar, eliminar servicio
 ├─ selectors.py              # Lecturas: listar activos, buscar por nombre, get por ID
 ├─ templates/
 │  └─ catalog/
@@ -2032,10 +2039,10 @@ apps/catalog/
   - valida nombre único en empresa,
   - inyecta clases Bootstrap,
   - gestiona campo `activo` (oculto en creación, editable en edición).
-- **`services/services.py`**: mutaciones de dominio (`crear_servicio`, `editar_servicio`, `activar_servicio`, `desactivar_servicio`).
+- **`services/services.py`**: mutaciones de dominio (`crear_servicio`, `editar_servicio`, `activar_servicio`, `desactivar_servicio`, `eliminar_servicio`).
 - **`selectors.py`**: consultas (`servicios_activos(empresa)`, `buscar_por_nombre`, `get_servicio_por_id`).
 - **`views.py`**:
-  - CBVs para List, Create, Update, Detail,
+  - CBVs para List, Create, Update, Detail, Delete,
   - acciones POST para activar/desactivar,
   - soporte `?next` para redirecciones.
 - **`templates/catalog/*`**: interfaz UI:
@@ -2053,6 +2060,7 @@ apps/catalog/
 - `/catalogo/servicios/<id>/detalle/` → Detalle de servicio (`ServiceDetailView`).
 - `/catalogo/servicios/<id>/activar/` → Activar servicio (`ServiceActivateView`).
 - `/catalogo/servicios/<id>/desactivar/` → Desactivar servicio (`ServiceDeactivateView`).
+- `/catalogo/servicios/<id>/eliminar/` → Eliminar servicio (`ServiceDeleteView`).
 
 ---
 
@@ -2089,7 +2097,13 @@ apps/catalog/
 
 - **Input (POST)**: id + `csrf_token`.
 - **Proceso**: cambiar flag `activo`.
-- **Output**: redirect a listado (o `next`), mensaje confirmación.
+- **Output**: redirect a listado o detalle (según `next`), mensaje confirmación.
+
+### Eliminar Servicio
+
+- **Input (POST)**: id + `csrf_token`.
+- **Proceso**: borrado definitivo de `Servicio`.
+- **Output**: redirect a listado (ignora `next` si apunta al detalle borrado), mensaje de confirmación.
 
 ---
 
@@ -2104,9 +2118,20 @@ apps/catalog/
 
 ## 5) Seguridad
 
-- Todas las vistas requieren usuario autenticado.
+- Todas las vistas requieren usuario autenticado y empresa activa.
 - Validación multi-tenant: solo se listan/gestionan servicios de la empresa activa (`request.empresa_activa`).
-- Acciones de alta/edición/activación restringidas a roles `admin` / `operador`.
+- **Permisos granulares (`apps.org.permissions.Perm`)**:
+  - `CATALOG_VIEW`: ver/listar servicios (list/detail).
+  - `CATALOG_CREATE`: crear servicios.
+  - `CATALOG_EDIT`: editar servicios.
+  - `CATALOG_ACTIVATE` / `CATALOG_DEACTIVATE`: cambiar estado activo.
+  - `CATALOG_DELETE`: eliminar definitivamente.
+- **Política por rol (`ROLE_POLICY`)**:
+  - `admin`: todos los permisos sobre catálogo.
+  - `operador`: solo `CATALOG_VIEW` (puede listar/ver detalle, no crear/editar).
+  - `supervisor`: solo `CATALOG_VIEW` (lectura).
+- Los botones en UI se muestran/ocultan o deshabilitan según flags de permisos (`puede_crear`, `puede_editar`, `puede_eliminar`, etc.).
+- Backend aplica seguridad con `EmpresaPermRequiredMixin`, nunca solo en frontend.
 
 ---
 
@@ -2114,8 +2139,8 @@ apps/catalog/
 
 - Modelo `Servicio` implementado con unicidad por empresa y slug autogenerado.
 - Formularios estilizados con Bootstrap (`form-control`, `is-invalid`, `form-check-input`).
-- Vistas CRUD y de activación/desactivación funcionando.
-- Templates `list`, `form`, `detail` completos y responsivos.
+- Vistas CRUD, activación/desactivación y eliminación funcionando con permisos.
+- Templates `list`, `form`, `detail` completos, con tooltips y modales de confirmación.
 - Sidebar con link a “Catálogo de servicios”.
 - Mensajes de éxito/error integrados con `django.contrib.messages`.
 

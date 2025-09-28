@@ -1,16 +1,13 @@
 # apps/catalog/views.py
 from __future__ import annotations
-from django.views.generic import DetailView
-
 from typing import Any, Dict, Optional
 
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views import View
-from django.views.generic import ListView, CreateView, UpdateView
+from django.views.generic import ListView, CreateView, UpdateView, DetailView
 
 from apps.catalog.forms.service import ServiceForm
 from apps.catalog import selectors
@@ -20,27 +17,12 @@ from apps.catalog.services import (
     activar_servicio,
     desactivar_servicio,
 )
+from apps.org.permissions import (
+    EmpresaPermRequiredMixin,
+    has_empresa_perm,
+    Perm,
+)
 from apps.org.models import Empresa
-
-
-# --------------------
-# Mixins utilitarios
-# --------------------
-
-class EmpresaContextMixin:
-    """
-    Garantiza que exista empresa activa en el request.
-    Provee `self.empresa`.
-    """
-    empresa: Empresa
-
-    def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
-        empresa = getattr(request, "empresa_activa", None)
-        if empresa is None:
-            messages.error(request, "No hay una empresa activa seleccionada.")
-            return redirect("org:empresas")  # o al panel "/"
-        self.empresa = empresa
-        return super().dispatch(request, *args, **kwargs)
 
 
 class NextUrlMixin:
@@ -61,74 +43,97 @@ class NextUrlMixin:
         return self.get_next_url() or self.default_success_url
 
 
-# -------------
+# -------------------
 # Listado
-# -------------
+# -------------------
 
-class ServiceListView(LoginRequiredMixin, EmpresaContextMixin, ListView):
+class ServiceListView(EmpresaPermRequiredMixin, ListView):
     """
     Listado de servicios con búsqueda `?q=` y paginación.
     """
+    required_perms = (Perm.CATALOG_VIEW,)
     template_name = "catalog/list.html"
     context_object_name = "servicios"
     paginate_by = 20
 
     def get_queryset(self):
         q = (self.request.GET.get("q") or "").strip()
-        return selectors.buscar_servicios(self.empresa, q)
+        return selectors.buscar_servicios(self.empresa_activa, q)
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
         ctx = super().get_context_data(**kwargs)
         ctx["q"] = (self.request.GET.get("q") or "").strip()
+        # Flags de permisos
+        ctx["puede_crear"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_CREATE)
+        ctx["puede_editar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_EDIT)
+        ctx["puede_activar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_ACTIVATE)
+        ctx["puede_desactivar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_DEACTIVATE)
+        ctx["puede_eliminar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_DELETE)
         return ctx
 
 
-class ServiceDetailView(LoginRequiredMixin, EmpresaContextMixin, DetailView):
+class ServiceDetailView(EmpresaPermRequiredMixin, DetailView):
     """
     Muestra detalle de un servicio de la empresa activa.
     """
+    required_perms = (Perm.CATALOG_VIEW,)
     template_name = "catalog/detail.html"
-    context_object_name = "object"  # default, pero lo dejamos explícito
+    context_object_name = "object"
 
     def get_object(self, queryset=None):
         pk = self.kwargs.get("pk")
-        obj = selectors.get_servicio_por_id(self.empresa, pk)
+        obj = selectors.get_servicio_por_id(self.empresa_activa, pk)
         if obj is None:
             messages.error(
-                self.request, "El servicio no existe o no pertenece a la empresa activa.")
+                self.request, "El servicio no existe o no pertenece a la empresa activa."
+            )
             raise self.handle_no_permission()
         return obj
 
-# -------------
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        ctx = super().get_context_data(**kwargs)
+        ctx["puede_editar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_EDIT)
+        ctx["puede_activar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_ACTIVATE)
+        ctx["puede_desactivar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_DEACTIVATE)
+        ctx["puede_eliminar"] = has_empresa_perm(
+            self.request.user, self.empresa_activa, Perm.CATALOG_DELETE)
+        return ctx
+
+
+# -------------------
 # Alta
-# -------------
+# -------------------
 
-
-class ServiceCreateView(LoginRequiredMixin, EmpresaContextMixin, NextUrlMixin, CreateView):
+class ServiceCreateView(EmpresaPermRequiredMixin, NextUrlMixin, CreateView):
     """
     Alta de servicio.
-    - Forzamos activo=True en el form (ya contemplado en ServiceForm).
     """
+    required_perms = (Perm.CATALOG_CREATE,)
     template_name = "catalog/form.html"
     form_class = ServiceForm
     default_success_url = reverse_lazy("catalog:services")
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        # Pasamos request para que el form conozca empresa_activa
         kwargs["request"] = self.request
         return kwargs
 
     def form_valid(self, form: ServiceForm) -> HttpResponse:
-        # Usamos el service para centralizar validaciones y efectos
         data = form.cleaned_data
         try:
             result = crear_servicio(
-                empresa=self.empresa,
+                empresa=self.empresa_activa,
                 nombre=data.get("nombre"),
                 descripcion=data.get("descripcion") or "",
                 slug=data.get("slug") or None,
-                # creado_por=self.request.user.id  # si luego se usa auditoría
             )
         except Exception as e:
             form.add_error(None, e)
@@ -139,26 +144,25 @@ class ServiceCreateView(LoginRequiredMixin, EmpresaContextMixin, NextUrlMixin, C
         return HttpResponseRedirect(self.get_success_url())
 
 
-# -------------
+# -------------------
 # Edición
-# -------------
+# -------------------
 
-class ServiceUpdateView(LoginRequiredMixin, EmpresaContextMixin, NextUrlMixin, UpdateView):
+class ServiceUpdateView(EmpresaPermRequiredMixin, NextUrlMixin, UpdateView):
     """
     Edición de servicio.
     """
+    required_perms = (Perm.CATALOG_EDIT,)
     template_name = "catalog/form.html"
     form_class = ServiceForm
     default_success_url = reverse_lazy("catalog:services")
 
-    # Obtenemos el objeto respetando el scope de empresa
     def get_object(self, queryset=None):
         pk = self.kwargs.get("pk")
-        obj = selectors.get_servicio_por_id(self.empresa, pk)
+        obj = selectors.get_servicio_por_id(self.empresa_activa, pk)
         if obj is None:
             messages.error(
                 self.request, "El servicio no existe o no pertenece a la empresa activa.")
-            # provoca redirect a login por LoginRequired; si querés, redirige a listado
             raise self.handle_no_permission()
         return obj
 
@@ -171,13 +175,12 @@ class ServiceUpdateView(LoginRequiredMixin, EmpresaContextMixin, NextUrlMixin, U
         data = form.cleaned_data
         try:
             result = editar_servicio(
-                empresa=self.empresa,
+                empresa=self.empresa_activa,
                 servicio_id=self.object.pk,
                 nombre=data.get("nombre"),
                 descripcion=data.get("descripcion"),
                 slug=data.get("slug") or None,
                 activo=data.get("activo"),
-                # editado_por=self.request.user.id,
             )
         except Exception as e:
             form.add_error(None, e)
@@ -189,17 +192,19 @@ class ServiceUpdateView(LoginRequiredMixin, EmpresaContextMixin, NextUrlMixin, U
 
 
 # ---------------------------
-# Activar / Desactivar (POST)
+# Activar / Desactivar
 # ---------------------------
 
-class ServiceDeactivateView(LoginRequiredMixin, EmpresaContextMixin, View):
+class ServiceDeactivateView(EmpresaPermRequiredMixin, View):
     """
     Marca un servicio como inactivo. Solo acepta POST.
     """
+    required_perms = (Perm.CATALOG_DEACTIVATE,)
 
     def post(self, request: HttpRequest, pk: int, *args, **kwargs) -> HttpResponse:
         try:
-            res = desactivar_servicio(empresa=self.empresa, servicio_id=pk)
+            res = desactivar_servicio(
+                empresa=self.empresa_activa, servicio_id=pk)
             messages.success(
                 request, f"Servicio “{res.servicio.nombre}” desactivado.")
         except Exception as e:
@@ -208,17 +213,44 @@ class ServiceDeactivateView(LoginRequiredMixin, EmpresaContextMixin, View):
         return redirect(next_url)
 
 
-class ServiceActivateView(LoginRequiredMixin, EmpresaContextMixin, View):
+class ServiceActivateView(EmpresaPermRequiredMixin, View):
     """
     Reactiva un servicio previamente inactivo. Solo acepta POST.
     """
+    required_perms = (Perm.CATALOG_ACTIVATE,)
 
     def post(self, request: HttpRequest, pk: int, *args, **kwargs) -> HttpResponse:
         try:
-            res = activar_servicio(empresa=self.empresa, servicio_id=pk)
+            res = activar_servicio(empresa=self.empresa_activa, servicio_id=pk)
             messages.success(
                 request, f"Servicio “{res.servicio.nombre}” activado.")
         except Exception as e:
             messages.error(request, f"No se pudo activar el servicio: {e}")
+        next_url = request.POST.get("next") or reverse_lazy("catalog:services")
+        return redirect(next_url)
+
+
+# -------------------
+# Eliminación
+# -------------------
+
+class ServiceDeleteView(EmpresaPermRequiredMixin, View):
+    """
+    Elimina un servicio de forma definitiva. Solo acepta POST.
+    """
+    required_perms = (Perm.CATALOG_DELETE,)
+
+    def post(self, request: HttpRequest, pk: int, *args, **kwargs) -> HttpResponse:
+        try:
+            obj = selectors.get_servicio_por_id(self.empresa_activa, pk)
+            if not obj:
+                messages.error(
+                    request, "El servicio no existe o no pertenece a la empresa activa.")
+            else:
+                obj.delete()
+                messages.success(
+                    request, f"Servicio “{obj.nombre}” eliminado definitivamente.")
+        except Exception as e:
+            messages.error(request, f"No se pudo eliminar el servicio: {e}")
         next_url = request.POST.get("next") or reverse_lazy("catalog:services")
         return redirect(next_url)

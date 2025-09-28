@@ -22,4 +22,6 @@ urlpatterns = [
          views.ServiceDeactivateView.as_view(), name="service_deactivate"),
     path("catalogo/servicios/<int:pk>/activar/",
          views.ServiceActivateView.as_view(), name="service_activate"),
+    path("catalogo/servicios/<int:pk>/eliminar/",
+         views.ServiceDeleteView.as_view(), name="service_delete"),
 ]
