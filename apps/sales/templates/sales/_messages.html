@@ -1,0 +1,28 @@
+{# apps/sales/templates/sales/_messages.html #}
+{% if messages %}
+  <div class="mb-2">
+    {% for m in messages %}
+      {% if m.tags == "success" %}
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+          {{ m }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% elif m.tags == "warning" %}
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+          {{ m }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% elif m.tags == "error" or m.tags == "danger" %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+          {{ m }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% else %}
+        <div class="alert alert-secondary alert-dismissible fade show" role="alert">
+          {{ m }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endif %}

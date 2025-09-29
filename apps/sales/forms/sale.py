@@ -43,10 +43,8 @@ class VentaForm(forms.ModelForm):
                 self.fields["vehiculo"].widget.attrs["disabled"] = "disabled"
 
         # ===== Bootstrap classes =====
-        # Selects
         self.fields["cliente"].widget.attrs.setdefault("class", "form-select")
         self.fields["vehiculo"].widget.attrs.setdefault("class", "form-select")
-        # Textarea
         self.fields["notas"].widget.attrs.setdefault("class", "form-control")
         self.fields["notas"].widget.attrs.setdefault(
             "placeholder", "Observaciones (opcional)")

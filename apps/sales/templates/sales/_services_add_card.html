@@ -1,0 +1,95 @@
+{# apps/sales/templates/sales/_services_add_card.html #}
+<div class="card">
+    <div class="card-header fw-semibold">Agregar servicios</div>
+    <div class="card-body">
+  
+      {% if venta.estado in "borrador,en_proceso" and puede_agregar_items %}
+  
+        {% if services_form.fields.servicios.choices %}
+          {# Lista CSV de servicios ya agregados (para JS) #}
+          <span id="svc-existing"
+                data-ids="{% for it in venta_items %}{{ it.servicio.id }}{% if not forloop.last %},{% endif %}{% endfor %}"></span>
+  
+          <form method="post" action="{% url 'sales:item_add' pk=venta.pk %}" novalidate>
+            {% csrf_token %}
+  
+            <div class="row g-2">
+              {% for checkbox in services_form.servicios %}
+                <div class="col-12 col-md-12">
+                  <div class="form-check">
+                    {{ checkbox.tag }}
+                    <label class="form-check-label" for="{{ checkbox.id_for_label }}">
+                      {{ checkbox.choice_label }}
+                    </label>
+                    <span class="badge bg-secondary-subtle text-secondary align-middle ms-1 d-none svc-badge-ya">
+                      ya agregado
+                    </span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+  
+            {% if services_form.errors.servicios %}
+              <div class="invalid-feedback d-block">{{ services_form.errors.servicios|striptags }}</div>
+            {% else %}
+              <div class="form-text mt-1">Elegí uno o varios servicios (sin cantidades). Los ya agregados aparecen bloqueados.</div>
+            {% endif %}
+  
+            <div class="d-grid mt-3">
+              <button type="submit" class="btn btn-primary" id="btn-agregar-servicios">
+                <i class="bi bi-plus-circle"></i> Agregar
+              </button>
+            </div>
+          </form>
+        {% else %}
+          <div class="alert alert-warning mb-0">
+            No hay servicios con precio vigente para el tipo de vehículo en la sucursal actual.
+            <a href="{% url 'pricing:list' %}">Configurar precios</a>.
+          </div>
+        {% endif %}
+  
+      {% elif venta.estado not in "borrador,en_proceso" %}
+        <div class="alert alert-warning mb-0">
+          La venta está <strong>{{ venta.estado }}</strong>; no se pueden agregar servicios.
+        </div>
+      {% else %}
+        <div class="alert alert-secondary mb-0">
+          No tenés permisos para agregar ítems en esta venta.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  
+  {# Mini-script: deshabilita y marca checkboxes de servicios ya agregados #}
+  <script>
+    (function() {
+      var holder = document.getElementById('svc-existing');
+      if (!holder) return;
+      var idsCsv = holder.getAttribute('data-ids') || '';
+      var existing = idsCsv.split(',').filter(Boolean);
+  
+      var checkboxes = document.querySelectorAll('input[type="checkbox"][name="{{ services_form.servicios.html_name }}"]');
+  
+      var allDisabled = true;
+      checkboxes.forEach(function (cb) {
+        if (existing.includes(cb.value)) {
+          cb.checked = true;
+          cb.disabled = true;
+          var badge = cb.closest('.form-check')?.querySelector('.svc-badge-ya');
+          if (badge) badge.classList.remove('d-none');
+        } else {
+          allDisabled = false;
+        }
+      });
+  
+      if (allDisabled) {
+        var submitBtn = document.getElementById('btn-agregar-servicios');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.setAttribute('data-bs-toggle', 'tooltip');
+          submitBtn.setAttribute('data-bs-title', 'Todos los servicios vigentes ya están agregados.');
+        }
+      }
+    })();
+  </script>
+  

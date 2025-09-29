@@ -19,7 +19,19 @@
     <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Volver al listado</a>
   </div>
 
-  {% include "includes/_messages.html" %}
+  {# Mensajes flash: alineado con templates de ventas #}
+  {% include "sales/_messages.html" %}
+
+  {# Hint si no hay sucursal activa (el POST fallará con mensaje, pero avisamos en GET) #}
+  {% if not request.sucursal_activa %}
+    <div class="alert alert-warning d-flex align-items-start">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>
+        <div class="fw-semibold">No hay una sucursal activa seleccionada.</div>
+        <div class="small">Seleccioná una sucursal para poder crear ventas.</div>
+      </div>
+    </div>
+  {% endif %}
 
   <!-- Paso 1 y 2: Cliente y vehículo (GET con auto-submit) -->
   <div class="card mb-3">
@@ -127,10 +139,15 @@
         <hr class="my-4">
 
         <div class="d-flex gap-2">
-          <button type="submit" class="btn btn-primary"
-                  {% if not crear_habilitado %}disabled{% endif %}>
-            Crear venta
-          </button>
+          {% if crear_habilitado %}
+            <button type="submit" class="btn btn-primary">Crear venta</button>
+          {% else %}
+            <button type="button" class="btn btn-primary" disabled
+                    data-bs-toggle="tooltip"
+                    data-bs-title="Seleccioná cliente, vehículo y al menos un servicio disponible.">
+              Crear venta
+            </button>
+          {% endif %}
           <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">Cancelar</a>
         </div>
       </form>
@@ -138,4 +155,16 @@
   </div>
 
 </div>
+
+{# Habilitar tooltips Bootstrap #}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const getForm = document.querySelector('form[method="get"]');
+    getForm?.addEventListener('change', function (e) {
+      if (e.target && (e.target.name === 'cliente' || e.target.name === 'vehiculo')) {
+        getForm.submit();
+      }
+    });
+  });
+  </script>
 {% endblock %}

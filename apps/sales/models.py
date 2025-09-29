@@ -13,22 +13,30 @@ class Venta(models.Model):
     """
     Representa una orden de servicio / venta.
 
-    - Tiene un ciclo de vida (FSM) definido en `apps/sales/fsm.py`.
-    - Es la entidad madre de la que dependen:
-        pagos, comprobantes, notificaciones, etc.
-    - Los totales se recalculan cada vez que cambian sus ítems
-      (ver calculations.py y signals.py).
+    - Ciclo operativo (FSM) en `apps/sales/fsm.py`: controla SOLO el proceso del trabajo.
+      Estados: borrador | en_proceso | terminado | cancelado.
+    - Estado de pago separado en `payment_status`: no_pagada | parcial | pagada.
+    - Entidad madre: pagos, comprobantes, notificaciones, etc.
+    - Totales se recalculan cuando cambian los ítems (ver calculations.py y signals.py).
     """
 
+    # Estados del PROCESO (no confundir con pago)
     ESTADOS = [
         ("borrador", "Borrador"),
         ("en_proceso", "En proceso"),
         ("terminado", "Terminado"),
-        ("pagado", "Pagado"),
         ("cancelado", "Cancelado"),
     ]
 
+    # Estados del PAGO (independientes del proceso)
+    PAYMENT_STATUS = [
+        ("no_pagada", "No pagada"),
+        ("parcial", "Pago parcial"),
+        ("pagada", "Pagada"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
     empresa = models.ForeignKey(
         Empresa, on_delete=models.CASCADE, related_name="ventas"
     )
@@ -42,8 +50,13 @@ class Venta(models.Model):
         Vehiculo, on_delete=models.PROTECT, related_name="ventas"
     )
 
+    # Estado operativo (proceso)
     estado = models.CharField(
-        max_length=20, choices=ESTADOS, default="borrador"
+        max_length=20, choices=ESTADOS, default="borrador")
+
+    # Estado de pago (nuevo, reemplaza el uso de 'pagado' en estado)
+    payment_status = models.CharField(
+        max_length=20, choices=PAYMENT_STATUS, default="no_pagada", db_index=True
     )
 
     # Totales cacheados (se recalculan con calculations.py)
@@ -71,10 +84,11 @@ class Venta(models.Model):
         indexes = [
             models.Index(fields=["empresa", "sucursal", "estado"]),
             models.Index(fields=["cliente"]),
+            models.Index(fields=["payment_status"]),  # consultas por pago
         ]
 
     def __str__(self):
-        return f"Venta {self.id} - {self.cliente} ({self.get_estado_display()})"
+        return f"Venta {self.id} - {self.cliente} ({self.get_estado_display()} / {self.get_payment_status_display()})"
 
 
 class VentaItem(models.Model):
@@ -83,6 +97,7 @@ class VentaItem(models.Model):
 
     - Cachea el `precio_unitario` vigente al momento de agregarlo.
     - Se usa para calcular los totales de la Venta.
+    - La cantidad es editable (una fila por servicio en la venta).
     """
 
     venta = models.ForeignKey(
@@ -100,7 +115,7 @@ class VentaItem(models.Model):
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # un servicio por venta (editable cantidad)
+        # un servicio por venta (cantidad editable)
         unique_together = ("venta", "servicio")
         ordering = ["venta", "id"]
 

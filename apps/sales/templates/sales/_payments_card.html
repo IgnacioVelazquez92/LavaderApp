@@ -1,0 +1,68 @@
+{# apps/sales/templates/sales/_payments_card.html #}
+<div class="card shadow-sm mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Pagos</span>
+  
+      {% if venta.estado == "cancelado" %}
+        <button class="btn btn-sm btn-primary" disabled
+                data-bs-toggle="tooltip" data-bs-title="Venta cancelada: no se pueden registrar pagos.">
+          <i class="bi bi-cash-coin"></i> Registrar pago
+        </button>
+      {% else %}
+        <a href="{% url 'payments:create' venta_id=venta.pk %}"
+           class="btn btn-sm btn-primary">
+          <i class="bi bi-cash-coin"></i> Registrar pago
+        </a>
+      {% endif %}
+    </div>
+  
+    <div class="card-body">
+      {% if venta.estado == "cancelado" %}
+        <div class="alert alert-warning d-flex align-items-start" role="alert">
+          <i class="bi bi-slash-circle me-2 fs-5"></i>
+          <div>
+            <div class="fw-semibold">Pagos bloqueados</div>
+            <div class="small text-muted">Esta venta se encuentra cancelada.</div>
+          </div>
+        </div>
+      {% endif %}
+  
+      {% if pagos %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Fecha</th>
+                <th>Método</th>
+                <th class="text-end">Monto</th>
+                <th>Propina</th>
+                <th>Referencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pago in pagos %}
+                <tr>
+                  <td>{{ pago.creado_en|date:"d/m/Y H:i" }}</td>
+                  <td>{{ pago.medio }}</td>
+                  <td class="text-end">${{ pago.monto }}</td>
+                  <td>
+                    {% if pago.es_propina %}
+                      <span class="badge text-bg-info">Sí</span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-break small">{{ pago.referencia|default:"—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="alert alert-info mb-0">
+          Aún no se registraron pagos para esta venta.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  

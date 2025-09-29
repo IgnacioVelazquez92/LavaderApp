@@ -15,10 +15,86 @@ from apps.sales.fsm import VentaEstado, puede_transicionar
 from apps.sales.models import Venta
 
 
+# ---------------------------------------------------------------------
+# Helpers de PAGO (payment_status)
+# ---------------------------------------------------------------------
+
+def _resolver_payment_status_desde_saldo(*, venta: Venta) -> str:
+    """
+    Devuelve el payment_status esperado según total y saldo_pendiente.
+      - saldo == total -> no_pagada
+      - 0 < saldo < total -> parcial
+      - saldo == 0 -> pagada
+    """
+    total = (venta.total or Decimal("0"))
+    saldo = (venta.saldo_pendiente or Decimal("0"))
+
+    if saldo <= Decimal("0"):
+        return "pagada"
+    if saldo >= total:
+        return "no_pagada"
+    return "parcial"
+
+
+@transaction.atomic
+def sync_payment_status_desde_saldo(*, venta: Venta, actor=None) -> Venta:
+    """
+    Sincroniza payment_status en base a 'total' y 'saldo_pendiente' actuales.
+    Dispara hook 'on_pagada' si cambia a 'pagada'.
+    """
+    nuevo = _resolver_payment_status_desde_saldo(venta=venta)
+    if nuevo != venta.payment_status:
+        prev = venta.payment_status
+        venta.payment_status = nuevo
+        venta.save(update_fields=["payment_status", "actualizado"])
+
+        # Hook si pasó a 'pagada'
+        if nuevo == "pagada":
+            from apps.sales.services import lifecycle as lifecycle_services
+            try:
+                lifecycle_services.on_pagada(
+                    venta, prev_payment_status=prev, actor=actor)
+            except Exception:
+                pass
+    return venta
+
+
+@transaction.atomic
+def set_payment_status(*, venta: Venta, payment_status: str, actor=None) -> Venta:
+    """
+    Cambia payment_status explícitamente (casos excepcionales).
+    Dispara hook si cambia a 'pagada'.
+    """
+    if payment_status not in {"no_pagada", "parcial", "pagada"}:
+        raise ValidationError("payment_status inválido.")
+
+    prev = venta.payment_status
+    if prev == payment_status:
+        return venta
+
+    venta.payment_status = payment_status
+    venta.save(update_fields=["payment_status", "actualizado"])
+
+    if payment_status == "pagada":
+        from apps.sales.services import lifecycle as lifecycle_services
+        try:
+            lifecycle_services.on_pagada(
+                venta, prev_payment_status=prev, actor=actor)
+        except Exception:
+            pass
+
+    return venta
+
+
+# ---------------------------------------------------------------------
+# CRUD / Totales
+# ---------------------------------------------------------------------
+
 @transaction.atomic
 def crear_venta(*, empresa, sucursal, cliente, vehiculo, creado_por, notas: str = "") -> Venta:
     """
     Crea una nueva Venta en estado 'borrador'.
+    payment_status inicia en 'no_pagada'.
     """
     venta = Venta.objects.create(
         empresa=empresa,
@@ -28,6 +104,7 @@ def crear_venta(*, empresa, sucursal, cliente, vehiculo, creado_por, notas: str 
         estado=VentaEstado.BORRADOR,
         notas=notas,
         creado_por=creado_por,
+        # payment_status usa el default del modelo: "no_pagada"
     )
     return venta
 
@@ -56,81 +133,152 @@ def recalcular_totales(*, venta: Venta) -> Venta:
     return venta
 
 
+# ---------------------------------------------------------------------
+# FSM del PROCESO (estado)
+# ---------------------------------------------------------------------
+
 @transaction.atomic
 def cambiar_estado(*, venta: Venta, nuevo_estado: str) -> Venta:
     """
-    Transición de estado con validación FSM.
+    Transición de estado con validación FSM (proceso).
     """
     if not puede_transicionar(venta.estado, nuevo_estado):
         raise ValidationError(
             f"No se puede pasar de {venta.estado} a {nuevo_estado}")
+    prev = venta.estado
     venta.estado = nuevo_estado
     venta.save(update_fields=["estado", "actualizado"])
+
+    # Hooks de proceso según el destino
+    from apps.sales.services import lifecycle as lifecycle_services
+    try:
+        if nuevo_estado == VentaEstado.EN_PROCESO:
+            lifecycle_services.on_iniciar(venta, prev_estado=prev)
+        elif nuevo_estado == VentaEstado.TERMINADO:
+            lifecycle_services.on_finalizar(venta, prev_estado=prev)
+        elif nuevo_estado == VentaEstado.CANCELADO:
+            lifecycle_services.on_cancelar(venta, prev_estado=prev)
+    except Exception:
+        pass
+
+    return venta
+
+
+@transaction.atomic
+def iniciar_trabajo(*, venta: Venta, actor=None) -> Venta:
+    """
+    Marca la venta como 'en_proceso'.
+    - No depende del pago.
+    - Respeta FSM (borrador -> en_proceso).
+    - Rechaza si está cancelada.
+    """
+    if venta.estado == VentaEstado.CANCELADO:
+        raise ValidationError("La venta está cancelada.")
+
+    if not puede_transicionar(venta.estado, VentaEstado.EN_PROCESO):
+        raise ValidationError(
+            f"No se puede pasar de {venta.estado} a en_proceso")
+
+    prev = venta.estado
+    venta.estado = VentaEstado.EN_PROCESO
+    venta.save(update_fields=["estado", "actualizado"])
+
+    from apps.sales.services import lifecycle as lifecycle_services  # import local
+    try:
+        lifecycle_services.on_iniciar(venta, prev_estado=prev, actor=actor)
+    except Exception:
+        pass
+
+    return venta
+
+
+@transaction.atomic
+def finalizar_trabajo(*, venta: Venta, actor=None) -> Venta:
+    """
+    Marca la venta como 'terminado' (cierre operativo).
+    NO toca pagos ni saldo.
+    Está permitido venir desde 'borrador' o 'en_proceso' (según FSM).
+    """
+    if venta.estado == VentaEstado.CANCELADO:
+        raise ValidationError("La venta está cancelada.")
+
+    if not puede_transicionar(venta.estado, VentaEstado.TERMINADO):
+        raise ValidationError(
+            f"No se puede pasar de {venta.estado} a terminado")
+
+    prev = venta.estado
+    venta.estado = VentaEstado.TERMINADO
+    venta.save(update_fields=["estado", "actualizado"])
+
+    from apps.sales.services import lifecycle as lifecycle_services  # import local
+    try:
+        lifecycle_services.on_finalizar(venta, prev_estado=prev, actor=actor)
+    except Exception:
+        pass
+
     return venta
 
 
 @transaction.atomic
 def finalizar_venta(*, venta: Venta, actor=None) -> Venta:
     """
-    Cierra la edición de la venta. Según saldo:
-      - Si saldo_pendiente > 0  -> deja la venta en 'terminado'
-      - Si saldo_pendiente == 0 -> 'terminado' y luego 'pagado' (en la misma transacción)
+    Acción compuesta (convenience):
+      - Recalcula totales.
+      - Recalcula saldo vía payments.
+      - Sincroniza payment_status desde saldo.
+      - Pasa a 'terminado' (si la FSM lo permite).
 
-    Notas:
-    - Primero recalculamos totales e IMPORTANTE: sincronizamos saldo con pagos
-      para decidir con datos frescos.
-    - Respetamos la FSM: si para llegar a 'pagado' hace falta pasar por 'terminado',
-      se hacen ambas transiciones en orden.
+    Nota: no fuerza 'pagada'; eso lo decide sync_payment_status (saldo==0).
     """
-    # 1) Totales por ítems (seguridad)
+    # 1) Totales por ítems
     recalcular_totales(venta=venta)
 
-    # 2) Sincronizar saldo con pagos (evita depender de saldo viejo)
-    #    Import local para evitar dependencia circular a módulo-level.
-    from apps.payments.services.payments import recalcular_saldo as _recalc_saldo
+    # 2) Recalcular saldo con pagos (estado del dinero)
+    from apps.payments.services.payments import recalcular_saldo as _recalc_saldo  # import local
     _recalc_saldo(venta)
 
-    # 3) Pasar a TERMINADO (bloquea edición) — deja que la FSM valide
-    cambiar_estado(venta=venta, nuevo_estado=VentaEstado.TERMINADO)
+    # 3) Sincronizar payment_status
+    sync_payment_status_desde_saldo(venta=venta, actor=actor)
 
-    # 4) Si el saldo quedó en 0, pasar a PAGADO
-    if (venta.saldo_pendiente or Decimal("0.00")) == Decimal("0.00"):
-        cambiar_estado(venta=venta, nuevo_estado=VentaEstado.PAGADO)
+    # 4) Pasar a TERMINADO (si corresponde)
+    if puede_transicionar(venta.estado, VentaEstado.TERMINADO):
+        prev = venta.estado
+        venta.estado = VentaEstado.TERMINADO
+        venta.save(update_fields=["estado", "actualizado"])
+        from apps.sales.services import lifecycle as lifecycle_services
+        try:
+            lifecycle_services.on_finalizar(
+                venta, prev_estado=prev, actor=actor)
+        except Exception:
+            pass
 
     return venta
 
 
 @transaction.atomic
 def cancelar_venta(*, venta: Venta) -> Venta:
-    """Marca la venta como cancelada."""
+    """
+    Marca la venta como cancelada.
+
+    Política por defecto:
+    - Bloquea cancelar si hay pagos (payment_status != 'no_pagada').
+      (Para permitirlo, habría que implementar reversos/nota de crédito primero.)
+    """
+    if venta.payment_status != "no_pagada":
+        raise ValidationError(
+            "No se puede cancelar una venta con pagos registrados.")
+
     return cambiar_estado(venta=venta, nuevo_estado=VentaEstado.CANCELADO)
 
 
-@transaction.atomic
-def marcar_pagada(*, venta: Venta) -> Venta:
-    """
-    Marca la venta como pagada.
-    Uso excepcional (p. ej. tareas de conciliación). En el circuito estándar,
-    NO LLAMAR desde payments: la decisión se toma en `finalizar_venta()`.
-    """
-    return cambiar_estado(venta=venta, nuevo_estado=VentaEstado.PAGADO)
-
+# ---------------------------------------------------------------------
+# Casos excepcionales
+# ---------------------------------------------------------------------
 
 @transaction.atomic
-def finalizar_trabajo(*, venta, actor=None):
+def marcar_pagada(*, venta: Venta, actor=None) -> Venta:
     """
-    Marca la venta como 'terminado' (cierre operativo).
-    NO toca pagos ni saldo.
-    Está permitido venir desde 'borrador', 'en_proceso' o 'pagado'.
+    Marca la venta como 'pagada' a nivel payment_status.
+    NO cambia el estado operativo del proceso.
     """
-    if not puede_transicionar(venta.estado, VentaEstado.TERMINADO):
-        raise ValidationError(
-            f"No se puede pasar de {venta.estado} a terminado")
-
-    venta.estado = VentaEstado.TERMINADO
-    venta.save(update_fields=["estado", "actualizado"])
-
-    # Hook de notificación, etc.
-    from apps.sales.services import lifecycle as lifecycle_services
-    lifecycle_services.on_finalizar(venta, actor=actor)
-    return venta
+    return set_payment_status(venta=venta, payment_status="pagada", actor=actor)

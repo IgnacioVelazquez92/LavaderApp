@@ -191,12 +191,23 @@ class Perm(str, Enum):
     CATALOG_DEACTIVATE = "CATALOG_DEACTIVATE"
     CATALOG_ACTIVATE = "CATALOG_ACTIVATE"
     CATALOG_DELETE = "CATALOG_DELETE"
-
+    # === PRICING ===
     PRICING_VIEW = "PRICING_VIEW"
     PRICING_CREATE = "PRICING_CREATE"
     PRICING_EDIT = "PRICING_EDIT"
     PRICING_DEACTIVATE = "PRICING_DEACTIVATE"
     PRICING_DELETE = "PRICING_DELETE"
+
+    # === SALES (nuevo) ===
+    SALES_VIEW = "SALES_VIEW"
+    SALES_CREATE = "SALES_CREATE"
+    SALES_EDIT = "SALES_EDIT"
+    SALES_FINALIZE = "SALES_FINALIZE"        # finalizar trabajo (TERMINADO)
+    SALES_CANCEL = "SALES_CANCEL"            # cancelar (CANCELADO)
+    SALES_DELETE = "SALES_DELETE"            # eliminar venta (si existe)
+    SALES_ITEM_ADD = "SALES_ITEM_ADD"        # agregar ítems/servicios
+    SALES_ITEM_UPDATE_QTY = "SALES_ITEM_UPDATE_QTY"
+    SALES_ITEM_REMOVE = "SALES_ITEM_REMOVE"
 
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
@@ -245,6 +256,17 @@ ROLE_POLICY = {
         Perm.PRICING_EDIT,
         Perm.PRICING_DEACTIVATE,
         Perm.PRICING_DELETE,
+
+        # SALES (admin todo)
+        Perm.SALES_VIEW,
+        Perm.SALES_CREATE,
+        Perm.SALES_EDIT,
+        Perm.SALES_FINALIZE,
+        Perm.SALES_CANCEL,
+        Perm.SALES_DELETE,
+        Perm.SALES_ITEM_ADD,
+        Perm.SALES_ITEM_UPDATE_QTY,
+        Perm.SALES_ITEM_REMOVE,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -271,6 +293,15 @@ ROLE_POLICY = {
         Perm.CATALOG_VIEW,
         # === PRICING  ===
         Perm.PRICING_VIEW,
+
+        # SALES (operativa diaria, sin acciones destructivas)
+        Perm.SALES_VIEW,
+        Perm.SALES_CREATE,
+        Perm.SALES_EDIT,
+        Perm.SALES_FINALIZE,
+        Perm.SALES_ITEM_ADD,
+        Perm.SALES_ITEM_UPDATE_QTY,
+        Perm.SALES_ITEM_REMOVE,
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.

@@ -6,6 +6,9 @@
 {% block content %}
 <div class="container-fluid py-3">
 
+  {# Mensajes flash (opcional) #}
+  {% include "sales/_messages.html" %}
+
   <!-- Breadcrumb -->
   <nav aria-label="breadcrumb">
     <ol class="breadcrumb mb-2">
@@ -17,24 +20,40 @@
   <!-- Header + CTA -->
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h1 class="h4 mb-0">Ventas</h1>
-    <a class="btn btn-primary" href="{% url 'sales:create' %}">
-      <i class="bi bi-plus-lg"></i> Nueva venta
-    </a>
+    {% if puede_crear %}
+      <a class="btn btn-primary" href="{% url 'sales:create' %}">
+        <i class="bi bi-plus-lg"></i> Nueva venta
+      </a>
+    {% else %}
+      <button class="btn btn-primary" disabled data-bs-toggle="tooltip" data-bs-title="No tenés permisos para crear.">
+        <i class="bi bi-plus-lg"></i> Nueva venta
+      </button>
+    {% endif %}
   </div>
 
   <!-- Filtros -->
   <form method="get" class="row gy-2 gx-2 align-items-end mb-3">
     <div class="col-12 col-md-3">
-      <label class="form-label mb-0">Estado</label>
+      <label class="form-label mb-0">Estado (proceso)</label>
       <select class="form-select" name="estado">
         <option value="">Todos</option>
         <option value="borrador"   {% if request.GET.estado == "borrador" %}selected{% endif %}>Borrador</option>
         <option value="en_proceso" {% if request.GET.estado == "en_proceso" %}selected{% endif %}>En proceso</option>
         <option value="terminado"  {% if request.GET.estado == "terminado" %}selected{% endif %}>Terminado</option>
-        <option value="pagado"     {% if request.GET.estado == "pagado" %}selected{% endif %}>Pagado</option>
         <option value="cancelado"  {% if request.GET.estado == "cancelado" %}selected{% endif %}>Cancelado</option>
       </select>
-      <div class="form-text">Filtrar por estado de la venta.</div>
+      <div class="form-text">Flujo operativo de la venta.</div>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label class="form-label mb-0">Pago</label>
+      <select class="form-select" name="pago">
+        <option value="">Todos</option>
+        <option value="no_pagada" {% if request.GET.pago == "no_pagada" %}selected{% endif %}>No pagada</option>
+        <option value="parcial"   {% if request.GET.pago == "parcial" %}selected{% endif %}>Parcial</option>
+        <option value="pagada"    {% if request.GET.pago == "pagada" %}selected{% endif %}>Pagada</option>
+      </select>
+      <div class="form-text">Estado de cobro.</div>
     </div>
 
     {% if sucursales %}
@@ -57,7 +76,7 @@
         Aplicar filtros
       </button>
     </div>
-    {% if request.GET.estado or request.GET.sucursal %}
+    {% if request.GET.estado or request.GET.sucursal or request.GET.pago %}
     <div class="col-12 col-md-3">
       <a class="btn btn-outline-dark w-100" href="{% url 'sales:list' %}">Limpiar</a>
     </div>
@@ -74,6 +93,7 @@
           <th scope="col">Vehículo</th>
           <th scope="col" class="d-none d-md-table-cell">Sucursal</th>
           <th scope="col">Estado</th>
+          <th scope="col">Pago</th>
           <th scope="col" class="text-end">Total</th>
           <th scope="col" class="text-end">Acciones</th>
         </tr>
@@ -86,6 +106,8 @@
             <td>{{ v.cliente }}</td>
             <td>{{ v.vehiculo }}</td>
             <td class="d-none d-md-table-cell">{{ v.sucursal }}</td>
+
+            {# Estado (proceso) #}
             <td>
               {% if v.estado == "borrador" %}
                 <span class="badge text-bg-secondary">Borrador</span>
@@ -93,48 +115,92 @@
                 <span class="badge text-bg-warning">En proceso</span>
               {% elif v.estado == "terminado" %}
                 <span class="badge text-bg-info">Terminado</span>
-              {% elif v.estado == "pagado" %}
-                <span class="badge text-bg-success">Pagado</span>
               {% elif v.estado == "cancelado" %}
                 <span class="badge text-bg-danger">Cancelado</span>
               {% else %}
                 <span class="badge text-bg-light">—</span>
               {% endif %}
             </td>
+
+            {# Pago (payment_status) #}
+            <td>
+              {% if v.payment_status == "pagada" %}
+                <span class="badge text-bg-success">Pagada</span>
+              {% elif v.payment_status == "parcial" %}
+                <span class="badge text-bg-warning">Parcial</span>
+              {% else %}
+                <span class="badge text-bg-secondary">No pagada</span>
+              {% endif %}
+            </td>
+
             <td class="text-end">${{ v.total|floatformat:2 }}</td>
+
             <td class="text-end" style="white-space:nowrap">
               <a class="btn btn-sm btn-outline-primary" href="{% url 'sales:detail' pk=v.pk %}">
                 Ver
               </a>
 
-              {# Acción rápida: Finalizar (solo si está en proceso) #}
-              {% if v.estado == "en_proceso" %}
-                <button type="button"
-                        class="btn btn-sm btn-outline-success"
-                        data-bs-toggle="modal"
-                        data-bs-target="#finalizeModal{{ v.pk }}">
-                  Finalizar
-                </button>
+              {# Iniciar (solo borrador) #}
+              {% if v.estado == "borrador" %}
+                {% if puede_iniciar %}
+                  <button type="button"
+                          class="btn btn-sm btn-outline-primary"
+                          data-bs-toggle="modal"
+                          data-bs-target="#startModal{{ v.pk }}">
+                    Iniciar
+                  </button>
+                {% else %}
+                  <button type="button" class="btn btn-sm btn-outline-primary" disabled
+                          data-bs-toggle="tooltip" data-bs-title="Sin permiso para iniciar.">
+                    Iniciar
+                  </button>
+                {% endif %}
               {% endif %}
 
-              {# Acción rápida: Cancelar (si aún no es final) #}
+              {# Finalizar (solo en_proceso) #}
+              {% if v.estado == "en_proceso" %}
+                {% if puede_finalizar %}
+                  <button type="button"
+                          class="btn btn-sm btn-outline-success"
+                          data-bs-toggle="modal"
+                          data-bs-target="#finalizeModal{{ v.pk }}">
+                    Finalizar
+                  </button>
+                {% else %}
+                  <button type="button" class="btn btn-sm btn-outline-success" disabled
+                          data-bs-toggle="tooltip" data-bs-title="Sin permiso para finalizar.">
+                    Finalizar
+                  </button>
+                {% endif %}
+              {% endif %}
+
+              {# Cancelar (borrador | en_proceso | terminado) #}
               {% if v.estado == "borrador" or v.estado == "en_proceso" or v.estado == "terminado" %}
-                <button type="button"
-                        class="btn btn-sm btn-outline-danger"
-                        data-bs-toggle="modal"
-                        data-bs-target="#cancelModal{{ v.pk }}">
-                  Cancelar
-                </button>
+                {% if puede_cancelar %}
+                  <button type="button"
+                          class="btn btn-sm btn-outline-danger"
+                          data-bs-toggle="modal"
+                          data-bs-target="#cancelModal{{ v.pk }}">
+                    Cancelar
+                  </button>
+                {% else %}
+                  <button type="button" class="btn btn-sm btn-outline-danger" disabled
+                          data-bs-toggle="tooltip" data-bs-title="Sin permiso para cancelar.">
+                    Cancelar
+                  </button>
+                {% endif %}
               {% endif %}
             </td>
           </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="7">
+            <td colspan="8">
               <div class="alert alert-info mb-0">
                 No se encontraron ventas con los filtros actuales.
-                <a href="{% url 'sales:create' %}" class="alert-link">Crear la primera venta</a>.
+                {% if puede_crear %}
+                  <a href="{% url 'sales:create' %}" class="alert-link">Crear la primera venta</a>.
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -145,11 +211,42 @@
 
   {% include "includes/_pagination.html" %}
 
-  {# Modales por venta (fuera de la tabla para no romper el DOM) #}
+  {# Modales por venta (fuera de la tabla) #}
   {% if ventas %}
     {% for v in ventas %}
-      {% if v.estado == "en_proceso" %}
-        <!-- Modal Finalizar -->
+      {# Iniciar #}
+      {% if v.estado == "borrador" and puede_iniciar %}
+        <div class="modal fade" id="startModal{{ v.pk }}" tabindex="-1"
+             aria-labelledby="startModalLabel{{ v.pk }}" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="startModalLabel{{ v.pk }}">Iniciar trabajo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+              </div>
+              <div class="modal-body">
+                <div class="d-flex align-items-start">
+                  <i class="bi bi-info-circle-fill text-primary fs-4 me-2"></i>
+                  <div>
+                    <p class="h6 mb-1"><strong>Cliente:</strong> {{ v.cliente }}</p>
+                    <p class="mb-0 text-muted small">La venta pasará a <strong>EN PROCESO</strong>.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+                <form method="post" action="{% url 'sales:start' pk=v.pk %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-outline-primary">Iniciar</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      {# Finalizar #}
+      {% if v.estado == "en_proceso" and puede_finalizar %}
         <div class="modal fade" id="finalizeModal{{ v.pk }}" tabindex="-1"
              aria-labelledby="finalizeModalLabel{{ v.pk }}" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
@@ -179,38 +276,48 @@
         </div>
       {% endif %}
 
+      {# Cancelar #}
       {% if v.estado == "borrador" or v.estado == "en_proceso" or v.estado == "terminado" %}
-        <!-- Modal Cancelar -->
-        <div class="modal fade" id="cancelModal{{ v.pk }}" tabindex="-1"
-             aria-labelledby="cancelModalLabel{{ v.pk }}" aria-hidden="true">
-          <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-              <div class="modal-header">
-                <h5 class="modal-title" id="cancelModalLabel{{ v.pk }}">Cancelar venta</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-              </div>
-              <div class="modal-body">
-                <div class="d-flex align-items-start">
-                  <i class="bi bi-exclamation-triangle-fill text-danger fs-4 me-2"></i>
-                  <div>
-                    <p class="h6 mb-1"><strong>Cliente:</strong> {{ v.cliente }}</p>
-                    <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+        {% if puede_cancelar %}
+          <div class="modal fade" id="cancelModal{{ v.pk }}" tabindex="-1"
+               aria-labelledby="cancelModalLabel{{ v.pk }}" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="cancelModalLabel{{ v.pk }}">Cancelar venta</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                  <div class="d-flex align-items-start">
+                    <i class="bi bi-exclamation-triangle-fill text-danger fs-4 me-2"></i>
+                    <div>
+                      <p class="h6 mb-1"><strong>Cliente:</strong> {{ v.cliente }}</p>
+                      <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
-                <form method="post" action="{% url 'sales:cancel' pk=v.pk %}">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-danger">Cancelar venta</button>
-                </form>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+                  <form method="post" action="{% url 'sales:cancel' pk=v.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Cancelar venta</button>
+                  </form>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        {% endif %}
       {% endif %}
     {% endfor %}
   {% endif %}
 
 </div>
+
+{# Habilitar tooltips Bootstrap #}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.forEach(function (el) { new bootstrap.Tooltip(el); });
+  });
+</script>
 {% endblock %}

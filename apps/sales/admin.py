@@ -15,23 +15,27 @@ class VentaAdmin(admin.ModelAdmin):
         "id",
         "cliente",
         "vehiculo",
-        "estado",
+        "estado",          # proceso
+        "payment_status",  # pago (nuevo en el modelo)
         "subtotal",
         "total",
         "saldo_pendiente",
         "creado",
     )
-    list_filter = ("estado", "sucursal", "empresa")
+    list_filter = ("estado", "payment_status", "sucursal", "empresa")
     search_fields = ("id", "cliente__nombre", "vehiculo__patente")
     inlines = [VentaItemInline]
+    readonly_fields = ("creado", "actualizado")
 
 
 @admin.register(VentaItem)
 class VentaItemAdmin(admin.ModelAdmin):
     list_display = ("venta", "servicio", "cantidad",
-                    "precio_unitario", "subtotal")
+                    "precio_unitario", "subtotal_col")
     list_filter = ("servicio",)
     search_fields = ("venta__id", "servicio__nombre")
+    readonly_fields = ("creado", "actualizado")
 
-    def subtotal(self, obj):
+    def subtotal_col(self, obj):
         return obj.subtotal
+    subtotal_col.short_description = "Subtotal"
