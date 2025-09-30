@@ -1,4 +1,5 @@
 # apps/sales/admin.py
+from .models import Promotion
 from django.contrib import admin
 from .models import Venta, VentaItem
 
@@ -39,3 +40,11 @@ class VentaItemAdmin(admin.ModelAdmin):
     def subtotal_col(self, obj):
         return obj.subtotal
     subtotal_col.short_description = "Subtotal"
+
+
+@admin.register(Promotion)
+class PromotionAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "empresa", "sucursal", "scope", "mode",
+                    "value", "activo", "prioridad", "valido_desde", "valido_hasta")
+    list_filter = ("empresa", "sucursal", "scope", "mode", "activo")
+    search_fields = ("nombre", "codigo")

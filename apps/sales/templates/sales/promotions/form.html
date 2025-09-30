@@ -1,0 +1,81 @@
+{% extends "base_auth.html" %}
+{% block title %}{% if promo %}Editar{% else %}Nueva{% endif %} promoción{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  {% include "sales/_messages.html" %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h4 mb-0">{% if promo %}Editar{% else %}Nueva{% endif %} promoción</h1>
+    <a class="btn btn-outline-secondary" href="{% url 'sales:promos_list' %}">Volver</a>
+  </div>
+
+  <form method="post" class="card p-3">
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-12 col-md-6">
+        <label class="form-label">Nombre</label>
+        {{ form.nombre }}
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label">Código</label>
+        {{ form.codigo }} <div class="form-text">{{ form.codigo.help_text }}</div>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Sucursal</label>
+        {{ form.sucursal }} <div class="form-text">{{ form.sucursal.help_text }}</div>
+      </div>
+
+      <div class="col-6 col-md-3">
+        <label class="form-label">Ámbito</label>
+        {{ form.scope }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Modo</label>
+        {{ form.mode }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Valor</label>
+        {{ form.value }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Prioridad</label>
+        {{ form.prioridad }}
+      </div>
+
+      <div class="col-6 col-md-3">
+        <label class="form-label">Válida desde</label>
+        {{ form.valido_desde }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Válida hasta</label>
+        {{ form.valido_hasta }}
+      </div>
+
+      <div class="col-6 col-md-3">
+        <label class="form-label">Min. total (opcional)</label>
+        {{ form.min_total }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Medio pago (opcional)</label>
+        {{ form.payment_method_code }}
+        <div class="form-text">{{ form.payment_method_code.help_text }}</div>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Descripción</label>
+        {{ form.descripcion }}
+      </div>
+
+      <div class="col-12">
+        <div class="form-check">
+          {{ form.activo }} <label class="form-check-label ms-1">Activa</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+      <button class="btn btn-primary" type="submit">Guardar</button>
+      <a class="btn btn-outline-secondary" href="{% url 'sales:promos_list' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

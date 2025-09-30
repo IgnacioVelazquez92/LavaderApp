@@ -295,6 +295,9 @@
         </div>
       </div>
 
+      {# === Descuentos y Promociones === #}
+      {% include "sales/_discounts_card.html" %}
+
       {# PAGOS (card separada) #}
       {% include "sales/_payments_card.html" with venta=venta pagos=pagos %}
     </div>

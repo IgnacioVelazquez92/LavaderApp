@@ -2399,9 +2399,33 @@ erDiagram
 
 # Módulo 7 — `apps/sales` (Ventas / Órdenes de Servicio)
 
-> **Objetivo:** Gestionar **Ventas** (órdenes de servicio) con sus **ítems**, **estados (FSM)** y **totales**.  
-> **Rol de orquestador:** la Venta es la “entidad madre” para **pagos**, **comprobantes** y **notificaciones**.  
+> **Objetivo:** Gestionar **Ventas** (órdenes de servicio) con sus **ítems**, **estados (FSM)**, **pagos**, **comprobantes**, **notificaciones** y ahora **promociones/descuentos** robustos con control de permisos y unicidad.  
 > **Stack:** Django (server-rendered) + Bootstrap 5 + Bootstrap Icons.
+
+---
+
+## 0) Qué cambió en esta iteración (resumen ejecutivo)
+
+- **Promociones & Descuentos**
+  - Nuevos modelos: **`Promotion`** y **`SalesAdjustment`** (ajustes por venta o por ítem, origen manual/promo/pago).
+  - Reglas profesionales: **unicidad** de aplicación de promo por target (venta o ítem), **vigencia**, **scope** (venta/ítem), **modo** (% o monto) y **stacking** controlado.
+  - **Services** (`services/discounts.py`) con validaciones de negocio, recalculo de totales e idempotencia.
+- **Permisos finos**
+  - **Admin**: crea/edita/desactiva **promos**, aplica **descuentos manuales** y elimina ajustes.
+  - **Operador**: **solo aplica promociones ya creadas** (no puede crear/borrar promos ni cargar descuentos manuales).
+  - Nuevo permiso: **`SALES_PROMO_APPLY`** (ADMIN + OPERADOR).
+- **Vistas y templates**
+  - `VentaDetailView` ahora muestra **Descuentos y promociones** con `_discounts_card.html` (tabla de ajustes + modales).
+  - Nuevas vistas en `views_promotions.py` (gestión de promos) + acciones de aplicar/eliminar ajustes.
+  - Botones deshabilitados por estado/permiso desde flags calculados en la vista (no lógica en templates).
+- **DB/Integridad**
+  - Constraints de unicidad por promo/target (`order` vs `item`) y check constraints por **modo** y **consistencia** `kind`/`item`.
+  - Migrations nuevas para introducir modelos/cambios.
+- **UX/Flujo**
+  - Detalle de venta: CTAs para **promo (venta/ítem)** y **descuento manual (venta/ítem)** con permisos y estado de edición controlados.
+  - Listado y creación ajustados/limpios.
+
+> Ver secciones 3, 4, 7, 8, 9 y 10 para detalles.
 
 ---
 
@@ -2411,377 +2435,463 @@ erDiagram
 apps/sales/
 ├─ __init__.py
 ├─ apps.py
-├─ admin.py                         # Admin de Venta y VentaItem
+├─ admin.py                         # Admin Venta, VentaItem, Promotion, SalesAdjustment
 ├─ migrations/
-│  └─ __init__.py
-├─ models.py                        # Venta, VentaItem
-├─ urls.py                          # Namespace: app_name="sales"
-├─ views.py                         # List, Create, Detail, Acciones (iniciar/finalizar/cancelar, items)
-├─ selectors.py                     # (lecturas optimizadas; opcional)
-├─ calculations.py                  # subtotal/total/propina/descuento/saldo_pendiente
-├─ fsm.py                           # máquina de estados + validación de transiciones
+│  ├─ 0003_promotion_salesadjustment_and_more.py
+│  ├─ 0004_promotion_descripcion_promotion_min_total.py
+│  ├─ 0005_salesadjustment_sales_sales_venta_i_f56e51_idx_and_more.py
+│  └─ 0006_remove_salesadjustment_uq_salesadj_unique_promo_per_target_and_more.py
+├─ models.py                        # + Promotion, + SalesAdjustment
+├─ urls.py                          # + rutas de promos/ajustes
+├─ views.py                         # Venta list/create/detail + items + acciones de estado
+├─ views_promotions.py              # Gestión de promos y aplicación/borra de ajustes
+├─ calculations.py                  # totales (ahora consideran ajustes)
+├─ fsm.py                           # máquina de estados
 ├─ services/
 │  ├─ __init__.py
-│  ├─ sales.py                      # crear_venta, iniciar_trabajo, finalizar_trabajo, finalizar_venta, cancelar, marcar_pagada, recalcular_totales
-│  ├─ items.py                      # agregar_item(s), actualizar_cantidad, quitar_item
-│  └─ lifecycle.py                  # Hooks (on_iniciar, on_finalizar, on_pagada, on_cancelar)
+│  ├─ sales.py                      # crear_venta, iniciar/finalizar, cancelar, recalcular
+│  ├─ items.py                      # agregar/actualizar/quitar items (sync saldo/pagos)
+│  ├─ lifecycle.py                  # hooks (on_pagada auto-emit opcional)
+│  └─ discounts.py                  # NUEVO: negocio de promos/ajustes
 ├─ forms/
 │  ├─ __init__.py
-│  ├─ sale.py                       # VentaForm (cliente, vehículo, notas)
-│  └─ service_select.py             # ServiceSelectionForm (checkboxes servicios vigentes)
-├─ templates/
-│  └─ sales/
-│     ├─ list.html
-│     ├─ create.html
-│     ├─ detail.html
-│     ├─ _summary_card.html
-│     ├─ _item_row.html
-│     ├─ _services_add_card.html    # panel lateral de alta de servicios
-│     ├─ _payments_card.html        # card de pagos (tabla + CTA registrar pago)
-│     └─ _messages.html             # mensajes flash (éxito/error/info)
-├─ static/
-│  └─ sales/
-│     ├─ sales.css                  # (opcional)
-│     └─ sales.js                   # (opcional)
-└─ signals.py                       # (opcional)
+│  ├─ sale.py                       # VentaForm
+│  ├─ service_select.py             # ServiceSelectionForm
+│  ├─ discounts.py                  # OrderDiscountForm, ItemDiscountForm, ApplyPromotionForm
+│  └─ promotion.py                  # PromotionForm (admin/gestión)
+└─ templates/sales/
+   ├─ list.html
+   ├─ create.html
+   ├─ detail.html
+   ├─ _summary_card.html            # actualizado (muestra descuento cacheado)
+   ├─ _discounts_card.html          # NUEVO (tabla ajustes + modales)
+   ├─ promotions/                   # list/create/update/detail templates de promos
+   ├─ _item_row.html
+   ├─ _services_add_card.html
+   ├─ _payments_card.html
+   └─ _messages.html
 ```
 
-**Cambios clave vs. diseño previo**
-
-- **Flujos UI** y **FSM** actualizados para separar _proceso_ (borrador/en_proceso/terminado) de _pagos_ (pagado puede suceder antes o después de terminado).
-- **Parciales** reutilizables para pagos y alta de servicios.
-- **ServiceSelectionForm** filtra por **precios vigentes** y toma `tipo_vehiculo` (parámetro correcto).
+Además: `templates/base_auth.html` incluye (si aplica) acceso a **Promociones** cuando el usuario tiene `SALES_PROMO_MANAGE`.
 
 ---
 
 ## 2) Decisiones de UX / UI
 
-1. **Crear venta (2 pasos)**
+- **Detalle de Venta** agrega una card específica: **Descuentos y promociones**.
 
-   - **GET**: seleccionar **Cliente** → habilitar **Vehículo** del cliente (auto-submit). Links “Crear cliente” y “Agregar vehículo” con `next` de retorno.
-   - **POST**: checkboxes de **Servicios disponibles** (según sucursal activa + tipo de vehículo + vigencia). Crea venta en **borrador** y redirige al detalle.
+  - Tabla de **ajustes** (tipo, modo, valor, motivo/promo, ítem, origen, acciones).
+  - **Cuatro modales**: Descuento venta / Descuento ítem / Promo venta / Promo ítem.
+  - **Botones** se habilitan/deshabilitan por flags:
+    - `puede_agregar_descuento` (solo admin)
+    - `puede_quitar_descuento` (solo admin)
+    - `puede_aplicar_promo` (admin + operador)
+    - `descuentos_habilitados` (solo en `borrador`/`en_proceso`).
 
-2. **Edición de ítems**: permitida en `borrador` y `en_proceso`; **bloqueada** desde `terminado`.
-
-3. **Pagos**: no bloquean el proceso; **`pagado`** se marca cuando el **saldo** llega a **0** desde cualquier estado no cancelado. La **notificación** al cliente depende de **`terminado`**.
-
-4. **Comprobante**: solo si la venta está **pagada**. Auto-emisión opcional vía `INVOICING_AUTO_EMIT_ON_PAID` y `lifecycle.on_pagada`.
-
-5. **Bootstrap 5**: estilos desde los **forms**; templates sin lógica pesada (se exponen **flags** desde la vista).
-
----
-
-## 3) Modelos (resumen)
-
-### `Venta`
-
-- FK: `empresa`, `sucursal`, `cliente`, `vehiculo`, `creado_por`
-- **Estado** (`CharField`): `borrador | en_proceso | terminado | pagado | cancelado`
-- Totales cacheados: `subtotal`, `descuento`, `propina`, `total`, `saldo_pendiente`
-- `notas`, `creado`, `actualizado`
-- Index: `(empresa, sucursal, estado)` y por `cliente`
-
-### `VentaItem`
-
-- FK: `venta`, `servicio`
-- `cantidad` (≥1; MVP agrega 1 por servicio)
-- `precio_unitario` (cache del resolver al momento de agregar)
-- `subtotal` (propiedad = `cantidad * precio_unitario`)
-- Unique: `(venta, servicio)` (no se duplican servicios; la cantidad es el multiplicador)
-
-**Cálculo de totales** → `calculations.calcular_totales(items, descuento, propina)`
+- **Gestión de Promos** (pantallas server-rendered simples):
+  - Listado, alta, edición, activar/desactivar, borrar (solo admin: `SALES_PROMO_MANAGE`).
+  - Por empresa y sucursal (opcional), con filtros básicos y prioridades.
 
 ---
 
-## 4) FSM (máquina de estados)
+## 3) Modelos nuevos / campos nuevos
 
-```mermaid
-stateDiagram-v2
-    [*] --> borrador
-    borrador --> en_proceso: iniciar trabajo
-    en_proceso --> terminado: finalizar trabajo
+### `Promotion`
 
-    %% Pagos (saldo=0) pueden cerrar en pagado desde estados no finales
-    borrador --> pagado: saldo=0
-    en_proceso --> pagado: saldo=0
-    terminado --> pagado: saldo=0
+```python
+class Promotion(models.Model):
+    SCOPE_ORDER = "order"
+    SCOPE_ITEM  = "item"
+    MODE_PERCENT = "percent"
+    MODE_AMOUNT  = "amount"
 
-    %% Cancelación permitida hasta antes de pagado (según reglas de negocio)
-    borrador --> cancelado: cancelar
-    en_proceso --> cancelado: cancelar
-    terminado --> cancelado: cancelar
+    empresa   = models.ForeignKey("org.Empresa", on_delete=models.CASCADE, related_name="promotions")
+    sucursal  = models.ForeignKey("org.Sucursal", on_delete=models.CASCADE, null=True, blank=True, related_name="promotions")
+    nombre    = models.CharField(max_length=120)
+    codigo    = models.CharField(max_length=50, blank=True, default="")
+    activo    = models.BooleanField(default=True)
+    valido_desde = models.DateField(null=True, blank=True)
+    valido_hasta = models.DateField(null=True, blank=True)
 
-    pagado --> [*]
-    cancelado --> [*]
+    # añadidos
+    min_total   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    descripcion = models.TextField(null=True, blank=True)
+
+    scope     = models.CharField(max_length=10, choices=[(SCOPE_ORDER,"Por venta"), (SCOPE_ITEM,"Por ítem")], default=SCOPE_ORDER)
+    mode      = models.CharField(max_length=10, choices=[(MODE_PERCENT,"%"), (MODE_AMOUNT,"Monto")], default=MODE_PERCENT)
+    value     = models.DecimalField(max_digits=10, decimal_places=2) # % 0..100 o monto
+    stackable = models.BooleanField(default=True)  # puede acumularse con otras
+    prioridad = models.PositiveSmallIntegerField(default=10)
+    payment_method_code = models.CharField(max_length=40, blank=True, default="")
+
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    def esta_vigente(self, fecha=None) -> bool:
+        fecha = fecha or timezone.localdate()
+        if not self.activo:
+            return False
+        if self.valido_desde and fecha < self.valido_desde:
+            return False
+        if self.valido_hasta and fecha > self.valido_hasta:
+            return False
+        return True
 ```
 
-**Reglas operativas:**
+**Notas**
 
-- **Proceso**: `borrador → en_proceso → terminado` (independiente de pagos).
-- **Pagado**: se marca **automáticamente** cuando `saldo_pendiente == 0` (si no está cancelado).
-- **Notificar**: solo si `estado == terminado` (sin importar pago).
-- **Comprobante**: solo si **pagado**.
-- **Edición**: ítems editables en `borrador/en_proceso`, bloqueados desde `terminado`.
+- **Tenancy**: obligatoria por `empresa`, opcional por `sucursal`.
+- **Vigencia** diaria (`DateField`); las reglas a hora exacta no son necesarias.
+- **min_total** permite condicionar el mínimo en el **scope de venta**; se valida en `services/discounts.py` si se quiere endurecer.
 
-> La validación de transiciones vive en `fsm.py` (`puede_transicionar`, `transiciones_desde`, `es_final`).
+### `SalesAdjustment`
 
----
+```python
+class SalesAdjustment(models.Model):
+    KIND_ORDER = "order"  # ajuste aplicado a la venta completa
+    KIND_ITEM  = "item"   # ajuste aplicado a un ítem particular
+    MODE_PERCENT = "percent"
+    MODE_AMOUNT  = "amount"
+    SOURCE_MANUAL = "manual"
+    SOURCE_PROMO  = "promo"
+    SOURCE_PAYMENT= "payment"
 
-## 5) Formularios
+    venta = models.ForeignKey("sales.Venta", on_delete=models.CASCADE, related_name="adjustments")
+    item  = models.ForeignKey("sales.VentaItem", on_delete=models.CASCADE, null=True, blank=True, related_name="adjustments")
 
-### `forms/sale.py` — `VentaForm`
+    kind  = models.CharField(max_length=10, choices=[(KIND_ORDER,"Venta"), (KIND_ITEM,"Ítem")])
+    mode  = models.CharField(max_length=10, choices=[(MODE_PERCENT,"%"), (MODE_AMOUNT,"Monto")])
+    value = models.DecimalField(max_digits=10, decimal_places=2)  # % 0..100 o monto ≥ 0
 
-- Campos: `cliente`, `vehiculo`, `notas`
-- Filtrado por **empresa activa**; `vehiculo` se restringe al **cliente** elegido (o se deshabilita hasta elegir cliente).
-- Validación: `vehiculo.cliente == cliente` y ambos pertenecen a la **empresa**.
+    source    = models.CharField(max_length=10, choices=[(SOURCE_MANUAL,"Manual"), (SOURCE_PROMO,"Promoción"), (SOURCE_PAYMENT,"Método de pago")], default=SOURCE_MANUAL)
+    promotion = models.ForeignKey("sales.Promotion", null=True, blank=True, on_delete=models.SET_NULL, related_name="applied_adjustments")
 
-### `forms/service_select.py` — `ServiceSelectionForm`
+    motivo       = models.CharField(max_length=160, blank=True, default="")
+    aplicado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado       = models.DateTimeField(auto_now_add=True)
 
-- Campo: `servicios` (`MultipleChoiceField` con `CheckboxSelectMultiple`).
-- **Choices**: `Servicio` con **`PrecioServicio` vigente** para `(empresa, sucursal, tipo_vehiculo, fecha=hoy)`.
-- Usa `pricing_resolver.get_precio_vigente(…, tipo_vehiculo=…)` (**parámetro correcto**).
-
-### `forms/item.py` (opcional)
-
-- Para edición puntual de un ítem (cantidad/servicio) filtrando servicios con precio vigente. MVP puede no exponer UI de cantidad aún.
-
----
-
-## 6) Servicios (dominio)
-
-### `services/sales.py`
-
-- `crear_venta(empresa, sucursal, cliente, vehiculo, creado_por, notas="")`
-- `actualizar_venta(venta, notas=None)`
-- `recalcular_totales(venta)`
-- `cambiar_estado(venta, nuevo_estado)` (respeta `fsm.puede_transicionar`)
-- **Proceso:**
-  - `iniciar_trabajo(venta, actor=None)` → `borrador → en_proceso`
-  - `finalizar_trabajo(venta, actor=None)` → `… → terminado` (no toca pagos)
-  - `finalizar_venta(venta, actor=None)` → helper “one-click”: recalcula totales/saldo; termina y, si `saldo=0`, marca **pagado**
-- **Pago/Cancelación:**
-  - `marcar_pagada(venta)` → `… → pagado` (uso excepcional; en circuito normal lo decide `payments` cuando `saldo=0`)
-  - `cancelar_venta(venta)` → `… → cancelado`
-
-> Hooks en `services/lifecycle.py`: `on_iniciar`, `on_finalizar`, `on_pagada`, `on_cancelar`. El de **pagada** puede intentar **auto-emitir** comprobante si `INVOICING_AUTO_EMIT_ON_PAID=True`.
-
-### `services/items.py`
-
-- `agregar_item(venta, servicio)` → crea (o ignora si ya existe) con `cantidad=1` y cachea `precio_unitario` resuelto; recalcula totales.
-- `agregar_items_batch(venta, servicios_ids)` → itera `agregar_item`; acumula errores; recalcula.
-- `actualizar_cantidad(item, cantidad)` → valida estado; recalcula totales.
-- `quitar_item(item)` → valida estado; borra y recalcula.
-
----
-
-## 7) Vistas (CBV) y contexto
-
-### `VentaListView`
-
-- Filtros por `estado` y `sucursal`. Paginación. Acciones rápidas con **modales** por fila.
-- Flags de permisos a la UI: `puede_crear`, `puede_iniciar`, `puede_finalizar`, `puede_cancelar`.
-
-### `VentaCreateView`
-
-- **GET**: `VentaForm` (cliente → vehículo) con auto-submit.
-- **POST**: `ServiceSelectionForm` (checkboxes). Crea venta en **borrador** y agrega ítems seleccionados.
-- Contexto adicional: `cliente_seleccionado`, `vehiculo_seleccionado`, `services_form`, `crear_habilitado`.
-
-### `VentaDetailView`
-
-- Expone **todo** lo necesario para renderizar sin lógica en HTML:
-  - `services_form`, `venta_items`, `pagos`
-  - Flags: `venta_pagada`, `tiene_comprobante`, `comprobante_id`, `puede_emitir_comprobante`, `saldo_cubierto`, `debe_finalizar_para_emitir`
-  - FSM/Acciones: `puede_iniciar_trabajo`, `puede_finalizar_trabajo`
-  - Notificaciones: `has_whatsapp_templates`, `can_notify`, `notify_url`, `notify_disabled_reason`
-  - Permisos: `puede_crear/editar/iniciar/finalizar/cancelar`, `puede_agregar_items/actualizar_cantidad/quitar_items`
-
-### Acciones (POST)
-
-- `IniciarVentaView` → `sales:start`
-- `FinalizarVentaView` → `sales:finalize`
-- `CancelarVentaView` → `sales:cancel`
-- `AgregarItemView` → `sales:item_add`
-- `EliminarItemView` → `sales:item_delete`
-
----
-
-## 8) URLs (`apps/sales/urls.py`)
-
-> Prefijo montado: `path("ventas/", include(("apps.sales.urls", "sales"), namespace="sales"))`
-
-```
-GET   /ventas/                                   name="sales:list"
-GET   /ventas/nueva/                             name="sales:create"
-POST  /ventas/nueva/                             (mismo endpoint)
-GET   /ventas/<uuid:pk>/                         name="sales:detail"
-
-POST  /ventas/<uuid:pk>/iniciar/                 name="sales:start"
-POST  /ventas/<uuid:pk>/finalizar/               name="sales:finalize"
-POST  /ventas/<uuid:pk>/cancelar/                name="sales:cancel"
-
-POST  /ventas/<uuid:pk>/items/agregar/           name="sales:item_add"
-POST  /ventas/<uuid:pk>/items/<int:item_id>/eliminar/  name="sales:item_delete"
+    class Meta:
+        indexes = [
+            models.Index(fields=["venta", "kind"]),
+            models.Index(fields=["venta", "promotion"]),
+        ]
+        constraints = [
+            # Unicidad de PROMO por target VENTA (item es NULL)
+            models.UniqueConstraint(
+                fields=["venta", "promotion"],
+                condition=models.Q(promotion__isnull=False, item__isnull=True),
+                name="uq_salesadj_unique_promo_order",
+            ),
+            # Unicidad de PROMO por target ÍTEM (item NOT NULL)
+            models.UniqueConstraint(
+                fields=["venta", "item", "promotion"],
+                condition=models.Q(promotion__isnull=False, item__isnull=False),
+                name="uq_salesadj_unique_promo_item",
+            ),
+            # Consistencia kind/item
+            models.CheckConstraint(
+                check=(
+                    (models.Q(kind="order") & models.Q(item__isnull=True)) |
+                    (models.Q(kind="item")  & models.Q(item__isnull=False))
+                ),
+                name="ck_salesadj_kind_item_consistency",
+            ),
+            # Rango de value por modo
+            models.CheckConstraint(
+                check=(
+                    (models.Q(mode="percent") & models.Q(value__gte=0) & models.Q(value__lte=100)) |
+                    (models.Q(mode="amount")  & models.Q(value__gte=0))
+                ),
+                name="ck_salesadj_value_range_by_mode",
+            ),
+        ]
 ```
 
----
-
-## 9) Templates (resumen funcional)
-
-- `list.html`  
-  Tabla con badges de estado; **modales** por fila para Iniciar/Finalizar/Cancelar (respetando permisos). Filtros por estado y sucursal.
-
-- `create.html`  
-  Paso 1 (GET): selects Cliente/vehículo con auto-submit + links Crear cliente / Agregar vehículo.  
-  Paso 2 (POST): checkboxes de servicios vigentes. Botón **Crear** deshabilitado hasta tener selección válida.
-
-- `detail.html`  
-  Encabezado con badges (estado + saldo). Meta de la venta.  
-  Parciales:
-
-  - `sales/_summary_card.html` → Subtotal / Descuento / Propina / **Total** / **Saldo**.
-  - `sales/_services_add_card.html` → Alta de servicios (checkboxes).
-  - `sales/_payments_card.html` → Tabla de pagos + CTA “Registrar pago”.
-  - `sales/_item_row.html` → Fila de ítem con modal Eliminar (solo en estados editables).
-  - `sales/_messages.html` → mensajes flash.
-
-  Panel **Comprobante**:
-
-  - `pagada && !tiene_comprobante` → CTA “Emitir comprobante”.
-  - `tiene_comprobante` → “Ver” y “Descargar”.
-  - `cancelado` → bloquea emisión.
-
-  Panel **Notificaciones** (WhatsApp):
-
-  - **Habilitado si** `terminado` **y** hay plantillas WA activas.
-  - Muestra saldo pendiente (si lo hubiera) como recordatorio en el aviso.
+**Consecuencia:** intentar aplicar dos veces la **misma promo** al mismo **target** (venta o un ítem concreto) levanta `IntegrityError` y es manejado en `services/discounts.py` y vistas.
 
 ---
 
-## 10) Seguridad / Tenancy / Permisos
+## 4) Servicios de Descuentos/Promos (`services/discounts.py`)
 
-- Todas las vistas heredan `EmpresaPermRequiredMixin` y verifican la **empresa activa** (tenancy).
-- Permisos por rol (fuente de verdad en `apps.org.permissions`):
-  - `Perm.SALES_VIEW`, `Perm.SALES_CREATE`, `Perm.SALES_EDIT`
-  - `Perm.SALES_FINALIZE`, `Perm.SALES_CANCEL`
-  - `Perm.SALES_ITEM_ADD`, `Perm.SALES_ITEM_UPDATE_QTY`, `Perm.SALES_ITEM_REMOVE`
-- La **sucursal** se toma de `request.sucursal_activa` (middleware), nunca desde forms del usuario.
+### Helpers clave
 
----
+- `_assert_ajustable(venta)` → permite ajustes solo en `borrador` / `en_proceso` (bloquea en `terminado` o `cancelado`).
+- `_validate_mode_value(mode, value)` → rangos válidos.
+- `_promo_esta_vigente(promo, fecha=None)` → usa los campos **correctos** `valido_desde/valido_hasta`.
+- `_require_perm(actor, empresa, perm)` → **guard** de permisos (defensa en profundidad).
 
-## 11) Integraciones (resumen)
+### API principal
 
-- **Pricing** (`apps.pricing.services.resolver.get_precio_vigente`)  
-  Param: `tipo_vehiculo` (correcto) + `empresa`, `sucursal`, `servicio`, `fecha`.
+```python
+@transaction.atomic
+def agregar_descuento_manual_venta(*, venta: Venta, mode: str, value: Decimal, motivo: str="", actor=None) -> SalesAdjustment
 
-- **Payments**  
-  Registra pagos (con idempotencia) y **recalcula `saldo_pendiente`**.  
-  Si `saldo_pendiente == 0` y no está cancelado → `sales.marcar_pagada(venta)`.
+@transaction.atomic
+def agregar_descuento_manual_item(*, item: VentaItem, mode: str, value: Decimal, motivo: str="", actor=None) -> SalesAdjustment
 
-- **Invoicing**  
-  Emisión solo si **pagada**. Auto-emisión opcional desde `lifecycle.on_pagada` (configurable).
+@transaction.atomic
+def eliminar_ajuste(*, ajuste: SalesAdjustment) -> None
 
-- **Notifications**  
-  Habilita aviso “vehículo listo para retirar” cuando la venta está **terminada** (independiente del pago).
+@transaction.atomic
+def aplicar_promocion(*, venta: Venta, promo: Promotion, item: Optional[VentaItem]=None, motivo: str="", actor=None) -> SalesAdjustment
+```
 
-- **Cashbox** (si aplica)  
-  Cierres de caja y reportes de cobros/propinas.
+**Reglas en `aplicar_promocion`** (resumido):
 
----
+- Requiere `SALES_PROMO_APPLY` (admin + operador).
+- Promo **activa y vigente** en fecha.
+- `scope="item"` → requiere `item` propio de la venta; `scope="order"` → `item` **no** permitido.
+- Unicidad de aplicación por target (DB + catch de `IntegrityError` → `ValidationError` legible).
+- `recalcular_totales(venta)` al final (sin romper el flujo).
 
-## 12) Errores resueltos / Pitfalls
+### Listados (para UI)
 
-- `TemplateSyntaxError` por usar tuplas/expresiones complejas en `{% if %}` → mover lógica a la vista y exponer **flags** simples.
-- `NoReverseMatch` por nombres incorrectos → usar los **names reales** (`customers:create`, `vehicles:new`, `sales:start`, etc.).
-- Parámetro del resolver de precios: **`tipo_vehiculo`** (no `tipo`).
-- Bloqueos correctos: ítems no editables desde `terminado`; emisión bloqueada si `cancelado`.
+```python
+def listar_promociones_vigentes_para_venta(*, venta: Venta) -> list[Promotion]
 
----
+def listar_promociones_vigentes_para_item(*, venta: Venta) -> list[Promotion]
+```
 
-## 13) QA manual (sugerido)
-
-1. Crear cliente A (+vehículo A1) y cliente B (+vehículo B1).
-2. Crear venta con A → el select de vehículo muestra **solo A1**.
-3. “Agregar vehículo” respeta `next` y retorna al flujo.
-4. Ver servicios: **solo** con precio vigente para el **tipo** de A1 y **sucursal activa**.
-5. Crear venta (borrador) con 1+ servicios → totales correctos.
-6. **Iniciar** → `en_proceso`; se pueden agregar/quitar ítems.
-7. **Finalizar** → `terminado`; ya no permite editar ítems.
-8. Registrar pago **parcial** → saldo baja; **pagos** listados en card.
-9. Cubrir saldo → estado **pagado**; panel **Comprobante** muestra CTA.
-10. **Notificar**: solo si `terminado`; el panel muestra saldo pendiente (si queda).
-11. **Cancelar**: bloquea pagos/emisión; banner rojo visible en detalle.
+- Filtran por `empresa`, `sucursal` (null o igual), `scope`, `activo=True`, `esta_vigente()`, `stackable` si se desea (hoy se listan todas vigentes).
+- **Opcional**: filtrar por `min_total` cuando `scope="order"`.
 
 ---
 
-## 14) Roadmap corto
+## 5) Permisos y Roles (`apps/org/permissions.py`)
 
-- UI para **editar cantidad** por ítem.
-- Auditoría (actor/fecha) en transiciones e ítems.
-- Acciones masivas en listado (cancelar borradores).
-- KPIs operativos (en proceso, terminadas, pagadas).
-- Mejoras de DX: tests del FSM y de services puros.
+### Nuevos permisos
+
+- `SALES_DISCOUNT_ADD` (solo **admin**): aplicar **descuentos manuales** (venta/ítem).
+- `SALES_DISCOUNT_REMOVE` (solo **admin**): quitar **cualquier ajuste** (manual/promo/pago).
+- `SALES_PROMO_MANAGE` (solo **admin**): CRUD de **promociones**.
+- `SALES_PROMO_APPLY` (**admin + operador**): **aplicar promociones** a ventas/ítems existentes.
+
+### ROLE_POLICY (extracto)
+
+```python
+ROLE_POLICY = {
+    "ADMIN": (
+        # ... otros ...
+        Perm.SALES_DISCOUNT_ADD,
+        Perm.SALES_DISCOUNT_REMOVE,
+        Perm.SALES_PROMO_MANAGE,
+        Perm.SALES_PROMO_APPLY,
+    ),
+    "OPERADOR": (
+        # ... otros ...
+        Perm.SALES_PROMO_APPLY,  # puede aplicar promos creadas
+        # No tiene SALES_DISCOUNT_* ni SALES_PROMO_MANAGE
+    ),
+}
+```
+
+> **Importante**: las **vistas** y los **services** verifican estos permisos. La UI (templates) solo refleja flags.
 
 ---
 
-## 15) Diagrama ER (alto nivel)
+## 6) Vistas nuevas / movidas
 
-```mermaid
-erDiagram
-    Empresa ||--o{ Sucursal : tiene
-    Empresa ||--o{ Cliente  : tiene
-    Cliente ||--o{ Vehiculo : posee
-    Empresa ||--o{ Servicio : ofrece
-    Sucursal ||--o{ Venta   : opera
-    Venta ||--o{ VentaItem  : compone
-    Servicio ||--o{ VentaItem : se_vende
-    Vehiculo ||--o{ Venta    : participa
+### `views_promotions.py`
 
-    Venta {
-        uuid id
-        int empresa_id
-        int sucursal_id
-        int cliente_id
-        int vehiculo_id
-        varchar estado          // borrador | en_proceso | terminado | pagado | cancelado
-        decimal subtotal
-        decimal descuento
-        decimal propina
-        decimal total
-        decimal saldo_pendiente
-        text notas
-        datetime creado
-        datetime actualizado
-    }
-    VentaItem {
-        int id
-        uuid venta_id
-        int servicio_id
-        int cantidad
-        decimal precio_unitario
-        // subtotal = cantidad * precio_unitario (propiedad)
-    }
+- **Gestión (solo admin / `SALES_PROMO_MANAGE`)**
+  - `PromotionListView`, `PromotionCreateView`, `PromotionUpdateView`, `PromotionDeleteView`, `PromotionToggleActiveView`
+- **Acciones sobre ventas**
+  - `PromotionApplyView` (ADMIN + OPERADOR / `SALES_PROMO_APPLY`)
+  - `DiscountCreateOrderView` (solo ADMIN / `SALES_DISCOUNT_ADD`)
+  - `DiscountCreateItemView` (solo ADMIN / `SALES_DISCOUNT_ADD`)
+  - `DiscountDeleteView` (solo ADMIN / `SALES_DISCOUNT_REMOVE`)
+
+> Las 4 vistas de acciones sobre ventas se **movieron** desde `views.py` a `views_promotions.py`.
+
+### `views.py` (VentaDetailView)
+
+- Contexto ampliado para descuentos/promos:
+  - `ajustes`, `order_discount_form`, `item_discount_form`, `apply_promo_form`
+  - `promos_order`, `promos_item`
+  - Flags: `puede_agregar_descuento`, `puede_quitar_descuento`, `puede_aplicar_promo`, `descuentos_habilitados`
+
+---
+
+## 7) URLs (extracto) — `apps/sales/urls.py`
+
+```python
+# Descuentos / Promos en ventas
+path("<uuid:pk>/descuentos/agregar/venta/", views_promotions.DiscountCreateOrderView.as_view(), name="discount_add_order"),
+path("<uuid:pk>/descuentos/agregar/item/",  views_promotions.DiscountCreateItemView.as_view(),  name="discount_add_item"),
+path("<uuid:pk>/descuentos/<int:adj_id>/eliminar/", views_promotions.DiscountDeleteView.as_view(), name="discount_delete"),
+path("<uuid:pk>/promos/aplicar/", views_promotions.PromotionApplyView.as_view(), name="promo_apply"),
+
+# Gestión de promociones (solo admin)
+path("promos/",                    views_promotions.PromotionListView.as_view(),   name="promos_list"),
+path("promos/nueva/",              views_promotions.PromotionCreateView.as_view(), name="promos_create"),
+path("promos/<int:pk>/editar/",    views_promotions.PromotionUpdateView.as_view(), name="promos_update"),
+path("promos/<int:pk>/eliminar/",  views_promotions.PromotionDeleteView.as_view(), name="promos_delete"),
+path("promos/<int:pk>/toggle/",    views_promotions.PromotionToggleActiveView.as_view(), name="promos_toggle"),
 ```
 
 ---
 
-## 16) Convenciones de calidad
+## 8) Templates
 
-- **Sin lógica** en templates (solo flags simples).
-- **Forms**: inyectan clases Bootstrap en `__init__`; usar `invalid-feedback` y `form-text`.
-- **CBV**: filtran por `empresa_activa`; exponen permisos como flags; evitar N+1 con `select_related/prefetch_related`.
-- **Mensajes**: feedback homogéneo con `django.contrib.messages`.
-- **Permisos**: `has_empresa_perm(user, empresa, Perm.XXX)` para habilitar/deshabilitar CTAs.
-- **URLs**: siempre por `namespace:name`.
+### `templates/sales/_discounts_card.html`
+
+- **Tabla** de ajustes (tipo, modo, valor, motivo/promo, ítem, origen) + acción eliminar (solo admin y estado habilitado).
+- **Modales**:
+  - **Descuento (venta/ítem)** → Solo admin (`puede_agregar_descuento`).
+  - **Promo (venta/ítem)** → Admin + Operador (`puede_aplicar_promo`).
+- **Flags** para deshabilitar por estado: `descuentos_habilitados` (solo `borrador/en_proceso`).
+
+### `templates/sales/_summary_card.html`
+
+- Muestra **Subtotal / Descuento / Propina / Total / Saldo**.
+- Hint cuando la venta está pagada o cuando saldo=0 aún no marcado como `pagada`.
+
+### `templates/sales/detail.html`
+
+- Incluye `_discounts_card.html`.
+- Mantiene cards de **Comprobante** y **Notificaciones** con lógicas previas.
+
+### `templates/sales/promotions/*`
+
+- CRUD simple de **promociones** (solo admin).
+- Formularios Bootstrap con `PromotionForm`.
 
 ---
 
-### TL;DR (operativo)
+## 9) Forms
 
-- **Proceso** y **pago** van **independientes**: se puede pagar antes de terminar o al retiro.
-- **Notificar** depende de **terminado**; **Facturar** depende de **pagado**.
-- Templates limpios + parciales reutilizables + flags desde la vista.
-- FSM robusto, totales consistentes e integraciones claras con pricing/payments/invoicing/notifications.
+- `OrderDiscountForm(mode, value, motivo)` — venta completa.
+- `ItemDiscountForm(item_id, mode, value, motivo)` — por ítem.
+- `ApplyPromotionForm(promotion_id, [item_id])` — aplica promo existente (scope según promo).
+- `PromotionForm` — alta/edición de promos; incluye `min_total`, `descripcion` y filtros por sucursal.
+
+---
+
+## 10) Admin (`apps/sales/admin.py`)
+
+- Registrados **Promotion** y **SalesAdjustment** con list_display, filtros por empresa/sucursal/activo, búsqueda por nombre/código, inlines si aplica.
+- Venta y VentaItem sin cambios funcionales, pero se pueden mostrar **ajustes** relacionados en read-only.
+
+---
+
+## 11) Cálculos y Recalculo (`calculations.py` + `services/sales.py`)
+
+- Totales consideran: **items** → **ajustes** (por ítem y por venta) → **propina** → **total** → **saldo** (contra pagos).
+- Cada mutación (items/ajustes/pagos) hace `recalcular_totales(venta)`; capa de servicios orquesta.
+- **Idempotencia**: si no cambian valores, no rompe flujo (logs informativos).
+
+---
+
+## 12) Seguridad / Tenancy
+
+- **Todas** las vistas usan `EmpresaPermRequiredMixin` + **querysets** filtrados por `empresa=self.empresa_activa`.
+- **Sucursal** siempre tomada del middleware (`request.sucursal_activa`) y validada en resoluciones de precio / promos por sucursal.
+- **Permisos**:
+  - Operador **puede** aplicar promos (`SALES_PROMO_APPLY`).
+  - Operador **NO** puede cargar descuentos manuales ni gestionar promos (`SALES_DISCOUNT_*`, `SALES_PROMO_MANAGE`).
+- **Defensa en profundidad**: los **services** (`discounts.py`) vuelven a chequear permisos con `_require_perm`.
+
+---
+
+## 13) Migrations
+
+Incluyen:
+
+- Creación de `Promotion` y `SalesAdjustment`.
+- Campos extra en `Promotion` (`min_total`, `descripcion`).
+- Índices y constraints de unicidad y check en `SalesAdjustment`.
+
+> **Orden sugerida**: aplicar `0003` → `0004` → `0005` → `0006` según el árbol generado.
+
+---
+
+## 14) Rúbrica de QA (checklist)
+
+- [ ] Operador **NO** ve botones de **Descuento (venta/ítem)**.
+- [ ] Operador **SÍ** ve botones de **Promo (venta/ítem)** y puede aplicarlas.
+- [ ] Admin puede **crear/editar/desactivar** promos y **aplicar descuentos manuales**.
+- [ ] No se puede **aplicar dos veces** la **misma promo** al **mismo target** (venta o ítem) → UI muestra error legible si API devuelve `ValidationError` por unicidad.
+- [ ] Ajustes **bloqueados** cuando venta está `terminado` o `cancelado`.
+- [ ] Totales recalculan tras cada ajuste (tabla refleja valor correcto).
+- [ ] **create → detail** flujo OK; servicios disponibles según **sucursal activa** y **tipo de vehículo**.
+- [ ] **Notificaciones**: solo habilitadas en `terminado` (badge WA).
+- [ ] **Comprobante**: CTA visible solo cuando **pagada** y sin comprobante.
+
+---
+
+## 15) Snippets clave
+
+### Guard de permisos en service
+
+```python
+from django.core.exceptions import PermissionDenied
+from apps.org.permissions import has_empresa_perm, Perm
+
+def _require_perm(actor, empresa, perm):
+    if actor is None or not has_empresa_perm(actor, empresa, perm):
+        raise PermissionDenied("No tenés permisos para esta acción.")
+```
+
+### Vigencia correcta de promo
+
+```python
+def _promo_esta_vigente(promo: Promotion, fecha=None) -> bool:
+    fecha = fecha or timezone.localdate()
+    return promo.esta_vigente(fecha=fecha)
+```
+
+### Unicidad de aplicación (DB + catch)
+
+```python
+try:
+    adj = SalesAdjustment.objects.create(...)
+except IntegrityError:
+    raise ValidationError("Esta promoción ya fue aplicada a este destino.")
+```
+
+---
+
+## 16) Documentación de rutas (uso)
+
+- **Venta detalle**: aplicar promo **por venta**  
+  `POST /ventas/<venta_id>/promos/aplicar/ { promotion_id }`
+
+- **Venta detalle**: aplicar promo **por ítem**  
+  `POST /ventas/<venta_id>/promos/aplicar/ { promotion_id, item_id }`
+
+- **Descuento manual (admin)**
+
+  - Venta: `POST /ventas/<venta_id>/descuentos/agregar/venta/ { mode, value, motivo? }`
+  - Ítem: `POST /ventas/<venta_id>/descuentos/agregar/item/  { item_id, mode, value, motivo? }`
+
+- **Eliminar ajuste (admin)**  
+  `POST /ventas/<venta_id>/descuentos/<adj_id>/eliminar/`
+
+- **Gestión de Promos (admin)**  
+  `GET /ventas/promos/` — lista  
+  `GET/POST /ventas/promos/nueva/` — crear  
+  `GET/POST /ventas/promos/<id>/editar/` — editar  
+  `POST /ventas/promos/<id>/eliminar/` — eliminar  
+  `POST /ventas/promos/<id>/toggle/` — activar/desactivar
+
+---
+
+## 17) Roadmap corto
+
+- Reglas de **stacking** más ricas (prioridad, exclusiones)
+- **Condiciones** adicionales (por servicio, por tipo de vehículo, por cliente)
+- **Código promocional** (validación por input del operador)
+- **Reportes**: top promos usadas, descuentos otorgados por usuario/periodo
+- Tests unitarios e integración (services, fsm, permisos, templates)
+
+---
+
+## 18) TL;DR
+
+- Añadimos **Promos** y **Ajustes** con **reglas pro** (unicidad por target, vigencia, permisos).
+- **Operador** solo **aplica** promos; **Admin** gestiona promos y puede cargar **descuentos manuales**.
+- Todo controlado desde la **Detail** con una card dedicada y **services** robustos que recalculan totales.
+- Constraints de DB evitan duplicados; la **capa de services** traduce a errores legibles.
 
 # Módulo 8 — `apps/payments` (Pagos)
 

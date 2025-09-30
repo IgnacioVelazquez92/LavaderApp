@@ -208,6 +208,15 @@ class Perm(str, Enum):
     SALES_ITEM_ADD = "SALES_ITEM_ADD"        # agregar ítems/servicios
     SALES_ITEM_UPDATE_QTY = "SALES_ITEM_UPDATE_QTY"
     SALES_ITEM_REMOVE = "SALES_ITEM_REMOVE"
+    PROMO_VIEW = "promo_view"
+    PROMO_CREATE = "promo_create"
+    PROMO_EDIT = "promo_edit"
+    PROMO_DELETE = "promo_delete"
+
+    SALES_DISCOUNT_ADD = "sales.discount_add"     # aplicar descuentos/promos
+    SALES_DISCOUNT_REMOVE = "sales.discount_remove"  # quitar ajustes
+    SALES_PROMO_MANAGE = "sales.promo_manage"
+    SALES_PROMO_APPLY = "sales.promo_apply"
 
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
@@ -267,6 +276,17 @@ ROLE_POLICY = {
         Perm.SALES_ITEM_ADD,
         Perm.SALES_ITEM_UPDATE_QTY,
         Perm.SALES_ITEM_REMOVE,
+
+        Perm.PROMO_VIEW,
+        Perm.PROMO_CREATE,
+        Perm.PROMO_EDIT,
+        Perm.PROMO_DELETE,
+
+        # NUEVOS: SOLO ADMIN
+        Perm.SALES_DISCOUNT_ADD,
+        Perm.SALES_DISCOUNT_REMOVE,
+        Perm.SALES_PROMO_MANAGE,
+        Perm.SALES_PROMO_APPLY,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -302,6 +322,9 @@ ROLE_POLICY = {
         Perm.SALES_ITEM_ADD,
         Perm.SALES_ITEM_UPDATE_QTY,
         Perm.SALES_ITEM_REMOVE,
+        Perm.PROMO_VIEW,
+        Perm.SALES_PROMO_APPLY,
+
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.

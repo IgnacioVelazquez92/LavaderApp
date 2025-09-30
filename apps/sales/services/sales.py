@@ -123,10 +123,23 @@ def actualizar_venta(*, venta: Venta, notas: str | None = None) -> Venta:
 @transaction.atomic
 def recalcular_totales(*, venta: Venta) -> Venta:
     """
-    Recalcula todos los totales de una venta a partir de sus ítems.
+    Recalcula todos los totales de una venta a partir de sus ítems y ajustes.
     (Subtotal, propina, descuento, total. El saldo_pendiente depende de pagos.)
+
+    Nota:
+    - `calculations.calcular_totales` devuelve `saldo_pendiente = total` como baseline.
+      La capa de payments luego debe recalcularlo en base a pagos reales.
     """
-    data = calcular_totales(venta.items.all(), venta.descuento, venta.propina)
+    items_qs = venta.items.all()
+    # Pasamos los ajustes (descuentos) para soportar item/order, %/monto:
+    adjustments_qs = venta.adjustments.select_related("item").all()
+
+    data = calcular_totales(
+        items=items_qs,
+        descuento=venta.descuento,       # legacy; será ignorado si adjustments no está vacío
+        propina=venta.propina or Decimal("0.00"),
+        adjustments=adjustments_qs,
+    )
     for field, value in data.items():
         setattr(venta, field, value)
     venta.save(update_fields=list(data.keys()) + ["actualizado"])
@@ -223,14 +236,14 @@ def finalizar_trabajo(*, venta: Venta, actor=None) -> Venta:
 def finalizar_venta(*, venta: Venta, actor=None) -> Venta:
     """
     Acción compuesta (convenience):
-      - Recalcula totales.
+      - Recalcula totales (incluye descuentos).
       - Recalcula saldo vía payments.
       - Sincroniza payment_status desde saldo.
       - Pasa a 'terminado' (si la FSM lo permite).
 
     Nota: no fuerza 'pagada'; eso lo decide sync_payment_status (saldo==0).
     """
-    # 1) Totales por ítems
+    # 1) Totales por ítems + ajustes
     recalcular_totales(venta=venta)
 
     # 2) Recalcular saldo con pagos (estado del dinero)

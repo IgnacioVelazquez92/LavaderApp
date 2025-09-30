@@ -35,6 +35,8 @@ def on_finalizar(venta: Venta, prev_estado: str | None = None, actor=None) -> No
     """
     logger.info("Venta %s finalizada (terminado). Prev: %s",
                 venta.id, prev_estado)
+    # Nota: si en tu política querés bloquear más side-effects al estar cancelada,
+    # validá aquí (aunque 'cancelado' no debería llegar a 'terminado').
 
 
 def on_cancelar(venta: Venta, prev_estado: str | None = None, actor=None) -> None:

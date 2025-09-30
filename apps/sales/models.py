@@ -1,4 +1,6 @@
 # apps/sales/models.py
+from django.db.models import Q
+from django.utils import timezone
 import uuid
 from django.db import models
 from django.conf import settings
@@ -7,6 +9,7 @@ from apps.org.models import Empresa, Sucursal
 from apps.customers.models import Cliente
 from apps.vehicles.models import Vehiculo
 from apps.catalog.models import Servicio
+from django.db.models import Q, UniqueConstraint
 
 
 class Venta(models.Model):
@@ -126,3 +129,152 @@ class VentaItem(models.Model):
     def subtotal(self):
         """Subtotal de este ítem (cantidad × precio_unitario)."""
         return self.cantidad * self.precio_unitario
+
+
+# Promociones y ajustes
+class Promotion(models.Model):
+    SCOPE_ORDER = "order"
+    SCOPE_ITEM = "item"
+    SCOPE_CHOICES = [(SCOPE_ORDER, "Por venta"), (SCOPE_ITEM, "Por ítem")]
+
+    MODE_PERCENT = "percent"
+    MODE_AMOUNT = "amount"
+    MODE_CHOICES = [(MODE_PERCENT, "%"), (MODE_AMOUNT, "Monto")]
+
+    empresa = models.ForeignKey(
+        "org.Empresa", on_delete=models.CASCADE, related_name="promotions")
+    sucursal = models.ForeignKey(
+        "org.Sucursal", on_delete=models.CASCADE, null=True, blank=True, related_name="promotions")
+    nombre = models.CharField(max_length=120)
+    codigo = models.CharField(max_length=50, blank=True, default="")
+    activo = models.BooleanField(default=True)
+    valido_desde = models.DateField(null=True, blank=True)
+    valido_hasta = models.DateField(null=True, blank=True)
+    min_total = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True)
+    descripcion = models.TextField(null=True, blank=True)
+    scope = models.CharField(
+        max_length=10, choices=SCOPE_CHOICES, default=SCOPE_ORDER)
+    mode = models.CharField(
+        max_length=10, choices=MODE_CHOICES, default=MODE_PERCENT)
+    value = models.DecimalField(
+        max_digits=10, decimal_places=2)  # % 0..100 o monto
+    stackable = models.BooleanField(default=True)  # puede acumularse con otras
+    prioridad = models.PositiveSmallIntegerField(default=10)
+
+    # (Opcional) condición simple por método de pago
+    # ej: "cash", "debit", etc.
+    payment_method_code = models.CharField(
+        max_length=40, blank=True, default="")
+
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["empresa", "sucursal", "activo"]),
+        ]
+
+    def esta_vigente(self, fecha=None):
+        fecha = fecha or timezone.localdate()
+        if not self.activo:
+            return False
+        if self.valido_desde and fecha < self.valido_desde:
+            return False
+        if self.valido_hasta and fecha > self.valido_hasta:
+            return False
+        return True
+
+
+class SalesAdjustment(models.Model):
+    KIND_ORDER = "order"
+    KIND_ITEM = "item"
+    KIND_CHOICES = [(KIND_ORDER, "Venta"), (KIND_ITEM, "Ítem")]
+
+    MODE_PERCENT = "percent"
+    MODE_AMOUNT = "amount"
+    MODE_CHOICES = [(MODE_PERCENT, "%"), (MODE_AMOUNT, "Monto")]
+
+    SOURCE_MANUAL = "manual"
+    SOURCE_PROMO = "promo"
+    SOURCE_PAYMENT = "payment"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Manual"),
+        (SOURCE_PROMO, "Promoción"),
+        (SOURCE_PAYMENT, "Método de pago"),
+    ]
+
+    venta = models.ForeignKey(
+        "sales.Venta",
+        on_delete=models.CASCADE,
+        related_name="adjustments",
+    )
+    item = models.ForeignKey(
+        "sales.VentaItem",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="adjustments",
+    )
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES)
+    value = models.DecimalField(
+        max_digits=10, decimal_places=2)  # % 0..100 o monto ≥ 0
+    source = models.CharField(
+        max_length=10, choices=SOURCE_CHOICES, default=SOURCE_MANUAL
+    )
+    promotion = models.ForeignKey(
+        "sales.Promotion",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="applied_adjustments",
+    )
+    motivo = models.CharField(max_length=160, blank=True, default="")
+    aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["venta", "kind"]),
+            # (no es único) ayuda a búsquedas por promo
+            models.Index(fields=["venta", "promotion"]),
+        ]
+        constraints = [
+            # ── Promos por VENTA (item IS NULL): única por (venta, promotion)
+            models.UniqueConstraint(
+                fields=["venta", "promotion"],
+                condition=Q(promotion__isnull=False, item__isnull=True),
+                name="uq_salesadj_unique_promo_order",
+            ),
+            # ── Promos por ÍTEM (item NOT NULL): única por (venta, item, promotion)
+            models.UniqueConstraint(
+                fields=["venta", "item", "promotion"],
+                condition=Q(promotion__isnull=False, item__isnull=False),
+                name="uq_salesadj_unique_promo_item",
+            ),
+            # Coherencia de kind ↔ item NULL/NOT NULL
+            models.CheckConstraint(
+                check=(
+                    (Q(kind="order") & Q(item__isnull=True)) |
+                    (Q(kind="item") & Q(item__isnull=False))
+                ),
+                name="ck_salesadj_kind_item_consistency",
+            ),
+            # Rango de value según mode
+            models.CheckConstraint(
+                check=(
+                    (Q(mode="percent") & Q(value__gte=0) & Q(value__lte=100)) |
+                    (Q(mode="amount") & Q(value__gte=0))
+                ),
+                name="ck_salesadj_value_range_by_mode",
+            ),
+        ]
+
+    def __str__(self):
+        base = f"{self.get_kind_display()} {self.get_mode_display()} {self.value}"
+        if self.promotion_id:
+            base += f" · {self.promotion.nombre}"
+        return base

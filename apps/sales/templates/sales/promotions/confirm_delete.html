@@ -1,0 +1,17 @@
+{% extends "base_auth.html" %}
+{% block title %}Eliminar promoción{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="card">
+    <div class="card-body">
+      <h5 class="card-title">Eliminar promoción</h5>
+      <p>¿Confirmás eliminar la promoción <strong>{{ promo.nombre }}</strong>?</p>
+      <form method="post">
+        {% csrf_token %}
+        <a class="btn btn-outline-secondary" href="{% url 'sales:promos_list' %}">Volver</a>
+        <button class="btn btn-danger" type="submit">Eliminar</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

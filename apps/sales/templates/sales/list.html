@@ -94,6 +94,7 @@
           <th scope="col" class="d-none d-md-table-cell">Sucursal</th>
           <th scope="col">Estado</th>
           <th scope="col">Pago</th>
+          <th scope="col" class="text-end">Descuento</th>
           <th scope="col" class="text-end">Total</th>
           <th scope="col" class="text-end">Acciones</th>
         </tr>
@@ -133,6 +134,16 @@
               {% endif %}
             </td>
 
+            {# Descuento #}
+            <td class="text-end">
+              {% if v.descuento and v.descuento > 0 %}
+                <span class="text-danger">- ${{ v.descuento|floatformat:2 }}</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+            {# Total #}
             <td class="text-end">${{ v.total|floatformat:2 }}</td>
 
             <td class="text-end" style="white-space:nowrap">
@@ -195,7 +206,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="8">
+            <td colspan="9">
               <div class="alert alert-info mb-0">
                 No se encontraron ventas con los filtros actuales.
                 {% if puede_crear %}

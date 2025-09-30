@@ -29,11 +29,11 @@ def _assert_editable(venta: Venta) -> None:
 def _post_items_mutation_sync(venta: Venta) -> None:
     """
     Después de cambiar los ítems:
-      - recalcula totales
+      - recalcula totales (incluye descuentos aplicados por ítem/venta)
       - recalcula saldo con pagos
       - sincroniza payment_status
     """
-    # 1) Totales por ítems
+    # 1) Totales por ítems + ajustes (calculations usa venta.adjustments)
     recalcular_totales(venta=venta)
 
     # 2) Saldo con pagos actuales
@@ -58,7 +58,7 @@ def agregar_item(*, venta: Venta, servicio) -> VentaItem:
             empresa=venta.empresa,
             sucursal=venta.sucursal,
             servicio=servicio,
-            tipo_vehiculo=venta.vehiculo.tipo,
+            tipo_vehiculo=venta.vehiculo.tipo,  # param correcto del resolver
         )
     except Exception:
         raise ValidationError(
@@ -70,7 +70,7 @@ def agregar_item(*, venta: Venta, servicio) -> VentaItem:
         servicio=servicio,
         defaults={"cantidad": 1, "precio_unitario": precio.precio},
     )
-    # Si ya existía, no cambiamos cantidad (MVP sin edición automática).
+    # Si ya existía, mantenemos su cantidad y precio cacheado (MVP).
 
     _post_items_mutation_sync(venta)
     return item
@@ -106,6 +106,9 @@ def agregar_items_batch(*, venta: Venta, servicios_ids: list[int]) -> list[str]:
 def actualizar_cantidad(*, item: VentaItem, cantidad: int) -> VentaItem:
     """
     Actualiza la cantidad de un ítem (>=1).
+    Mantiene los ajustes por ítem (si existieran):
+      - % se recalcula naturalmente sobre el nuevo subtotal del ítem
+      - monto fijo queda como valor absoluto a restar
     """
     venta = item.venta
     _assert_editable(venta)
@@ -129,9 +132,10 @@ def actualizar_cantidad(*, item: VentaItem, cantidad: int) -> VentaItem:
 def quitar_item(*, item: VentaItem) -> None:
     """
     Elimina un ítem de la venta.
+    Los ajustes (SalesAdjustment) con FK al ítem se eliminan por CASCADE.
     """
     venta = item.venta
     _assert_editable(venta)
 
-    item.delete()
+    item.delete()  # CASCADE borra descuentos por ítem
     _post_items_mutation_sync(venta)
