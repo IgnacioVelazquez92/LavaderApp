@@ -2397,501 +2397,489 @@ erDiagram
     }
 ```
 
-# Módulo 7 — `apps/sales` (Ventas / Órdenes de Servicio)
+# Módulo 7 — `apps/sales` — Ventas / Órdenes de Servicio
 
-> **Objetivo:** Gestionar **Ventas** (órdenes de servicio) con sus **ítems**, **estados (FSM)**, **pagos**, **comprobantes**, **notificaciones** y ahora **promociones/descuentos** robustos con control de permisos y unicidad.  
-> **Stack:** Django (server-rendered) + Bootstrap 5 + Bootstrap Icons.
-
----
-
-## 0) Qué cambió en esta iteración (resumen ejecutivo)
-
-- **Promociones & Descuentos**
-  - Nuevos modelos: **`Promotion`** y **`SalesAdjustment`** (ajustes por venta o por ítem, origen manual/promo/pago).
-  - Reglas profesionales: **unicidad** de aplicación de promo por target (venta o ítem), **vigencia**, **scope** (venta/ítem), **modo** (% o monto) y **stacking** controlado.
-  - **Services** (`services/discounts.py`) con validaciones de negocio, recalculo de totales e idempotencia.
-- **Permisos finos**
-  - **Admin**: crea/edita/desactiva **promos**, aplica **descuentos manuales** y elimina ajustes.
-  - **Operador**: **solo aplica promociones ya creadas** (no puede crear/borrar promos ni cargar descuentos manuales).
-  - Nuevo permiso: **`SALES_PROMO_APPLY`** (ADMIN + OPERADOR).
-- **Vistas y templates**
-  - `VentaDetailView` ahora muestra **Descuentos y promociones** con `_discounts_card.html` (tabla de ajustes + modales).
-  - Nuevas vistas en `views_promotions.py` (gestión de promos) + acciones de aplicar/eliminar ajustes.
-  - Botones deshabilitados por estado/permiso desde flags calculados en la vista (no lógica en templates).
-- **DB/Integridad**
-  - Constraints de unicidad por promo/target (`order` vs `item`) y check constraints por **modo** y **consistencia** `kind`/`item`.
-  - Migrations nuevas para introducir modelos/cambios.
-- **UX/Flujo**
-  - Detalle de venta: CTAs para **promo (venta/ítem)** y **descuento manual (venta/ítem)** con permisos y estado de edición controlados.
-  - Listado y creación ajustados/limpios.
-
-> Ver secciones 3, 4, 7, 8, 9 y 10 para detalles.
+Sistema de gestión de **ventas** (órdenes de servicio) para lavaderos. Cubre: alta y edición de ventas, manejo de **ítems** (servicios), **estados de proceso (FSM)**, **pagos**, **comprobantes**, **notificaciones** y un módulo completo de **promociones/descuentos** con control de permisos.
 
 ---
 
-## 1) Estructura (actualizada)
+## 1) Propósito y alcance
+
+- **Entidad principal:** `Venta` (orden de servicio) que orquesta ítems, totales, pagos, emisión de comprobantes y notificaciones.
+- **Experiencia operativa:** flujo claro desde el **borrador** hasta el **terminado/pagado**, con reglas que impiden errores comunes (editar ítems en estados finales, facturar si no está pagada, etc.).
+- **Multi-empresa / multi-sucursal:** toda la lógica respeta empresa activa y sucursal activa.
+- **Seguridad por roles:** capacidades diferenciadas para **Administrador** y **Operador** (ver §6).
+
+---
+
+## 2) Mapa del módulo (qué es cada cosa)
+
+Estructura lógica (archivos y carpetas) y su razón de ser. No se incluyen fragmentos de código aquí: el objetivo es entender **qué hace** cada pieza.
 
 ```
 apps/sales/
-├─ __init__.py
-├─ apps.py
-├─ admin.py                         # Admin Venta, VentaItem, Promotion, SalesAdjustment
-├─ migrations/
-│  ├─ 0003_promotion_salesadjustment_and_more.py
-│  ├─ 0004_promotion_descripcion_promotion_min_total.py
-│  ├─ 0005_salesadjustment_sales_sales_venta_i_f56e51_idx_and_more.py
-│  └─ 0006_remove_salesadjustment_uq_salesadj_unique_promo_per_target_and_more.py
-├─ models.py                        # + Promotion, + SalesAdjustment
-├─ urls.py                          # + rutas de promos/ajustes
-├─ views.py                         # Venta list/create/detail + items + acciones de estado
-├─ views_promotions.py              # Gestión de promos y aplicación/borra de ajustes
-├─ calculations.py                  # totales (ahora consideran ajustes)
-├─ fsm.py                           # máquina de estados
+├─ admin.py                # Alta en Django Admin: Venta, VentaItem, Promotion, SalesAdjustment
+├─ apps.py                 # Configuración de la app
+├─ calculations.py         # Motor de totales (subtotal, descuentos, propina, total, saldo)
+├─ fsm.py                  # Máquina de estados de la Venta (reglas de transición)
+├─ models.py               # Modelos: Venta, VentaItem, Promotion, SalesAdjustment
+├─ selectors.py            # (Opcional) Lecturas optimizadas y consultas de apoyo
 ├─ services/
-│  ├─ __init__.py
-│  ├─ sales.py                      # crear_venta, iniciar/finalizar, cancelar, recalcular
-│  ├─ items.py                      # agregar/actualizar/quitar items (sync saldo/pagos)
-│  ├─ lifecycle.py                  # hooks (on_pagada auto-emit opcional)
-│  └─ discounts.py                  # NUEVO: negocio de promos/ajustes
+│  ├─ sales.py             # Orquestación de ventas: crear, iniciar/finalizar, cancelar, recalcular
+│  ├─ items.py             # Operaciones con ítems: agregar/quitar/actualizar y recalcular
+│  ├─ lifecycle.py         # Hooks de negocio: on_iniciar, on_finalizar, on_pagada, on_cancelar
+│  └─ discounts.py         # Negocio de promociones y descuentos (aplicar/quitar, vigencia, unicidad)
 ├─ forms/
-│  ├─ __init__.py
-│  ├─ sale.py                       # VentaForm
-│  ├─ service_select.py             # ServiceSelectionForm
-│  ├─ discounts.py                  # OrderDiscountForm, ItemDiscountForm, ApplyPromotionForm
-│  └─ promotion.py                  # PromotionForm (admin/gestión)
-└─ templates/sales/
-   ├─ list.html
-   ├─ create.html
-   ├─ detail.html
-   ├─ _summary_card.html            # actualizado (muestra descuento cacheado)
-   ├─ _discounts_card.html          # NUEVO (tabla ajustes + modales)
-   ├─ promotions/                   # list/create/update/detail templates de promos
-   ├─ _item_row.html
-   ├─ _services_add_card.html
-   ├─ _payments_card.html
-   └─ _messages.html
+│  ├─ sale.py              # VentaForm (cliente, vehículo, notas)
+│  ├─ service_select.py    # ServiceSelectionForm (servicios con precio vigente)
+│  ├─ discounts.py         # Formularios de ajustes: venta/ítem y aplicar promoción
+│  └─ promotion.py         # Formulario de gestión de promociones (admin)
+├─ templates/sales/
+│  ├─ list.html            # Listado con filtros y acciones rápidas
+│  ├─ create.html          # Alta guiada en dos pasos (cliente/vehículo → servicios)
+│  ├─ detail.html          # Detalle integral de la venta
+│  ├─ _summary_card.html   # Resumen de montos (subtotal, descuento, propina, total, saldo)
+│  ├─ _discounts_card.html # Tabla de ajustes + modales (promos/desc.)
+│  ├─ _item_row.html       # Fila reutilizable de ítem en la tabla
+│  ├─ _services_add_card.html # Panel lateral para agregar servicios
+│  ├─ _payments_card.html  # Pagos asociados y CTA para registrar
+│  └─ _messages.html       # Mensajes flash coherentes
+├─ urls.py                 # Enrutamiento público del módulo
+├─ views.py                # Vistas de ventas (listado, alta, detalle, acciones de estado)
+└─ views_promotions.py     # Vistas de promociones/ajustes (gestión y aplicación a ventas)
 ```
 
-Además: `templates/base_auth.html` incluye (si aplica) acceso a **Promociones** cuando el usuario tiene `SALES_PROMO_MANAGE`.
+**Reglas de diseño clave**
+
+- **Servicios** encapsulan la lógica de negocio; las **vistas** coordinan entrada/salida y contextos; los **templates** renderizan sin lógica compleja (reciben _flags_).
+- **FSM** y **calculation engine** están separados para ser testeables y reusables.
+- **Promos/descuentos** viven en su propio _service_ con validaciones estrictas e integridad en DB.
 
 ---
 
-## 2) Decisiones de UX / UI
+## 3) Data Model — visión conceptual
 
-- **Detalle de Venta** agrega una card específica: **Descuentos y promociones**.
+No se muestran campos específicos; esto es una vista funcional con las relaciones relevantes.
 
-  - Tabla de **ajustes** (tipo, modo, valor, motivo/promo, ítem, origen, acciones).
-  - **Cuatro modales**: Descuento venta / Descuento ítem / Promo venta / Promo ítem.
-  - **Botones** se habilitan/deshabilitan por flags:
-    - `puede_agregar_descuento` (solo admin)
-    - `puede_quitar_descuento` (solo admin)
-    - `puede_aplicar_promo` (admin + operador)
-    - `descuentos_habilitados` (solo en `borrador`/`en_proceso`).
+```mermaid
+erDiagram
+    Empresa ||--o{ Sucursal : tiene
+    Empresa ||--o{ Cliente  : tiene
+    Cliente ||--o{ Vehiculo : posee
 
-- **Gestión de Promos** (pantallas server-rendered simples):
-  - Listado, alta, edición, activar/desactivar, borrar (solo admin: `SALES_PROMO_MANAGE`).
-  - Por empresa y sucursal (opcional), con filtros básicos y prioridades.
+    Empresa ||--o{ Promotion       : define
+    Sucursal ||--o{ Promotion      : (opcional) restringe a sucursal
 
----
+    Sucursal ||--o{ Venta          : opera
+    Cliente  ||--o{ Venta          : solicita
+    Vehiculo ||--o{ Venta          : se_atiende_en
 
-## 3) Modelos nuevos / campos nuevos
+    Venta ||--o{ VentaItem         : compone
+    VentaItem }o--|| Servicio      : referencia
+    Venta ||--o{ SalesAdjustment   : ajusta_total
+    VentaItem ||--o{ SalesAdjustment : ajusta_subtotal
+    Promotion ||--o{ SalesAdjustment : aplica_promocion
 
-### `Promotion`
-
-```python
-class Promotion(models.Model):
-    SCOPE_ORDER = "order"
-    SCOPE_ITEM  = "item"
-    MODE_PERCENT = "percent"
-    MODE_AMOUNT  = "amount"
-
-    empresa   = models.ForeignKey("org.Empresa", on_delete=models.CASCADE, related_name="promotions")
-    sucursal  = models.ForeignKey("org.Sucursal", on_delete=models.CASCADE, null=True, blank=True, related_name="promotions")
-    nombre    = models.CharField(max_length=120)
-    codigo    = models.CharField(max_length=50, blank=True, default="")
-    activo    = models.BooleanField(default=True)
-    valido_desde = models.DateField(null=True, blank=True)
-    valido_hasta = models.DateField(null=True, blank=True)
-
-    # añadidos
-    min_total   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    descripcion = models.TextField(null=True, blank=True)
-
-    scope     = models.CharField(max_length=10, choices=[(SCOPE_ORDER,"Por venta"), (SCOPE_ITEM,"Por ítem")], default=SCOPE_ORDER)
-    mode      = models.CharField(max_length=10, choices=[(MODE_PERCENT,"%"), (MODE_AMOUNT,"Monto")], default=MODE_PERCENT)
-    value     = models.DecimalField(max_digits=10, decimal_places=2) # % 0..100 o monto
-    stackable = models.BooleanField(default=True)  # puede acumularse con otras
-    prioridad = models.PositiveSmallIntegerField(default=10)
-    payment_method_code = models.CharField(max_length=40, blank=True, default="")
-
-    creado = models.DateTimeField(auto_now_add=True)
-    actualizado = models.DateTimeField(auto_now=True)
-
-    def esta_vigente(self, fecha=None) -> bool:
-        fecha = fecha or timezone.localdate()
-        if not self.activo:
-            return False
-        if self.valido_desde and fecha < self.valido_desde:
-            return False
-        if self.valido_hasta and fecha > self.valido_hasta:
-            return False
-        return True
+    %% Extras fuera del módulo (no definidas aquí)
+    Venta ||..|| Comprobante : emite
+    Venta ||..o{ Pago        : registra
 ```
 
-**Notas**
+**Significado práctico**
 
-- **Tenancy**: obligatoria por `empresa`, opcional por `sucursal`.
-- **Vigencia** diaria (`DateField`); las reglas a hora exacta no son necesarias.
-- **min_total** permite condicionar el mínimo en el **scope de venta**; se valida en `services/discounts.py` si se quiere endurecer.
+- `Venta` es la entidad madre: su **estado**, **totales** y **relaciones** determinan qué acciones son válidas.
+- `Promotion` describe reglas de descuento parametrizadas; `SalesAdjustment` es la **aplicación** concreta a una venta o a un ítem.
+- `VentaItem` cachea precio/condiciones al momento del agregado (para trazabilidad).
 
-### `SalesAdjustment`
+---
 
-```python
-class SalesAdjustment(models.Model):
-    KIND_ORDER = "order"  # ajuste aplicado a la venta completa
-    KIND_ITEM  = "item"   # ajuste aplicado a un ítem particular
-    MODE_PERCENT = "percent"
-    MODE_AMOUNT  = "amount"
-    SOURCE_MANUAL = "manual"
-    SOURCE_PROMO  = "promo"
-    SOURCE_PAYMENT= "payment"
+## 4) Máquina de estados (FSM) de la Venta
 
-    venta = models.ForeignKey("sales.Venta", on_delete=models.CASCADE, related_name="adjustments")
-    item  = models.ForeignKey("sales.VentaItem", on_delete=models.CASCADE, null=True, blank=True, related_name="adjustments")
+Flujo operativo de trabajo (independiente del pago).
 
-    kind  = models.CharField(max_length=10, choices=[(KIND_ORDER,"Venta"), (KIND_ITEM,"Ítem")])
-    mode  = models.CharField(max_length=10, choices=[(MODE_PERCENT,"%"), (MODE_AMOUNT,"Monto")])
-    value = models.DecimalField(max_digits=10, decimal_places=2)  # % 0..100 o monto ≥ 0
+```mermaid
+stateDiagram-v2
+    [*] --> borrador
+    borrador --> en_proceso: iniciar_trabajo
+    en_proceso --> terminado: finalizar_trabajo
 
-    source    = models.CharField(max_length=10, choices=[(SOURCE_MANUAL,"Manual"), (SOURCE_PROMO,"Promoción"), (SOURCE_PAYMENT,"Método de pago")], default=SOURCE_MANUAL)
-    promotion = models.ForeignKey("sales.Promotion", null=True, blank=True, on_delete=models.SET_NULL, related_name="applied_adjustments")
+    %% Pagos pueden cerrar en pagado cuando saldo=0
+    borrador --> pagado: saldo_pendiente=0
+    en_proceso --> pagado: saldo_pendiente=0
+    terminado --> pagado: saldo_pendiente=0
 
-    motivo       = models.CharField(max_length=160, blank=True, default="")
-    aplicado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
-    creado       = models.DateTimeField(auto_now_add=True)
+    %% Cancelación (regla de negocio) antes de estados finales
+    borrador --> cancelado: cancelar
+    en_proceso --> cancelado: cancelar
+    terminado --> cancelado: cancelar
 
-    class Meta:
-        indexes = [
-            models.Index(fields=["venta", "kind"]),
-            models.Index(fields=["venta", "promotion"]),
-        ]
-        constraints = [
-            # Unicidad de PROMO por target VENTA (item es NULL)
-            models.UniqueConstraint(
-                fields=["venta", "promotion"],
-                condition=models.Q(promotion__isnull=False, item__isnull=True),
-                name="uq_salesadj_unique_promo_order",
-            ),
-            # Unicidad de PROMO por target ÍTEM (item NOT NULL)
-            models.UniqueConstraint(
-                fields=["venta", "item", "promotion"],
-                condition=models.Q(promotion__isnull=False, item__isnull=False),
-                name="uq_salesadj_unique_promo_item",
-            ),
-            # Consistencia kind/item
-            models.CheckConstraint(
-                check=(
-                    (models.Q(kind="order") & models.Q(item__isnull=True)) |
-                    (models.Q(kind="item")  & models.Q(item__isnull=False))
-                ),
-                name="ck_salesadj_kind_item_consistency",
-            ),
-            # Rango de value por modo
-            models.CheckConstraint(
-                check=(
-                    (models.Q(mode="percent") & models.Q(value__gte=0) & models.Q(value__lte=100)) |
-                    (models.Q(mode="amount")  & models.Q(value__gte=0))
-                ),
-                name="ck_salesadj_value_range_by_mode",
-            ),
-        ]
+    pagado --> [*]
+    cancelado --> [*]
 ```
 
-**Consecuencia:** intentar aplicar dos veces la **misma promo** al mismo **target** (venta o un ítem concreto) levanta `IntegrityError` y es manejado en `services/discounts.py` y vistas.
+**Políticas asociadas**
+
+- **Edición de ítems y ajustes** permitida en `borrador` y `en_proceso`; **bloqueada** desde `terminado`.
+- **Comprobante** solo cuando la venta está **pagada** (independiente del proceso).
+- **Notificaciones** al cliente cuando la venta está **terminada** (pago puede ser antes o después).
+- El cambio de estado respeta reglas de **`fsm.py`** y se canaliza por **servicios**.
 
 ---
 
-## 4) Servicios de Descuentos/Promos (`services/discounts.py`)
+## 5) Totales: cómo se calculan
 
-### Helpers clave
+Pipeline conceptual de cómputo de montos.
 
-- `_assert_ajustable(venta)` → permite ajustes solo en `borrador` / `en_proceso` (bloquea en `terminado` o `cancelado`).
-- `_validate_mode_value(mode, value)` → rangos válidos.
-- `_promo_esta_vigente(promo, fecha=None)` → usa los campos **correctos** `valido_desde/valido_hasta`.
-- `_require_perm(actor, empresa, perm)` → **guard** de permisos (defensa en profundidad).
-
-### API principal
-
-```python
-@transaction.atomic
-def agregar_descuento_manual_venta(*, venta: Venta, mode: str, value: Decimal, motivo: str="", actor=None) -> SalesAdjustment
-
-@transaction.atomic
-def agregar_descuento_manual_item(*, item: VentaItem, mode: str, value: Decimal, motivo: str="", actor=None) -> SalesAdjustment
-
-@transaction.atomic
-def eliminar_ajuste(*, ajuste: SalesAdjustment) -> None
-
-@transaction.atomic
-def aplicar_promocion(*, venta: Venta, promo: Promotion, item: Optional[VentaItem]=None, motivo: str="", actor=None) -> SalesAdjustment
+```mermaid
+flowchart TD
+    A[Items de Venta] --> B[Subtotal Items]
+    B --> C[SalesAdjustments por Ítem]
+    C --> D[Subtotal Ajustado de Ítems]
+    D --> E[SalesAdjustments por Venta]
+    E --> F[Subtotal Final con Descuentos]
+    F --> G[Propina]
+    G --> H[Total]
+    H --> I[Pagos registrados]
+    I --> J[Saldo pendiente]
 ```
 
-**Reglas en `aplicar_promocion`** (resumido):
+**Puntos a entender**
 
-- Requiere `SALES_PROMO_APPLY` (admin + operador).
-- Promo **activa y vigente** en fecha.
-- `scope="item"` → requiere `item` propio de la venta; `scope="order"` → `item` **no** permitido.
-- Unicidad de aplicación por target (DB + catch de `IntegrityError` → `ValidationError` legible).
-- `recalcular_totales(venta)` al final (sin romper el flujo).
+- Los **ajustes** pueden ser **por ítem** o **por venta**; cada uno aplica en su etapa correspondiente.
+- Un ajuste puede ser **porcentaje** o **monto**; la lógica y validación viven en `services/discounts.py`.
+- **Recalcular** sucede automáticamente tras mutaciones (agregar/quitar ítems, aplicar/quitar ajustes, registrar pagos).
 
-### Listados (para UI)
+---
 
-```python
-def listar_promociones_vigentes_para_venta(*, venta: Venta) -> list[Promotion]
+## 6) Roles y permisos (quién puede hacer qué)
 
-def listar_promociones_vigentes_para_item(*, venta: Venta) -> list[Promotion]
+El módulo no decide roles, sino que **consume** permisos desde `apps.org.permissions`. La matriz operativa es:
+
+```mermaid
+classDiagram
+    class Permisos {
+      SALES_VIEW
+      SALES_CREATE
+      SALES_EDIT
+      SALES_FINALIZE
+      SALES_CANCEL
+      SALES_ITEM_ADD
+      SALES_ITEM_UPDATE_QTY
+      SALES_ITEM_REMOVE
+
+      SALES_PROMO_MANAGE     %% admin: gestionar promociones
+      SALES_PROMO_APPLY      %% admin + operador: aplicar a ventas
+      SALES_DISCOUNT_ADD     %% admin: desc. manuales
+      SALES_DISCOUNT_REMOVE  %% admin: quitar cualquier ajuste
+    }
+
+    class Admin {
+      +ver ventas
+      +crear/editar ventas
+      +gestionar ítems
+      +transiciones (iniciar/finalizar/cancelar)
+      +gestionar promociones (CRUD/activar)
+      +aplicar promociones
+      +aplicar descuentos manuales
+      +eliminar ajustes
+    }
+
+    class Operador {
+      +ver ventas
+      +crear/editar ventas
+      +gestionar ítems
+      +transiciones (según política)
+      +aplicar promociones
+      -gestionar promociones (no)
+      -descuentos manuales (no)
+      -eliminar ajustes (no)
+    }
+
+    Permisos <.. Admin
+    Permisos <.. Operador
 ```
 
-- Filtran por `empresa`, `sucursal` (null o igual), `scope`, `activo=True`, `esta_vigente()`, `stackable` si se desea (hoy se listan todas vigentes).
-- **Opcional**: filtrar por `min_total` cuando `scope="order"`.
+**Defensa en profundidad**
+
+- Los **templates** muestran/ocultan CTAs según flags de permiso.
+- Las **vistas** validan permisos requeridos.
+- Los **servicios** vuelven a validar permisos críticos (p. ej., descuentos manuales).
 
 ---
 
-## 5) Permisos y Roles (`apps/org/permissions.py`)
+## 7) Flujos UI principales
 
-### Nuevos permisos
+### 7.1 Crear Venta (2 pasos)
 
-- `SALES_DISCOUNT_ADD` (solo **admin**): aplicar **descuentos manuales** (venta/ítem).
-- `SALES_DISCOUNT_REMOVE` (solo **admin**): quitar **cualquier ajuste** (manual/promo/pago).
-- `SALES_PROMO_MANAGE` (solo **admin**): CRUD de **promociones**.
-- `SALES_PROMO_APPLY` (**admin + operador**): **aplicar promociones** a ventas/ítems existentes.
+1. GET: seleccionar **Cliente** → habilita **Vehículo** (solo del cliente).
+2. POST: checkboxes de **Servicios** disponibles (filtrados por sucursal/tipo de vehículo/precio vigente).
 
-### ROLE_POLICY (extracto)
-
-```python
-ROLE_POLICY = {
-    "ADMIN": (
-        # ... otros ...
-        Perm.SALES_DISCOUNT_ADD,
-        Perm.SALES_DISCOUNT_REMOVE,
-        Perm.SALES_PROMO_MANAGE,
-        Perm.SALES_PROMO_APPLY,
-    ),
-    "OPERADOR": (
-        # ... otros ...
-        Perm.SALES_PROMO_APPLY,  # puede aplicar promos creadas
-        # No tiene SALES_DISCOUNT_* ni SALES_PROMO_MANAGE
-    ),
-}
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant V as Vista Create
+    participant S as Service (sales)
+    U->>V: GET /ventas/nueva/
+    V-->>U: Form Cliente + Vehículo (auto-submit)
+    U->>V: GET con cliente seleccionado
+    V-->>U: Vehículos del cliente + Servicios disponibles
+    U->>V: POST (cliente, vehiculo, servicios, notas)
+    V->>S: crear_venta + agregar_items
+    S-->>V: OK (venta en borrador)
+    V-->>U: Redirect a Detail
 ```
 
-> **Importante**: las **vistas** y los **services** verifican estos permisos. La UI (templates) solo refleja flags.
+### 7.2 Detalle de Venta
 
----
+- **Secciones:** Meta (cliente/vehículo/sucursal/fechas), **Ítems**, **Resumen**, **Comprobante**, **Notificaciones**, **Descuentos y promociones**.
+- **Acciones rápidas** según estado/permiso: iniciar, finalizar, cancelar; agregar/quitar ítems; aplicar promos; descuentos manuales (solo admin).
 
-## 6) Vistas nuevas / movidas
+### 7.3 Aplicar Promoción
 
-### `views_promotions.py`
-
-- **Gestión (solo admin / `SALES_PROMO_MANAGE`)**
-  - `PromotionListView`, `PromotionCreateView`, `PromotionUpdateView`, `PromotionDeleteView`, `PromotionToggleActiveView`
-- **Acciones sobre ventas**
-  - `PromotionApplyView` (ADMIN + OPERADOR / `SALES_PROMO_APPLY`)
-  - `DiscountCreateOrderView` (solo ADMIN / `SALES_DISCOUNT_ADD`)
-  - `DiscountCreateItemView` (solo ADMIN / `SALES_DISCOUNT_ADD`)
-  - `DiscountDeleteView` (solo ADMIN / `SALES_DISCOUNT_REMOVE`)
-
-> Las 4 vistas de acciones sobre ventas se **movieron** desde `views.py` a `views_promotions.py`.
-
-### `views.py` (VentaDetailView)
-
-- Contexto ampliado para descuentos/promos:
-  - `ajustes`, `order_discount_form`, `item_discount_form`, `apply_promo_form`
-  - `promos_order`, `promos_item`
-  - Flags: `puede_agregar_descuento`, `puede_quitar_descuento`, `puede_aplicar_promo`, `descuentos_habilitados`
-
----
-
-## 7) URLs (extracto) — `apps/sales/urls.py`
-
-```python
-# Descuentos / Promos en ventas
-path("<uuid:pk>/descuentos/agregar/venta/", views_promotions.DiscountCreateOrderView.as_view(), name="discount_add_order"),
-path("<uuid:pk>/descuentos/agregar/item/",  views_promotions.DiscountCreateItemView.as_view(),  name="discount_add_item"),
-path("<uuid:pk>/descuentos/<int:adj_id>/eliminar/", views_promotions.DiscountDeleteView.as_view(), name="discount_delete"),
-path("<uuid:pk>/promos/aplicar/", views_promotions.PromotionApplyView.as_view(), name="promo_apply"),
-
-# Gestión de promociones (solo admin)
-path("promos/",                    views_promotions.PromotionListView.as_view(),   name="promos_list"),
-path("promos/nueva/",              views_promotions.PromotionCreateView.as_view(), name="promos_create"),
-path("promos/<int:pk>/editar/",    views_promotions.PromotionUpdateView.as_view(), name="promos_update"),
-path("promos/<int:pk>/eliminar/",  views_promotions.PromotionDeleteView.as_view(), name="promos_delete"),
-path("promos/<int:pk>/toggle/",    views_promotions.PromotionToggleActiveView.as_view(), name="promos_toggle"),
+```mermaid
+sequenceDiagram
+    participant U as Usuario (Admin u Operador)
+    participant D as View Detail
+    participant P as View PromotionApply
+    participant S as Service discounts
+    U->>D: Abrir modal Promo (venta o ítem)
+    U->>P: POST promotion_id [+ item_id]
+    P->>S: aplicar_promocion(...)
+    S-->>P: Ajuste creado + recalcular totales
+    P-->>U: Mensaje éxito + redirect a Detail
 ```
 
----
+### 7.4 Descuento Manual (solo Admin)
 
-## 8) Templates
-
-### `templates/sales/_discounts_card.html`
-
-- **Tabla** de ajustes (tipo, modo, valor, motivo/promo, ítem, origen) + acción eliminar (solo admin y estado habilitado).
-- **Modales**:
-  - **Descuento (venta/ítem)** → Solo admin (`puede_agregar_descuento`).
-  - **Promo (venta/ítem)** → Admin + Operador (`puede_aplicar_promo`).
-- **Flags** para deshabilitar por estado: `descuentos_habilitados` (solo `borrador/en_proceso`).
-
-### `templates/sales/_summary_card.html`
-
-- Muestra **Subtotal / Descuento / Propina / Total / Saldo**.
-- Hint cuando la venta está pagada o cuando saldo=0 aún no marcado como `pagada`.
-
-### `templates/sales/detail.html`
-
-- Incluye `_discounts_card.html`.
-- Mantiene cards de **Comprobante** y **Notificaciones** con lógicas previas.
-
-### `templates/sales/promotions/*`
-
-- CRUD simple de **promociones** (solo admin).
-- Formularios Bootstrap con `PromotionForm`.
+Igual a la promo, pero con formularios de modo/valor/motivo y validación de permisos más estricta (no visible ni permitido al operador).
 
 ---
 
-## 9) Forms
+## 8) Rutas (enrutamiento público)
 
-- `OrderDiscountForm(mode, value, motivo)` — venta completa.
-- `ItemDiscountForm(item_id, mode, value, motivo)` — por ítem.
-- `ApplyPromotionForm(promotion_id, [item_id])` — aplica promo existente (scope según promo).
-- `PromotionForm` — alta/edición de promos; incluye `min_total`, `descripcion` y filtros por sucursal.
+> Prefijo típico en `urls.py` del proyecto: `path("ventas/", include(("apps.sales.urls", "sales"), namespace="sales"))`
+
+**Ventas**
+
+- `GET /ventas/` — listado, con filtros por estado/pago/sucursal, acciones rápidas por fila.
+- `GET|POST /ventas/nueva/` — flujo de alta (cliente/vehículo/servicios).
+- `GET /ventas/<uuid:pk>/` — detalle integral.
+- `POST /ventas/<uuid:pk>/iniciar/` — iniciar trabajo.
+- `POST /ventas/<uuid:pk>/finalizar/` — finalizar trabajo.
+- `POST /ventas/<uuid:pk>/cancelar/` — cancelar venta.
+- `POST /ventas/<uuid:pk>/items/agregar/` — agregar servicio.
+- `POST /ventas/<uuid:pk>/items/<int:item_id>/eliminar/` — quitar servicio.
+
+**Promos/Ajustes sobre ventas**
+
+- `POST /ventas/<uuid:pk>/promos/aplicar/` — aplicar promoción (admin + operador).
+- `POST /ventas/<uuid:pk>/descuentos/agregar/venta/` — descuento manual (solo admin).
+- `POST /ventas/<uuid:pk>/descuentos/agregar/item/` — descuento manual por ítem (solo admin).
+- `POST /ventas/<uuid:pk>/descuentos/<int:adj_id>/eliminar/` — quitar ajuste (solo admin).
+
+**Gestión de Promos (solo Admin)**
+
+- `GET /ventas/promos/` — listado de promociones.
+- `GET|POST /ventas/promos/nueva/` — crear.
+- `GET|POST /ventas/promos/<int:pk>/editar/` — editar.
+- `POST /ventas/promos/<int:pk>/eliminar/` — eliminar.
+- `POST /ventas/promos/<int:pk>/toggle/` — activar/desactivar.
 
 ---
 
-## 10) Admin (`apps/sales/admin.py`)
+## 9) Integraciones y dependencias externas
 
-- Registrados **Promotion** y **SalesAdjustment** con list_display, filtros por empresa/sucursal/activo, búsqueda por nombre/código, inlines si aplica.
-- Venta y VentaItem sin cambios funcionales, pero se pueden mostrar **ajustes** relacionados en read-only.
-
----
-
-## 11) Cálculos y Recalculo (`calculations.py` + `services/sales.py`)
-
-- Totales consideran: **items** → **ajustes** (por ítem y por venta) → **propina** → **total** → **saldo** (contra pagos).
-- Cada mutación (items/ajustes/pagos) hace `recalcular_totales(venta)`; capa de servicios orquesta.
-- **Idempotencia**: si no cambian valores, no rompe flujo (logs informativos).
+- **Pricing**: resolución de precios vigentes por sucursal y tipo de vehículo. El selector de servicios **solo** ofrece lo que tiene precio vigente.
+- **Payments**: registra pagos y recalcula saldo; si el saldo llega a 0 y la venta no está cancelada, el ciclo normal marca **pagado**.
+- **Invoicing**: emisión de comprobantes únicamente si la venta está **pagada**; puede ser **auto** desde un hook si está habilitado.
+- **Notifications**: envío por WhatsApp cuando la venta está **terminada** y existen plantillas activas.
 
 ---
 
-## 12) Seguridad / Tenancy
+## 10) Seguridad y Tenancy
 
-- **Todas** las vistas usan `EmpresaPermRequiredMixin` + **querysets** filtrados por `empresa=self.empresa_activa`.
-- **Sucursal** siempre tomada del middleware (`request.sucursal_activa`) y validada en resoluciones de precio / promos por sucursal.
+- Todas las vistas usan el **mixin de empresa** y filtran por **empresa activa**.
+- **Sucursal activa** proviene del middleware y limita precios/promos/servicios a mostrar/aplicar.
+- **Permisos** se evalúan en **tres capas**:
+  1. **Templates**: ocultan/inhabilitan CTAs (usabilidad).
+  2. **Vistas**: bloquean acceso (seguridad).
+  3. **Servicios**: vuelven a validar (defensa en profundidad).
+
+---
+
+## 11) Promociones y Descuentos — reglas de negocio
+
+- **Vigencia**: promo activa y dentro de su ventana (`valido_desde`/`valido_hasta`).
+- **Scope**: `venta` o `ítem`. Si es por ítem, exige target explícito.
+- **Unicidad**: la **misma** promoción no puede aplicarse dos veces al **mismo** target; lo garantiza la base con constraints.
+- **Stacking**: por defecto se permite acumular (configurable por `stackable`, prioridad y reglas futuras).
 - **Permisos**:
-  - Operador **puede** aplicar promos (`SALES_PROMO_APPLY`).
-  - Operador **NO** puede cargar descuentos manuales ni gestionar promos (`SALES_DISCOUNT_*`, `SALES_PROMO_MANAGE`).
-- **Defensa en profundidad**: los **services** (`discounts.py`) vuelven a chequear permisos con `_require_perm`.
+  - **Aplicar promoción**: Admin y Operador.
+  - **Descuento manual** y **Eliminar ajustes**: solo Admin.
+  - **Gestionar promociones** (CRUD/activar): solo Admin.
+- **Estados**: ajustes solo en `borrador` / `en_proceso` (bloqueo en `terminado`/`cancelado`).
 
 ---
 
-## 13) Migrations
+## 12) Performance y calidad
 
-Incluyen:
-
-- Creación de `Promotion` y `SalesAdjustment`.
-- Campos extra en `Promotion` (`min_total`, `descripcion`).
-- Índices y constraints de unicidad y check en `SalesAdjustment`.
-
-> **Orden sugerida**: aplicar `0003` → `0004` → `0005` → `0006` según el árbol generado.
+- **Querysets** en vistas: `select_related` / `prefetch_related` donde corresponde (cliente, vehículo, ítems, ajustes, pagos).
+- **Plantillas** simples con fragmentos parciales reutilizables.
+- **Recalcular** solo tras cambios; operaciones idempotentes donde es razonable.
+- **Mensajería** coherente: todas las acciones informan éxito/error en la UI.
 
 ---
 
-## 14) Rúbrica de QA (checklist)
+## 13) Testing recomendado (enfoque)
 
-- [ ] Operador **NO** ve botones de **Descuento (venta/ítem)**.
-- [ ] Operador **SÍ** ve botones de **Promo (venta/ítem)** y puede aplicarlas.
-- [ ] Admin puede **crear/editar/desactivar** promos y **aplicar descuentos manuales**.
-- [ ] No se puede **aplicar dos veces** la **misma promo** al **mismo target** (venta o ítem) → UI muestra error legible si API devuelve `ValidationError` por unicidad.
-- [ ] Ajustes **bloqueados** cuando venta está `terminado` o `cancelado`.
-- [ ] Totales recalculan tras cada ajuste (tabla refleja valor correcto).
-- [ ] **create → detail** flujo OK; servicios disponibles según **sucursal activa** y **tipo de vehículo**.
-- [ ] **Notificaciones**: solo habilitadas en `terminado` (badge WA).
-- [ ] **Comprobante**: CTA visible solo cuando **pagada** y sin comprobante.
+- **Unit**:
+  - `fsm`: transiciones válidas e inválidas.
+  - `calculations`: totales ante combinaciones de ítems y ajustes.
+  - `discounts`: vigencia, unicidad, permisos, aplicar/eliminar y side-effects (recalcular).
+- **Integration**:
+  - Flujos UI (crear → detalle → aplicar promo → finalizar → pagar → emitir).
+  - Permisos (operador vs admin) en vistas y services.
+- **E2E feliz y con errores**:
+  - Promo duplicada → error legible.
+  - Descuento manual por operador → prohibido.
+  - Editar ítems en terminado → bloqueado.
 
 ---
 
-## 15) Snippets clave
+## 14) Operación diaria (guía breve)
 
-### Guard de permisos en service
+- **Operador**:
+  1. Crea venta (selecciona cliente/vehículo) y agrega servicios.
+  2. Aplica **promociones** vigentes (si hay).
+  3. Inicia/finaliza el trabajo.
+  4. Registra pagos del cliente.
+  5. Cuando el saldo sea 0, la venta queda **pagada**; si corresponde, emissão del comprobante.
+- **Admin**:
+  - Configura **promociones** (empresa/sucursal, vigencia, modo, valor, prioridad, stacking).
+  - Puede aplicar **descuentos manuales** (casos excepcionales) y **eliminar ajustes**.
+  - Supervisa cierre de ventas, emisión y reportes.
 
-```python
-from django.core.exceptions import PermissionDenied
-from apps.org.permissions import has_empresa_perm, Perm
+---
 
-def _require_perm(actor, empresa, perm):
-    if actor is None or not has_empresa_perm(actor, empresa, perm):
-        raise PermissionDenied("No tenés permisos para esta acción.")
+## 15) Glosario mínimo
+
+- **Venta**: orden de servicio; unidad de trabajo sobre un vehículo para un cliente.
+- **Ítem**: servicio prestado dentro de la venta.
+- **Ajuste**: modificación del subtotal (por ítem o por venta), originada por **promoción**, **descuento manual** o **método de pago**.
+- **Promoción**: regla parametrizable (vigencia, modo, valor, alcance) que genera ajustes al aplicarse.
+- **Saldo**: total menos pagos aplicados; si llega a 0 → **pagada**.
+- **Terminado**: estado operativo que indica que el trabajo finalizó (independiente del pago).
+
+---
+
+## 16) Diagramas de referencia
+
+### 16.1 Arquitectura lógica (capas)
+
+```mermaid
+graph TD
+    UI[Templates] --> V[Views]
+    V --> S1[services.sales]
+    V --> S2[services.items]
+    V --> S3[services.discounts]
+    S1 --> M[Models]
+    S2 --> M
+    S3 --> M
+    V --> FSM[fsm]
+    V --> CALC[calculations]
+    V --> EXT[(Pricing/Payments\nInvoicing/Notifications)]
 ```
 
-### Vigencia correcta de promo
+### 16.2 Secuencia aplicar descuento/promoción
 
-```python
-def _promo_esta_vigente(promo: Promotion, fecha=None) -> bool:
-    fecha = fecha or timezone.localdate()
-    return promo.esta_vigente(fecha=fecha)
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant VW as Vista Venta (Detail)
+    participant VP as Vista Acción (Promo/Desc)
+    participant SD as services.discounts
+    participant CALC as calculations
+
+    U->>VW: Abrir modal
+    U->>VP: POST (datos)
+    VP->>SD: Validar permisos/estado/vigencia/unicidad
+    SD->>M: Crear ajuste
+    SD->>CALC: Recalcular totales
+    CALC-->>SD: Totales actualizados
+    SD-->>VP: OK
+    VP-->>U: Mensaje + redirect
 ```
 
-### Unicidad de aplicación (DB + catch)
+### 16.3 Matriz de edición por estado
 
-```python
-try:
-    adj = SalesAdjustment.objects.create(...)
-except IntegrityError:
-    raise ValidationError("Esta promoción ya fue aplicada a este destino.")
+```mermaid
+classDiagram
+    class Borrador {
+      +Editar ítems: Sí
+      +Aplicar promos: Sí
+      +Desc. manuales: Sí (Admin)
+      +Eliminar ajustes: Sí (Admin)
+    }
+    class EnProceso {
+      +Editar ítems: Sí
+      +Aplicar promos: Sí
+      +Desc. manuales: Sí (Admin)
+      +Eliminar ajustes: Sí (Admin)
+    }
+    class Terminado {
+      +Editar ítems: No
+      +Aplicar promos: No
+      +Desc. manuales: No
+      +Eliminar ajustes: No
+    }
+    class Cancelado {
+      +Acciones: No
+    }
 ```
 
 ---
 
-## 16) Documentación de rutas (uso)
+## 17) Buenas prácticas operativas
 
-- **Venta detalle**: aplicar promo **por venta**  
-  `POST /ventas/<venta_id>/promos/aplicar/ { promotion_id }`
-
-- **Venta detalle**: aplicar promo **por ítem**  
-  `POST /ventas/<venta_id>/promos/aplicar/ { promotion_id, item_id }`
-
-- **Descuento manual (admin)**
-
-  - Venta: `POST /ventas/<venta_id>/descuentos/agregar/venta/ { mode, value, motivo? }`
-  - Ítem: `POST /ventas/<venta_id>/descuentos/agregar/item/  { item_id, mode, value, motivo? }`
-
-- **Eliminar ajuste (admin)**  
-  `POST /ventas/<venta_id>/descuentos/<adj_id>/eliminar/`
-
-- **Gestión de Promos (admin)**  
-  `GET /ventas/promos/` — lista  
-  `GET/POST /ventas/promos/nueva/` — crear  
-  `GET/POST /ventas/promos/<id>/editar/` — editar  
-  `POST /ventas/promos/<id>/eliminar/` — eliminar  
-  `POST /ventas/promos/<id>/toggle/` — activar/desactivar
+- Mantener **precios** por sucursal y tipo de vehículo al día para que el selector ofrezca solo servicios vigentes.
+- Usar **promociones** para políticas comerciales recurrentes y **descuentos manuales** solo como excepción (admin).
+- Revisar **mensajería** de error/éxito para asegurar visibilidad de las acciones a los usuarios.
+- Monitorear el **listado de ventas** con filtros para trabajo en curso (en proceso) y pendientes de notificación o pago.
 
 ---
 
-## 17) Roadmap corto
+## 18) Preguntas frecuentes (FAQ)
 
-- Reglas de **stacking** más ricas (prioridad, exclusiones)
-- **Condiciones** adicionales (por servicio, por tipo de vehículo, por cliente)
-- **Código promocional** (validación por input del operador)
-- **Reportes**: top promos usadas, descuentos otorgados por usuario/periodo
-- Tests unitarios e integración (services, fsm, permisos, templates)
+- **¿Puedo facturar sin que esté pagada?** No, la emisión exige estado **pagada**.
+- **¿Puedo notificar si no está terminada?** No, las notificaciones se habilitan en **terminado**.
+- **¿Por qué no veo un servicio en crear venta?** Probablemente no tiene **precio vigente** para la sucursal/tipo de vehículo.
+- **¿Por qué no puedo aplicar una promo dos veces?** La base asegura **unicidad** por target; si ya se aplicó, se rechaza.
+- **¿El operador puede cargar descuentos manuales?** No, solo **admin**. El operador **sí** puede aplicar **promos** existentes.
 
 ---
 
-## 18) TL;DR
+## 19) Checklist de adopción
 
-- Añadimos **Promos** y **Ajustes** con **reglas pro** (unicidad por target, vigencia, permisos).
-- **Operador** solo **aplica** promos; **Admin** gestiona promos y puede cargar **descuentos manuales**.
-- Todo controlado desde la **Detail** con una card dedicada y **services** robustos que recalculan totales.
-- Constraints de DB evitan duplicados; la **capa de services** traduce a errores legibles.
+- [ ] Definir roles/usuarios y asignar permisos (Admin/Operador).
+- [ ] Configurar precios por sucursal/tipo de vehículo.
+- [ ] Crear promociones habituales (empresa/sucursal, vigencias, prioridades).
+- [ ] Verificar plantillas de WhatsApp (si se usan notificaciones).
+- [ ] Validar que invoicing esté integrado si se requiere emisión.
+- [ ] Ejecutar QA básico del flujo completo (crear → operar → pagar → emitir → notificar).
+
+---
+
+## 20) Contactos y mantenimiento
+
+- **Propietario del módulo:** Equipo de Ventas.
+- **Mantenedor técnico:** Equipo de Backend.
+- **Soporte UI:** Equipo de Frontend.
+- **Dependencias críticas:** Pricing, Payments, Invoicing, Notifications (coordinar cambios).
+
+---
+
+**Resumen**  
+El módulo `apps/sales` ofrece una gestión robusta de ventas con un flujo operativo claro, reglas de negocio estrictas para estados, totales y descuentos, y una separación nítida de responsabilidades (servicios, vistas, plantillas). La seguridad por permisos y la integridad a nivel de base protegen los procesos, mientras que la UI facilita el trabajo diario para operadores y administradores.
 
 # Módulo 8 — `apps/payments` (Pagos)
 
@@ -2910,11 +2898,13 @@ apps/payments/
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                     # MedioPago, Pago
-├─ urls.py                       # Rutas (crear pago, confirmación sobrepago, listado opcional)
-├─ views.py                      # Vistas server-rendered (form de pago, confirmación/split)
+├─ urls.py                       # Rutas (crear pago, confirmar sobrepago, listado; CRUD de medios)
+├─ views.py                      # Vistas de pagos (form de pago + sobrepago integrado + list)
+├─ views_medios.py               # Vistas de gestión de medios de pago (list/create/update/toggle)
 ├─ forms/
 │  ├─ __init__.py
-│  └─ payment.py                 # PaymentForm (medio, monto, es_propina, referencia, idempotency_key)
+│  ├─ payment.py                 # PaymentForm (medio, monto, es_propina, referencia, idempotency_key, notas)
+│  └─ medio_pago.py              # MedioPagoForm (nombre, activo) con validaciones por empresa
 ├─ services/
 │  ├─ __init__.py
 │  └─ payments.py                # registrar_pago(), recalcular_saldo(), OverpayNeedsConfirmation
@@ -2922,9 +2912,10 @@ apps/payments/
 ├─ validators.py                 # (Opcional) Reglas extra; parte quedó en services/models
 ├─ templates/
 │  └─ payments/
-│     ├─ form.html               # Alta de pago (desde detalle de venta)
-│     ├─ confirm_overpay.html    # Confirmación de sobrepago → registrar diferencia como propina
+│     ├─ form.html               # Alta de pago (desde detalle de venta), modal de sobrepago
 │     ├─ list.html               # (Opcional) Listado global/por fecha
+│     ├─ medios_list.html        # Gestión de medios (admin)
+│     ├─ medios_form.html        # Nuevo/Editar medio (admin)
 │     └─ _summary_sale.html      # (Opcional) Resumen venta+saldo para sidebar
 └─ static/
    └─ payments/
@@ -2934,31 +2925,34 @@ apps/payments/
 
 **Cambios clave vs. borrador anterior**
 
-- Se incorpora **`MedioPago`** por empresa (único `empresa+nombre`, `activo`).
-- `Pago` tiene `es_propina` y **constraint** `monto > 0`. Idempotencia por `(venta, idempotency_key)` (condicional).
-- **Service** `registrar_pago()` maneja **sobrepago**:
-  - Si **monto > saldo** y `es_propina=False` → lanza `OverpayNeedsConfirmation(saldo, monto)`.
-  - Si se confirma (o `auto_split_propina=True`) → **split**: crea **2 pagos**  
-    (uno por el **saldo** `es_propina=False`, otro por la **diferencia** `es_propina=True`).
-- **recalcular_saldo()** descuenta solo **pagos no propina** y, si `saldo == 0` y la venta **no está cancelada**, llama a `sales.services.marcar_pagada()`.
+- **Permisos granulares por rol** integrados con la infraestructura común (`apps.org.permissions`).
+  - Nuevos **Perm**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`, `PAYMENTS_EDIT`, `PAYMENTS_DELETE`, `PAYMENTS_CONFIG`.
+  - Mapeo en `ROLE_POLICY`: **admin** acceso total; **operador** crear/ver; **supervisor** ver.
+- Todas las CBVs usan **`EmpresaPermRequiredMixin`** (no `LoginRequiredMixin` directo) y **Tenancy** desde `EmpresaContextMixin`.
+  - Las vistas definen `required_perms = (Perm.XXX,)` y **filtran por `self.empresa_activa`**.
+- **Flags de UI** en contextos: `puede_crear`, `puede_configurar`, etc. para habilitar/ocultar CTAs en templates — **sin lógica de seguridad en front**.
+- Se incorporó **gestión de medios de pago** por empresa (`MedioPago`), con **CRUD** protegido por `PAYMENTS_CONFIG`.
 
 ---
 
 ## 2) Endpoints
 
 ```
-GET  /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"         # form
-POST /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"         # submit
+# Pagos
+GET  /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"
+POST /ventas/<uuid:venta_id>/pagos/nuevo/                name="payments:create"
+GET  /pagos/                                             name="payments:list"       # opcional
 
-# Flujo de sobrepago (confirmación)
-GET  /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/  name="payments:confirm_overpay"  # muestra confirmación
-POST /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/  name="payments:confirm_overpay"  # hace el split
-
-# (Opcional) Listado global
-GET  /pagos/                                             name="payments:list"
+# Medios de pago (configuración admin)
+GET  /pagos/medios/                                      name="payments:medios_list"
+GET  /pagos/medios/nuevo/                                name="payments:medios_create"
+POST /pagos/medios/nuevo/                                name="payments:medios_create"
+GET  /pagos/medios/<int:pk>/editar/                      name="payments:medios_update"
+POST /pagos/medios/<int:pk>/editar/                      name="payments:medios_update"
+POST /pagos/medios/<int:pk>/toggle/                      name="payments:medios_toggle"
 ```
 
-> Entrada típica: botón **“Registrar pago”** en `sales:detail` abre `payments:create` en la misma página o en ruta dedicada.
+> Entrada típica: botón **“Registrar pago”** en `sales:detail` abre `payments:create` (misma página o ruta dedicada).
 
 ---
 
@@ -2967,21 +2961,21 @@ GET  /pagos/                                             name="payments:list"
 ### 3.1 `MedioPago`
 
 - Campos: `empresa(FK)`, `nombre`, `activo`, timestamps.
-- Constraint: único por `empresa+nombre` (evita duplicados “Efectivo”, “Transferencia BBVA”, etc.).
+- Constraint: **único** por `empresa+nombre` (evita duplicados: “Efectivo”, “Transferencia BBVA”, etc.).
 
 ### 3.2 `Pago`
 
-- Campos: `id(UUID pk)`, `venta(FK)`, `medio(FK)`, `monto(>0)`, `es_propina(bool)`, `referencia`, `notas`, `idempotency_key`, `creado_por`, timestamps.
+- Campos: `id(UUID pk)`, `venta(FK)`, `medio(FK)`, `monto(>0)`, `es_propina(bool)`, `referencia`, `notas`, `idempotency_key`, `creado_por(FK user)`, timestamps.
 - Índices: por fecha y `(venta, es_propina)`.
 - Constraint: `monto > 0`. Idempotencia condicional por `(venta, idempotency_key)` (cuando la key no es `NULL`).
 
 **Reglas de negocio**
 
 - **Propina** no descuenta saldo.
-- **Idempotencia**: si existe `(venta, idempotency_key)`, se devuelve ese pago y se recalcula saldo (no duplica).
+- **Idempotencia**: si existe `(venta, idempotency_key)`, se retorna ese pago y se recalcula saldo (no duplica).
 - **Sobrepago**:
-  - Si el pago NO es propina y `monto > saldo` → se exige confirmación del usuario para registrar **diferencia como propina**.
-  - Al confirmar (o si se pasa `auto_split_propina=True` desde la vista), se crean **dos pagos** con keys derivadas `"<key>:saldo"` y `"<key>:propina"`.
+  - Si el pago NO es propina y `monto > saldo` → se exige confirmación para registrar **diferencia como propina**.
+  - Al confirmar (o con `auto_split_propina=True`), se crean **dos pagos** con keys derivadas: `"<key>:saldo"` y `"<key>:propina"`.
 
 ---
 
@@ -2989,181 +2983,291 @@ GET  /pagos/                                             name="payments:list"
 
 ### 4.1 `registrar_pago(venta, medio, monto, es_propina, referencia, notas, creado_por, idempotency_key=None, auto_split_propina=False) -> list[Pago]`
 
-- Bloquea la venta con `select_for_update()` para consistencia de saldo en concurrencia.
-- Valida `monto > 0` y pertenencia de `medio.empresa == venta.empresa`.
+- Bloquea la venta con `select_for_update()` (consistencia en concurrencia).
+- Valida `monto > 0` y `medio.empresa == venta.empresa` (tenancy).
 - Idempotencia simple (cuando **no hay split**).
-- Recalcula saldo previo y posterior.
+- Recalcula saldo **antes y después**; si queda en 0 y venta no está “cancelado” → `sales.services.marcar_pagada(venta)`.
 - Casuística:
-  - `es_propina=True` → crea un pago (propina), recalcula y retorna.
-  - `es_propina=False` y `monto <= saldo` → crea un pago normal, recalcula y retorna.
-  - `es_propina=False` y `monto > saldo` →
-    - Si `auto_split_propina=False` → **raise `OverpayNeedsConfirmation`** con `saldo`/`monto`.
-    - Si `auto_split_propina=True` → crea **pago por saldo** + **pago propina por diferencia**; recalcula y retorna ambos.
+  - `es_propina=True` → crea pago propina, recalcula.
+  - `es_propina=False` y `monto <= saldo` → crea pago normal, recalcula.
+  - `es_propina=False` y `monto > saldo` → `OverpayNeedsConfirmation` o split automático (saldo + propina).
 
 ### 4.2 `recalcular_saldo(venta)`
 
 - Suma pagos **no propina** y setea `venta.saldo_pendiente = max(venta.total - sum, 0)` (update atómico).
-- Si `saldo == 0` y `venta.estado != "cancelado"` → `sales.services.marcar_pagada(venta)`.
+- **No** toca FSM; la transición a “pagado” se hace en `_post_recalculo_y_pagado()` del service.
 
-> **Importante:** por decisión operativa, una venta puede quedar **`pagado`** incluso si está en `borrador` o `en_proceso`. Más tarde se puede marcar **`terminado`** para notificar al cliente.
-
----
-
-## 5) Views (flujo)
-
-### 5.1 `CreatePaymentView` (`payments:create`)
-
-- GET: muestra `PaymentForm` (medio, monto, es_propina, referencia, idempotency_key).
-- POST: intenta `registrar_pago()`:
-  - Si **OK** → mensajes y redirect a `sales:detail`.
-  - Si **`OverpayNeedsConfirmation`** → guarda `monto`, `saldo`, `medio_id`, `idempotency_key`, etc. en la **session** (scope corto) y redirige a `payments:confirm_overpay`.
-
-### 5.2 `ConfirmOverpayView` (`payments:confirm_overpay`)
-
-- GET: muestra un resumen (saldo, monto ingresado, **diferencia**) con **modal** → “Registrar diferencia como propina”.
-- POST: llama `registrar_pago(..., auto_split_propina=True)` usando los valores almacenados y limpia la session. Mensaje y redirect a `sales:detail`.
-
-### 5.3 `PaymentListView` (opcional)
-
-- Filtros por rango, medio, sucursal/empresa; tabla resumida para backoffice/caja.
+> **Nota operativa:** una venta puede quedar **`pagado`** aun en `borrador` o `en_proceso`. Luego puede marcarse `terminado` para notificar.
 
 ---
 
-## 6) Forms
+## 5) Permisos y roles (integración con `apps.org.permissions`)
 
-### `PaymentForm`
+### 5.1 Enumeración de permisos (`Perm`)
 
-- Campos: `medio (ModelChoice por empresa activa y activos)`, `monto (Decimal)`, `es_propina (bool)`, `referencia (str opcional)`, `idempotency_key (str opcional)`.
-- `__init__` inyecta clases Bootstrap (`form-select` / `form-control`) y filtra `medio` por `empresa_activa`.
-- Validación `monto > 0` (duplicada con constraint/servicio por defensa en profundidad).
-
----
-
-## 7) Selectors
-
-- `pagos_por_venta(venta)`
-- `pagos_por_fecha(empresa, desde, hasta, medio=None, sucursal=None)`
-- `resumen_por_medio(empresa, rango)` → totales y propinas separadas (para cierres de caja).
-
----
-
-## 8) URLs (namespace `payments`)
-
-Prefijo recomendado en `lavaderos/urls.py` (o el que uses):
-
-```
-path("pagos/", include(("apps.payments.urls", "payments"), namespace="payments")),
+```text
+PAYMENTS_VIEW     # ver pagos (listados / lectura)
+PAYMENTS_CREATE   # registrar pago
+PAYMENTS_EDIT     # editar pago (si se habilita en roadmap)
+PAYMENTS_DELETE   # eliminar/revertir pago (si se habilita)
+PAYMENTS_CONFIG   # gestionar medios de pago (CRUD + activar/desactivar)
 ```
 
-Rutas:
+### 5.2 Política por rol (`ROLE_POLICY`)
 
-```
-GET/POST /ventas/<uuid:venta_id>/pagos/nuevo/                 name="payments:create"
-GET/POST /ventas/<uuid:venta_id>/pagos/confirmar-sobrepago/   name="payments:confirm_overpay"
-GET       /pagos/                                             name="payments:list"         # opcional
+- **admin**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`, `PAYMENTS_EDIT`, `PAYMENTS_DELETE`, `PAYMENTS_CONFIG`
+- **operador**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`
+- **supervisor**: `PAYMENTS_VIEW`
+
+> **Fuente de verdad**: `apps.org.permissions.Perm` + `ROLE_POLICY`. **No se consultan roles directos** (`EmpresaMembership.rol`) en vistas/plantillas.
+
+```mermaid
+classDiagram
+  class Perm {
+    +PAYMENTS_VIEW
+    +PAYMENTS_CREATE
+    +PAYMENTS_EDIT
+    +PAYMENTS_DELETE
+    +PAYMENTS_CONFIG
+  }
+  class Admin {
+    +ver/crear/editar/borrar pagos
+    +configurar medios
+  }
+  class Operador {
+    +ver/crear pagos
+    -editar/borrar
+    -configurar medios
+  }
+  class Supervisor {
+    +ver
+  }
+  Perm <.. Admin
+  Perm <.. Operador
+  Perm <.. Supervisor
 ```
 
 ---
 
-## 9) Integración con `sales`
+## 6) Vistas y seguridad declarativa (CBVs)
 
-- **Detalle de venta (`sales:detail`)** muestra la **tabla de pagos** y un botón **“Registrar pago”** → `payments:create`.
-- Cada registro/edición borra cache y **recalcula**: `saldo_pendiente` y eventualmente **`estado="pagado"`** (si saldo==0 y no cancelado).
-- Los **templates** no calculan nada: solo muestran **flags** y valores computados por la vista/servicio.
+### 6.1 Patrón de uso
+
+- Todas las vistas heredan de **`EmpresaPermRequiredMixin`** (que ya incluye `LoginRequiredMixin` + contexto de empresa).
+- Cada vista declara `required_perms = (Perm.XXX,)` y **filtra** por `self.empresa_activa` en `get_queryset()` / `get_object()`.
+
+**Helpers disponibles**
+
+- `has_empresa_perm(user, empresa, perm)` para **flags de UI** (no para seguridad).
+- **No** crear helpers alternativos tipo `membership.has_perm` ni mezclar `LoginRequiredMixin` con `EmpresaPermRequiredMixin`.
+
+### 6.2 Vistas de pagos (`apps/payments/views.py`)
+
+- `PaymentCreateView`
+
+  - `required_perms = (Perm.PAYMENTS_CREATE,)`
+  - Flags en contexto: `puede_crear`, `puede_configurar` (para botones/avisos).
+  - Rechaza pagos sobre ventas `cancelado`.
+  - Defensa multi-tenant extra: `medio.empresa_id == venta.empresa_id`.
+  - Sobrepago: `OverpayNeedsConfirmation` → render con aviso y `<input hidden name="confirmar_split" value="1">` al confirmar.
+
+- `PaymentListView` (opcional)
+  - `required_perms = (Perm.PAYMENTS_VIEW,)`
+  - Queryset filtrado por `venta__empresa=self.empresa_activa`.
+  - Flags en contexto: `puede_crear`, `puede_configurar`.
+
+### 6.3 Vistas de medios (`apps/payments/views_medios.py`)
+
+- `MedioPagoListView`, `MedioPagoCreateView`, `MedioPagoUpdateView`, `MedioPagoToggleActivoView`
+  - `required_perms = (Perm.PAYMENTS_CONFIG,)`
+  - Tenancy estricto: `empresa=self.empresa_activa` en queryset/objeto.
+  - Mixin auxiliar interno **`_PermCtxMixin`** inyecta `puede_configurar` en el contexto para **todas** estas vistas.
 
 ---
 
-## 10) Seguridad / Tenancy
+## 7) Templates (flags y UX)
 
-- Requiere `LoginRequired` y **empresa activa** válida en `request` (middleware Tenancy).
-- El `medio` debe pertenecer a la **misma empresa** que la venta.
-- El usuario debe tener permiso para operar la venta en esa empresa/sucursal (en MVP se asume membresía; roles finos a futuro).
-- Restringir **revertir/eliminar pagos** a rol `admin` (si se habilita) y dejar audit log.
+### 7.1 `payments/form.html` (registrar pago)
+
+- Muestra aviso si `requiere_confirmacion` (fallback servidor).
+- **Flags**:
+  - `puede_crear` → habilita botón “Registrar pago” o “Confirmar y aplicar diferencia…”.
+  - `puede_configurar` → botón “Configurar medios”.
+- Modal Bootstrap de sobrepago (JS) para confirmar el split **antes** del submit.
+
+### 7.2 `payments/list.html` (listado de pagos)
+
+- **Flags**:
+  - `puede_crear` → CTA “Registrar pago” (opcional).
+  - `puede_configurar` → CTA “Configurar medios”.
+- Tabla con: fecha, venta, método, monto, propina, usuario, referencia.
+
+### 7.3 `payments/medios_list.html`
+
+- **Flag** `puede_configurar`: muestra/oculta “Nuevo medio”, “Editar” y “Activar/Desactivar”.
+- Confirmación simple en toggle con `onsubmit="return confirm(...)"`.
+
+### 7.4 `payments/medios_form.html`
+
+- **Flag** `puede_configurar`: aviso si no tiene permiso y deshabilita el botón **(defensa visual; el mixin ya bloquea)**.
+
+### 7.5 `_summary_sale.html`
+
+- Solo lectura (cliente/vehículo/total/saldo). **No requiere flags**, salvo que se decida agregar CTAs.
+
+> **Importante**: los templates **no implementan la seguridad**; solo mejoran la UX. La seguridad está en **mixins** y **services**.
 
 ---
 
-## 11) UX / UI
+## 8) Integración con `sales` e `invoicing`
 
-- **Nada de `confirm()` nativo**. Se usan **modales Bootstrap** para confirmar acciones (sobrepago, eliminar pago si se habilita).
-- Inputs con clases Bootstrap desde el **Form**. En template: `{{ form.campo }}` + mensajes con `invalid-feedback`.
-- **Mensajes** coherentes via `django.contrib.messages` (success/info/warning/error).
-- En sobrepago, la confirmación muestra **monto**, **saldo**, **diferencia** y el texto “La diferencia se registrará como **propina**”.
-
----
-
-## 12) Errores tratados / Idempotencia
-
-- **Idempotencia**: si llega un reintento con la misma `idempotency_key`, se retorna el pago existente y se recalcula el saldo (no duplica).
-- **Con split**: se derivan keys `"<key>:saldo"` y `"<key>:propina"` para poder reintentar sin duplicar ninguna de las dos mitades.
-- **Concurrencia**: se usa `select_for_update()` sobre la venta dentro de una transacción para evitar condiciones de carrera al recalcular el saldo.
+- `sales:detail` incluye **tabla de pagos** y botón “Registrar pago” si `puede_crear`.
+- El service recalcula **saldo** tras cada operación y si llega a 0 (y venta no está cancelada) marca estado **`pagado`**.
+- `invoicing`: emisión permitida únicamente con **venta pagada**. Operador puede **ver** comprobantes y **emitir** si corresponde; Admin puede **anular** y **configurar plantillas** (alineado al esquema global de permisos).
 
 ---
 
-## 13) QA Manual (checklist)
+## 9) Tenancy (multi-empresa / sucursal)
+
+- `EmpresaPermRequiredMixin` asegura: usuario autenticado, **empresa activa** válida, **membership activa**.
+- Querysets y objetos en vistas de `payments` y `medios` se limitan a `self.empresa_activa`.
+- `PaymentForm` filtra `medio` por empresa activa y solo **activos**.
+- Validación extra en service y vistas: `medio.empresa_id == venta.empresa_id`.
+
+---
+
+## 10) Seguridad (defensa en profundidad)
+
+1. **Templates** → Flags de UI (`puede_*`) para mostrar/ocultar/habilitar CTAs.
+2. **Vistas** → `EmpresaPermRequiredMixin` + `required_perms` + filtros por empresa.
+3. **Services** → Validaciones de negocio críticas (monto>0, tenant, idempotencia, sobrepago, recalcular saldo + FSM).
+
+**Prohibido**:
+
+- Consultar `EmpresaMembership.rol` directo en vistas o templates.
+- Mezclar `LoginRequiredMixin` con `EmpresaPermRequiredMixin`.
+- Crear helpers alternativos de permisos (`membership.has_perm`, etc.).
+- Dejar restricciones solo en frontend.
+
+---
+
+## 11) Errores tratados / Idempotencia / Concurrencia
+
+- **Idempotencia**: reintentos con la misma `idempotency_key` no duplican pagos; en split se usan claves derivadas.
+- **Concurrencia**: `select_for_update()` sobre la Venta durante el registro y recálculo de saldo.
+- **Sobrepago**: excepción `OverpayNeedsConfirmation` para confirmar split a propina; modal en front y fallback en server.
+
+---
+
+## 12) QA Manual (checklist)
 
 1. **Medios** por empresa: crear “Efectivo”, “Transferencia” (activos).
 2. Crear **Venta** con total ≈ 30.000 y **saldo_pendiente** = total.
 3. Registrar **pago parcial** (10.000, no propina) → saldo = 20.000; estado **no** cambia a `pagado`.
 4. Registrar **pago exacto** por el **saldo restante** → saldo = 0; estado pasa a **`pagado`**.
 5. Registrar **propina** (marcada) → saldo **no** cambia; propinas suman aparte.
-6. Intentar **sobrepago** (p. ej. 35.000 con saldo 30.000 y `es_propina=False`) → ver **pantalla de confirmación**; aceptar → se crean **2 pagos** (30.000 no propina + 5.000 propina); saldo = 0; estado `pagado`.
+6. Intentar **sobrepago** (p. ej. 35.000 con saldo 30.000 y `es_propina=False`) → ver **modal/aviso de confirmación**; aceptar → se crean **2 pagos** (30.000 no propina + 5.000 propina); saldo = 0; estado `pagado`.
 7. Reintentar el submit con la **misma `idempotency_key`** → no duplica (mismo pago/split), saldo consistente.
-8. En detalle de venta, ver **tabla de pagos** y **saldo** correcto tras cada operación.
-9. Si la venta está `cancelado`, intentar registrar pagos → bloquear (política a definir; en MVP evitar registrar).
+8. En `sales:detail`, ver **tabla de pagos** y **saldo** correcto tras cada operación.
+9. Si la venta está `cancelado`, intentar registrar pagos → **bloquear** (mensaje).
+10. Verificar que **operador** no ve “Configurar medios” ni puede acceder a rutas de medios (403/redirect con mensaje).
 
 ---
 
-## 14) Roadmap inmediato
+## 13) Roadmap inmediato
 
 - **Reversa de pago** (soft delete/estado `revertido` + recalcular saldo + auditoría).
 - **Cierres de caja**: resumen por medio, sucursal, rango. Monto de propinas separado.
 - **Integración pasarelas** (MP/Stripe): usar `referencia` como id externo y **`idempotency_key`** origen pasarela.
-- **Roles/permisos** finos (cajero, supervisor).
+- Roles finos adicionales (p. ej. **cajero**, **supervisor de caja**).
 
 ---
 
-## 15) Notas de implementación
+## 14) Notas de implementación
 
-- Mantener el **cálculo de saldo** y **transición a `pagado`** **únicamente** en el **service** (`payments.services.payments`), nunca en templates o signals con lógica duplicada.
-- Si se usa `signals` (post-save de `Pago`), que deleguen en el **service** para evitar divergir reglas.
-- **Mensajes** cortos y claros en UI; evitar textos técnicos en errores.
+- Mantener el **cálculo de saldo** y **transición a `pagado`** **solo** en el **service** (`payments.services.payments`).
+- Si se usan `signals`, delegar en el service (evitar duplicar reglas).
+- Mensajería UI consistente con `django.contrib.messages` (success/info/warning/error).
+- **Vistas de medios**: siempre filtrar por `self.empresa_activa` y proteger con `PAYMENTS_CONFIG`.
 
 ---
 
-## 16) Ejemplo de circuito (resumen)
+## 15) Diagramas de referencia
+
+### 15.1 Secuencia registrar pago
 
 ```mermaid
 sequenceDiagram
-  participant U as Operador
-  participant PAY as payments.services
+  participant U as Usuario
+  participant VW as PaymentCreateView
+  participant S as payments.services
   participant DB as PostgreSQL
 
-  U->>PAY: registrar_pago(venta, medio, monto, es_propina, ...)
-  PAY->>DB: lock venta (select_for_update)
-  PAY->>DB: sumar pagos no-propina, calcular saldo
-  alt monto > saldo y !es_propina
-    PAY-->>U: OverpayNeedsConfirmation(saldo, monto)
-    U->>PAY: confirmar split (auto_split_propina=True)
-    PAY->>DB: crear pago_saldo + pago_propina
-  else
-    PAY->>DB: crear pago simple
+  U->>VW: GET /ventas/<id>/pagos/nuevo/
+  VW-->>U: Form (medio, monto, es_propina, referencia, key)
+
+  U->>VW: POST form
+  VW->>S: registrar_pago(...)
+  alt monto > saldo y !es_propina y !auto_split
+    S-->>VW: OverpayNeedsConfirmation(saldo, monto)
+    VW-->>U: Re-render con aviso + hidden confirmar_split=1
+    U->>VW: POST form (confirmar_split=1)
+    VW->>S: registrar_pago(..., auto_split_propina=True)
+    S->>DB: crear pago saldo + pago propina
+  else pago simple
+    S->>DB: crear pago único
   end
-  PAY->>DB: recalcular saldo
-  alt saldo == 0 y venta != cancelado
-    PAY->>DB: venta.estado = pagado
-  end
-  DB-->>U: OK (pagos, saldo, estado)
+  S->>DB: recalcular_saldo + marcar_pagada si corresponde
+  VW-->>U: Mensaje + redirect a sales:detail
+```
+
+### 15.2 Permisos declarativos (CBVs)
+
+```mermaid
+graph TD
+  V[View] -->|hereda| EPRM[EmpresaPermRequiredMixin]
+  EPRM -->|usa| ECM[EmpresaContextMixin]
+  EPRM -->|valida| hasPerm[has_empresa_perm(user, empresa, perm)]
+  V -->|declara| RP[required_perms=(Perm.PAYMENTS_*,)]
+  V -->|context| Flags[puede_crear / puede_configurar]
+```
+
+---
+
+## 16) Apéndice — extracto de configuración de permisos
+
+> **Referencia resumida** (la implementación real vive en `apps/org/permissions.py`).
+
+```text
+class Perm(str, Enum):
+    # ...
+    PAYMENTS_VIEW     = "PAYMENTS_VIEW"
+    PAYMENTS_CREATE   = "PAYMENTS_CREATE"
+    PAYMENTS_EDIT     = "PAYMENTS_EDIT"
+    PAYMENTS_DELETE   = "PAYMENTS_DELETE"
+    PAYMENTS_CONFIG   = "PAYMENTS_CONFIG"
+
+ROLE_POLICY["admin"] |= {
+    Perm.PAYMENTS_VIEW, Perm.PAYMENTS_CREATE, Perm.PAYMENTS_EDIT,
+    Perm.PAYMENTS_DELETE, Perm.PAYMENTS_CONFIG,
+}
+ROLE_POLICY["operador"] |= {
+    Perm.PAYMENTS_VIEW, Perm.PAYMENTS_CREATE,
+}
+ROLE_POLICY["supervisor"] |= {
+    Perm.PAYMENTS_VIEW,
+}
 ```
 
 ---
 
 ### Resumen ejecutivo
 
-- **Pagos robustos** con idempotencia y tratamiento de **sobrepago** (confirmación/split a propina).
-- **Saldo** consistente y **transición automática a `pagado`** cuando corresponde.
-- **Tenancy** garantizado (medio y venta en misma empresa).
-- **UI** simple, con modales y mensajes claros; sin lógica en templates.
-- Lista para integrarse con **invoicing** (emisión solo cuando **`pagado`**), **cashbox** y auditoría.
+- **Pagos robustos** con idempotencia, tratamiento de **sobrepago** (modal/confirmación/split a propina) y **tenancy** garantizado.
+- **Permisos granulares por rol**: admin (total), operador (uso diario), supervisor (consulta).
+- **Seguridad en backend** (mixins + services); los templates solo reflejan flags de permiso para UX.
+- Integración fluida con `sales` e `invoicing` (emisión con venta **pagada**).
+- Código preparado para extensiones: reversa de pagos, cierres de caja e integración con pasarelas.
 
 # Módulo 9 — `apps/invoicing` (Comprobantes Simples y Numeración)
 

@@ -1,21 +1,39 @@
 {# apps/payments/templates/payments/form.html #}
 {% extends "base_auth.html" %}
-{% block title %}Registrar pago{% endblock %}
+{% load i18n %}
+{% block title %}{% trans "Registrar pago" %}{% endblock %}
 
 {% block content %}
 <div class="container py-3">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
-      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">Ventas</a></li>
-      <li class="breadcrumb-item"><a href="{% url 'sales:detail' pk=venta.pk %}">Detalle</a></li>
-      <li class="breadcrumb-item active" aria-current="page">Registrar pago</li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:list' %}">{% trans "Ventas" %}</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'sales:detail' pk=venta.pk %}">{% trans "Detalle" %}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{% trans "Registrar pago" %}</li>
     </ol>
   </nav>
+
+  <div class="d-flex justify-content-end gap-2 mb-2">
+    {% if puede_configurar %}
+      <a href="{% url 'payments:medios_list' %}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-gear"></i> {% trans "Configurar medios" %}
+      </a>
+    {% endif %}
+  </div>
+
+  {% if not puede_crear %}
+    <div class="alert alert-warning d-flex align-items-start mb-3">
+      <i class="bi bi-lock me-2"></i>
+      <div>
+        {% trans "No tenés permiso para registrar pagos. Si necesitás acceso, hablá con un administrador." %}
+      </div>
+    </div>
+  {% endif %}
 
   <div class="row g-3">
     <div class="col-12 col-lg-7">
       <div class="card">
-        <div class="card-header fw-semibold">Registrar pago</div>
+        <div class="card-header fw-semibold">{% trans "Registrar pago" %}</div>
         <div class="card-body">
 
           {# fallback server-side si el backend pidió confirmación #}
@@ -23,49 +41,53 @@
             <div class="alert alert-warning d-flex align-items-start">
               <i class="bi bi-exclamation-triangle-fill me-2"></i>
               <div>
-                Estás registrando <strong>${{ monto_ingresado }}</strong> y el saldo actual es
-                <strong>${{ saldo_actual }}</strong>.<br>
-                ¿Querés aplicar la <strong>diferencia de ${{ diferencia_propina }}</strong> como <strong>propina</strong>?
+                {% blocktrans with mi=monto_ingresado sa=saldo_actual dp=diferencia_propina %}
+                  Estás registrando <strong>${{ mi }}</strong> y el saldo actual es
+                  <strong>${{ sa }}</strong>.<br>
+                  ¿Querés aplicar la <strong>diferencia de ${{ dp }}</strong> como <strong>propina</strong>?
+                {% endblocktrans %}
               </div>
             </div>
           {% endif %}
 
-          <form id="payment-form" method="post" novalidate
-                data-saldo="{{ venta.saldo_pendiente }}">
+          <form id="payment-form" method="post" novalidate data-saldo="{{ venta.saldo_pendiente }}">
             {% csrf_token %}
 
             <div class="mb-3">
-              <label class="form-label" for="id_medio">Medio</label>
+              <label class="form-label" for="id_medio">{% trans "Medio" %}</label>
               {{ form.medio }}
               {% if form.medio.errors %}<div class="invalid-feedback d-block">{{ form.medio.errors|striptags }}</div>{% endif %}
             </div>
 
             <div class="mb-3">
-              <label class="form-label" for="id_monto">Monto</label>
+              <label class="form-label" for="id_monto">{% trans "Monto" %}</label>
               {{ form.monto }}
-              <div class="form-text">Saldo pendiente: <strong>${{ venta.saldo_pendiente }}</strong></div>
+              <div class="form-text">
+                {% trans "Saldo pendiente" %}: <strong>${{ venta.saldo_pendiente }}</strong>
+              </div>
               {% if form.monto.errors %}<div class="invalid-feedback d-block">{{ form.monto.errors|striptags }}</div>{% endif %}
             </div>
 
             <div class="mb-3 form-check">
-              {{ form.es_propina }} <label class="form-check-label" for="id_es_propina">Marcar como propina</label>
+              {{ form.es_propina }}
+              <label class="form-check-label" for="id_es_propina">{% trans "Marcar como propina" %}</label>
               {% if form.es_propina.errors %}<div class="invalid-feedback d-block">{{ form.es_propina.errors|striptags }}</div>{% endif %}
             </div>
 
             <div class="mb-3">
-              <label class="form-label" for="id_referencia">Referencia</label>
+              <label class="form-label" for="id_referencia">{% trans "Referencia" %}</label>
               {{ form.referencia }}
               {% if form.referencia.errors %}<div class="invalid-feedback d-block">{{ form.referencia.errors|striptags }}</div>{% endif %}
             </div>
 
             <div class="mb-3">
-              <label class="form-label" for="id_notas">Notas</label>
+              <label class="form-label" for="id_notas">{% trans "Notas" %}</label>
               {{ form.notas }}
               {% if form.notas.errors %}<div class="invalid-feedback d-block">{{ form.notas.errors|striptags }}</div>{% endif %}
             </div>
 
             <div class="mb-3">
-              <label class="form-label" for="id_idempotency_key">Clave de idempotencia (opcional)</label>
+              <label class="form-label" for="id_idempotency_key">{% trans "Clave de idempotencia (opcional)" %}</label>
               {{ form.idempotency_key }}
               {% if form.idempotency_key.errors %}<div class="invalid-feedback d-block">{{ form.idempotency_key.errors|striptags }}</div>{% endif %}
             </div>
@@ -75,14 +97,18 @@
 
             {% if requiere_confirmacion %}
               <div class="d-flex gap-2">
-                <a href="{% url 'payments:create' venta_id=venta.pk %}" class="btn btn-outline-secondary">Volver y editar</a>
-                <button type="submit" class="btn btn-primary">
-                  Confirmar y aplicar diferencia como propina
+                <a href="{% url 'payments:create' venta_id=venta.pk %}" class="btn btn-outline-secondary">
+                  {% trans "Volver y editar" %}
+                </a>
+                <button type="submit" class="btn btn-primary" {% if not puede_crear %}disabled{% endif %}>
+                  {% trans "Confirmar y aplicar diferencia como propina" %}
                 </button>
               </div>
             {% else %}
               <div class="d-grid">
-                <button type="submit" class="btn btn-primary">Registrar pago</button>
+                <button type="submit" class="btn btn-primary" {% if not puede_crear %}disabled{% endif %}>
+                  {% trans "Registrar pago" %}
+                </button>
               </div>
             {% endif %}
           </form>
@@ -93,18 +119,20 @@
 
     <div class="col-12 col-lg-5">
       <div class="card">
-        <div class="card-header fw-semibold">Resumen de venta</div>
+        <div class="card-header fw-semibold">{% trans "Resumen de venta" %}</div>
         <div class="card-body">
           <ul class="list-group list-group-flush">
             <li class="list-group-item d-flex justify-content-between">
-              <span>Total</span><span class="fw-semibold">${{ venta.total }}</span>
+              <span>{% trans "Total" %}</span><span class="fw-semibold">${{ venta.total }}</span>
             </li>
             <li class="list-group-item d-flex justify-content-between">
-              <span>Saldo pendiente</span><span class="fw-semibold">${{ venta.saldo_pendiente }}</span>
+              <span>{% trans "Saldo pendiente" %}</span><span class="fw-semibold">${{ venta.saldo_pendiente }}</span>
             </li>
           </ul>
           <div class="mt-3">
-            <a href="{% url 'sales:detail' pk=venta.pk %}" class="btn btn-outline-secondary w-100">Volver al detalle</a>
+            <a href="{% url 'sales:detail' pk=venta.pk %}" class="btn btn-outline-secondary w-100">
+              {% trans "Volver al detalle" %}
+            </a>
           </div>
         </div>
       </div>
@@ -118,18 +146,20 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Aplicar diferencia como propina</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        <h5 class="modal-title">{% trans "Aplicar diferencia como propina" %}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% trans 'Cerrar' %}"></button>
       </div>
       <div class="modal-body">
-        Estás registrando <strong>$<span id="montoIngresado"></span></strong> y el saldo actual es
-        <strong>$<span id="saldoActual"></span></strong>.<br>
-        La <strong>diferencia</strong> es <strong>$<span id="diferenciaPropina"></span></strong>.<br><br>
-        ¿Querés aplicar esa diferencia como <strong>propina</strong>?
+        {% blocktrans %}
+          Estás registrando <strong>$<span id="montoIngresado"></span></strong> y el saldo actual es
+          <strong>$<span id="saldoActual"></span></strong>.<br>
+          La <strong>diferencia</strong> es <strong>$<span id="diferenciaPropina"></span></strong>.<br><br>
+          ¿Querés aplicar esa diferencia como <strong>propina</strong>?
+        {% endblocktrans %}
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Volver y editar</button>
-        <button type="button" class="btn btn-primary" id="btnConfirmarSplit">Confirmar</button>
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">{% trans "Volver y editar" %}</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmarSplit">{% trans "Confirmar" %}</button>
       </div>
     </div>
   </div>
@@ -149,13 +179,10 @@
   function parseDecimal(value) {
     if (typeof value !== 'string') return Number(value) || 0;
     const v = value.trim();
-    // Si hay coma y punto, intentamos formato “es-AR”: quitamos puntos de miles y cambiamos coma por punto
     if (v.indexOf(',') >= 0 && v.indexOf('.') >= 0) {
       return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0;
     }
-    // Si solo hay coma, asumimos decimal con coma
     if (v.indexOf(',') >= 0) return parseFloat(v.replace(',', '.')) || 0;
-    // Default
     return parseFloat(v) || 0;
   }
 
@@ -168,7 +195,7 @@
   }
 
   form.addEventListener('submit', function(ev) {
-    // si el backend ya pidió confirmación, dejamos pasar
+    // Si el backend ya pidió confirmación, dejamos pasar
     if (hiddenSplit && hiddenSplit.value === '1') return;
 
     const monto = parseDecimal(inputMonto ? inputMonto.value : '0');
@@ -178,26 +205,22 @@
     if (!esPropina && monto > saldo && saldo > 0) {
       ev.preventDefault();
 
-      // Completar textos del modal
       document.getElementById('montoIngresado').textContent = monto.toFixed(2);
       document.getElementById('saldoActual').textContent = saldo.toFixed(2);
       document.getElementById('diferenciaPropina').textContent = (monto - saldo).toFixed(2);
 
-      const { el, bsModal } = getModal();
+      const { bsModal } = getModal();
       bsModal.show();
 
-      // Confirmar → setear hidden y enviar
       const btn = document.getElementById('btnConfirmarSplit');
       const handler = function() {
         hiddenSplit.value = '1';
         bsModal.hide();
-        // evitar duplicar handler
         btn.removeEventListener('click', handler);
         form.submit();
       };
       btn.addEventListener('click', handler, { once: true });
     }
-    // si no hay sobrepago, envío normal
   }, false);
 })();
 </script>

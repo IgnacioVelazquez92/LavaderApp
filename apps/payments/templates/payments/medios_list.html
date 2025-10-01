@@ -14,9 +14,12 @@
 
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h1 class="h5 mb-0">{% trans "Medios de pago" %}</h1>
-    <a href="{% url 'payments:medios_create' %}" class="btn btn-primary">
-      {% trans "Nuevo medio" %}
-    </a>
+
+    {% if puede_configurar %}
+      <a href="{% url 'payments:medios_create' %}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> {% trans "Nuevo medio" %}
+      </a>
+    {% endif %}
   </div>
 
   <div class="card shadow-sm">
@@ -28,7 +31,7 @@
               <tr>
                 <th>{% trans "Nombre" %}</th>
                 <th style="width:120px">{% trans "Estado" %}</th>
-                <th style="width:180px" class="text-end">{% trans "Acciones" %}</th>
+                <th style="width:220px" class="text-end">{% trans "Acciones" %}</th>
               </tr>
             </thead>
             <tbody>
@@ -43,15 +46,22 @@
                     {% endif %}
                   </td>
                   <td class="text-end">
-                    <a href="{% url 'payments:medios_update' pk=m.pk %}" class="btn btn-sm btn-outline-secondary">
-                      {% trans "Editar" %}
-                    </a>
-                    <form method="post" action="{% url 'payments:medios_toggle' pk=m.pk %}" class="d-inline">
-                      {% csrf_token %}
-                      <button type="submit" class="btn btn-sm {% if m.activo %}btn-outline-warning{% else %}btn-outline-success{% endif %}">
-                        {% if m.activo %}{% trans "Desactivar" %}{% else %}{% trans "Activar" %}{% endif %}
-                      </button>
-                    </form>
+                    {% if puede_configurar %}
+                      <a href="{% url 'payments:medios_update' pk=m.pk %}" class="btn btn-sm btn-outline-secondary me-1">
+                        {% trans "Editar" %}
+                      </a>
+                      <form method="post"
+                            action="{% url 'payments:medios_toggle' pk=m.pk %}"
+                            class="d-inline"
+                            onsubmit="return confirm('{% if m.activo %}{% trans '¿Desactivar este medio?' %}{% else %}{% trans '¿Activar este medio?' %}{% endif %}');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm {% if m.activo %}btn-outline-warning{% else %}btn-outline-success{% endif %}">
+                          {% if m.activo %}{% trans "Desactivar" %}{% else %}{% trans "Activar" %}{% endif %}
+                        </button>
+                      </form>
+                    {% else %}
+                      <span class="text-muted">{% trans "Sin permisos de configuración" %}</span>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

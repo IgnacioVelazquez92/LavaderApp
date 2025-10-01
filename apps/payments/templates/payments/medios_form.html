@@ -14,6 +14,15 @@
     </ol>
   </nav>
 
+  {% if puede_configurar is defined and not puede_configurar %}
+    <div class="alert alert-warning d-flex align-items-start">
+      <i class="bi bi-lock me-2"></i>
+      <div>
+        {% trans "No tenés permisos para configurar medios de pago. Contactá a un administrador." %}
+      </div>
+    </div>
+  {% endif %}
+
   <div class="card shadow-sm">
     <div class="card-body">
       <h1 class="h5 mb-3">
@@ -48,7 +57,8 @@
 
         <div class="d-flex justify-content-between">
           <a href="{% url 'payments:medios_list' %}" class="btn btn-outline-secondary">{% trans "Cancelar" %}</a>
-          <button type="submit" class="btn btn-primary">
+          <button type="submit" class="btn btn-primary"
+                  {% if puede_configurar is defined and not puede_configurar %}disabled{% endif %}>
             {% if form.instance.pk %}{% trans "Guardar cambios" %}{% else %}{% trans "Crear" %}{% endif %}
           </button>
         </div>

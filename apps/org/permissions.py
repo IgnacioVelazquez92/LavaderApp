@@ -218,6 +218,14 @@ class Perm(str, Enum):
     SALES_PROMO_MANAGE = "sales.promo_manage"
     SALES_PROMO_APPLY = "sales.promo_apply"
 
+    # === PAYMENTS ===
+    PAYMENTS_VIEW = "PAYMENTS_VIEW"           # ver pagos (detalle/listado)
+    PAYMENTS_CREATE = "PAYMENTS_CREATE"       # registrar pago
+    # editar pago (si se habilita en roadmap)
+    PAYMENTS_EDIT = "PAYMENTS_EDIT"
+    PAYMENTS_DELETE = "PAYMENTS_DELETE"       # eliminar/revertir pago
+    PAYMENTS_CONFIG = "PAYMENTS_CONFIG"       # gestionar medios de pago
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -287,6 +295,13 @@ ROLE_POLICY = {
         Perm.SALES_DISCOUNT_REMOVE,
         Perm.SALES_PROMO_MANAGE,
         Perm.SALES_PROMO_APPLY,
+
+        # === PAYMENTS (admin total) ===
+        Perm.PAYMENTS_VIEW,
+        Perm.PAYMENTS_CREATE,
+        Perm.PAYMENTS_EDIT,
+        Perm.PAYMENTS_DELETE,
+        Perm.PAYMENTS_CONFIG,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -324,6 +339,9 @@ ROLE_POLICY = {
         Perm.SALES_ITEM_REMOVE,
         Perm.PROMO_VIEW,
         Perm.SALES_PROMO_APPLY,
+        # === PAYMENTS (operativa diaria) ===
+        Perm.PAYMENTS_VIEW,
+        Perm.PAYMENTS_CREATE,
 
     },
 
