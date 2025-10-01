@@ -2468,7 +2468,7 @@ erDiagram
     Cliente ||--o{ Vehiculo : posee
 
     Empresa ||--o{ Promotion       : define
-    Sucursal ||--o{ Promotion      : (opcional) restringe a sucursal
+    Sucursal ||--o{ Promotion      : "restringe a sucursal (opcional)"
 
     Sucursal ||--o{ Venta          : opera
     Cliente  ||--o{ Venta          : solicita
@@ -3227,9 +3227,9 @@ sequenceDiagram
 graph TD
   V[View] -->|hereda| EPRM[EmpresaPermRequiredMixin]
   EPRM -->|usa| ECM[EmpresaContextMixin]
-  EPRM -->|valida| hasPerm[has_empresa_perm(user, empresa, perm)]
-  V -->|declara| RP[required_perms=(Perm.PAYMENTS_*,)]
-  V -->|context| Flags[puede_crear / puede_configurar]
+  EPRM -->|valida| hasPerm["has_empresa_perm(user, empresa, perm)"]
+  V -->|declara| RP["required_perms=(Perm.PAYMENTS_*,)"]
+  V -->|context| Flags["puede_crear / puede_configurar"]
 ```
 
 ---
