@@ -22,7 +22,6 @@
       <h1 class="h4 mb-1">Comprobante {{ comprobante.numero_completo }}</h1>
       <div class="small text-body-secondary">
         Tipo: <span class="badge text-bg-secondary">{{ comprobante.tipo }}</span>
-        <span class="ms-2">Punto de venta: <span class="badge text-bg-light">{{ comprobante.punto_venta }}</span></span>
         <span class="ms-2">Emitido: <span class="badge text-bg-light">{{ comprobante.emitido_en|date:"d/m/Y H:i" }}</span></span>
       </div>
     </div>
@@ -69,7 +68,7 @@
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Total
-              <span class="fw-semibold">{{ comprobante.total }}</span>
+              <span class="fw-semibold">$ {{ comprobante.total|floatformat:2 }}</span>
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
               Cliente (operativo)
@@ -78,11 +77,18 @@
               </span>
             </li>
             {% if comprobante.cliente_facturacion %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-              Cliente de facturación
-              <span class="text-body-secondary">
-                {{ comprobante.cliente_facturacion.razon_social }}
-              </span>
+            <li class="list-group-item">
+              <div class="fw-semibold">Datos de facturación</div>
+              <div>{{ comprobante.cliente_facturacion.razon_social }}</div>
+              <div class="small text-body-secondary">
+                CUIT: {{ comprobante.cliente_facturacion.cuit }} ·
+                IVA: {{ comprobante.cliente_facturacion.get_cond_iva_display }}
+              </div>
+              {% if comprobante.cliente_facturacion.domicilio_fiscal %}
+                <div class="small text-body-secondary">
+                  Domicilio: {{ comprobante.cliente_facturacion.domicilio_fiscal }}
+                </div>
+              {% endif %}
             </li>
             {% endif %}
             <li class="list-group-item">
@@ -92,15 +98,8 @@
             </li>
           </ul>
         </div>
-        <div class="card-footer d-flex justify-content-between align-items-center">
-          <div class="small text-body-secondary">
-            ID: <span class="text-monospace">{{ comprobante.id }}</span>
-          </div>
-          <div class="d-flex gap-2">
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'invoicing:download' pk=comprobante.id %}">
-              <i class="bi bi-download"></i> Descargar
-            </a>
-          </div>
+        <div class="card-footer small text-body-secondary">
+          ID: <span class="text-monospace">{{ comprobante.id }}</span>
         </div>
       </div>
     </div>
@@ -114,9 +113,18 @@
         <div class="card-body">
           <div class="row g-3">
             <div class="col-12 col-md-6">
-              <div class="small text-body-secondary">Cliente</div>
+              <div class="small text-body-secondary">Cliente operativo</div>
               <div>{{ snap.cliente.nombre }} {{ snap.cliente.apellido }}</div>
             </div>
+            {% if comprobante.cliente_facturacion %}
+            <div class="col-12 col-md-6">
+              <div class="small text-body-secondary">Facturado a</div>
+              <div>{{ comprobante.cliente_facturacion.razon_social }}</div>
+              <div class="small text-body-secondary">
+                CUIT: {{ comprobante.cliente_facturacion.cuit }}
+              </div>
+            </div>
+            {% endif %}
             <div class="col-12 col-md-6">
               <div class="small text-body-secondary">Venta</div>
               <div class="text-monospace">{{ snap.venta.id }}</div>
@@ -161,8 +169,8 @@
                 {% for it in snap.items %}
                 <tr>
                   <td class="text-break">{{ it.servicio_nombre }}</td>
-                  <td class="text-end">{{ it.precio_unitario }}</td>
-                  <td class="text-end">{{ it.subtotal }}</td>
+                  <td class="text-end">$ {{ it.precio_unitario|floatformat:2 }}</td>
+                  <td class="text-end">$ {{ it.subtotal|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
                 <tr>
@@ -175,22 +183,21 @@
               <tfoot>
                 <tr>
                   <th scope="row" class="text-end" colspan="2">Subtotal</th>
-                  <td class="text-end">{{ snap.venta.subtotal }}</td>
+                  <td class="text-end">$ {{ snap.venta.subtotal|floatformat:2 }}</td>
                 </tr>
                 <tr>
                   <th scope="row" class="text-end" colspan="2">Descuento</th>
-                  <td class="text-end">{{ snap.venta.descuento }}</td>
+                  <td class="text-end">$ {{ snap.venta.descuento|floatformat:2 }}</td>
                 </tr>
                 <tr class="table-light">
                   <th scope="row" class="text-end" colspan="2">Total</th>
-                  <td class="text-end fw-semibold">{{ comprobante.total }}</td>
+                  <td class="text-end fw-semibold">$ {{ comprobante.total|floatformat:2 }}</td>
                 </tr>
               </tfoot>
             </table>
           </div>
         </div>
       </div>
-
     </div>
   </div>
   {% endwith %}

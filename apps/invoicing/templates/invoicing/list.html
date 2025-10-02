@@ -111,9 +111,16 @@
                 </td>
                 <td>{{ c.sucursal.nombre }}</td>
                 <td>
-                  {{ c.cliente.nombre }} {{ c.cliente.apellido }}
+                  {% if c.cliente_facturacion %}
+                    {{ c.cliente_facturacion.razon_social }}
+                    <small class="text-body-secondary">({{ c.cliente_facturacion.cuit }})</small>
+                  {% else %}
+                    {{ c.cliente.nombre }} {{ c.cliente.apellido }}
+                  {% endif %}
                 </td>
-                <td class="text-end">{{ c.total }}</td>
+                <td class="text-end">
+                  $ {{ c.total|floatformat:2 }}
+                </td>
                 <td>{{ c.emitido_en|date:"d/m/Y H:i" }}</td>
                 <td class="text-end">
                   <div class="btn-group">

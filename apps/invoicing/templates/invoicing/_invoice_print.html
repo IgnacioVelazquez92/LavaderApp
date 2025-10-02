@@ -3,13 +3,21 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Remito {{ snapshot.comprobante.numero }}</title>
+  <title>{{ snapshot.comprobante.tipo }} {{ snapshot.comprobante.numero }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
   <style>
     /* Reglas mínimas para impresión (blanco/negro) */
     @page { margin: 18mm; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #000; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      color: #000;
+      /* --- A4: 210 mm = 21cm --- */
+      max-width: 21cm;
+      margin: 0 auto;
+      padding: 0;
+      position: relative;
+    }
     .table { width: 100%; border-collapse: collapse; }
     .table th, .table td { border: 1px solid #000; padding: 6px 8px; vertical-align: top; }
     .table thead th { font-weight: 700; }
@@ -19,38 +27,38 @@
     .h-title { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
     .muted { color: #333; }
     .tight td, .tight th { padding: 4px 6px; }
-    .w-10 { width: 10%; }
-    .w-20 { width: 20%; }
-    .w-30 { width: 30%; }
-    .w-40 { width: 40%; }
-    .w-50 { width: 50%; }
-    .w-60 { width: 60%; }
+    .w-10 { width: 10%; } .w-15 { width: 15%; } .w-20 { width: 20%; } .w-30 { width: 30%; }
+    .w-40 { width: 40%; } .w-50 { width: 50%; } .w-55 { width: 55%; } .w-60 { width: 60%; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
     .text-uppercase { text-transform: uppercase; }
-    .mb-0 { margin-bottom: 0; }
-    .mb-1 { margin-bottom: .25rem; }
-    .mb-2 { margin-bottom: .5rem; }
-    .mb-3 { margin-bottom: 1rem; }
-    .mt-2 { margin-top: .5rem; }
-    .mt-3 { margin-top: 1rem; }
-    .p-0 { padding: 0; }
-    .pt-2 { padding-top: .5rem; }
-    .pb-1 { padding-bottom: .25rem; }
+    .mb-0 { margin-bottom: 0; } .mb-1 { margin-bottom: .25rem; } .mb-2 { margin-bottom: .5rem; } .mb-3 { margin-bottom: 1rem; }
+    .mt-2 { margin-top: .5rem; } .mt-3 { margin-top: 1rem; }
+    .p-0 { padding: 0; } .pt-2 { padding-top: .5rem; } .pb-1 { padding-bottom: .25rem; }
     .fw-bold { font-weight: 700; }
-    .border { border: 1px solid #000; }
-    .border-0 { border: 0; }
+    .border { border: 1px solid #000; } .border-0 { border: 0; }
     .rounded { border-radius: 4px; }
     .row { display: flex; flex-wrap: nowrap; gap: 16px; }
-    .col { flex: 1 1 0; }
-    .col-auto { flex: 0 0 auto; }
+    .col { flex: 1 1 0; } .col-auto { flex: 0 0 auto; }
     .logo-box { width: 120px; height: 60px; border: 1px solid #000; display: flex; align-items: center; justify-content: center; }
     .checkbox { display:inline-block; width: 12px; height: 12px; border: 1px solid #000; margin-right: 6px; vertical-align: middle; }
-    /* Evitar cortes feos en tabla */
     .avoid-break { page-break-inside: avoid; }
+
+    /* Sello PAGADA */
+    .stamp-paid{
+      position: absolute; right: 18mm; top: 22mm;
+      border: 3px solid #28a745; color: #28a745;
+      padding: 6px 14px; font-weight: 700; font-size: 18px;
+      transform: rotate(-12deg);
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
+
+  {% if snapshot.venta.payment_status == "pagada" %}
+  <div class="stamp-paid">PAGADA</div>
+  {% endif %}
 
   {# ENCABEZADO #}
   <table class="table no-border mb-3">
@@ -58,7 +66,6 @@
       <td class="border-0 align-top w-40">
         <div class="row">
           <div class="col-auto">
-            {# Logo: si no hay, mostramos caja vacía #}
             {% if snapshot.empresa.logo_data %}
               <img src="{{ snapshot.empresa.logo_data }}" alt="Logo" style="width:120px; height:auto;">
             {% else %}
@@ -86,21 +93,17 @@
           {% endif %}
         </div>
         <div class="mt-2">
-          <div class="fw-bold">
-            Nº {{ snapshot.comprobante.numero }}
-          </div>
-          <div class="small">
-            Fecha: {{ snapshot.comprobante.emitido_en|slice:":10" }}
-          </div>
-          <div class="small">
-            Punto de venta: {{ snapshot.sucursal.punto_venta }}
-          </div>
+          <div class="fw-bold">Nº {{ snapshot.comprobante.numero }}</div>
+          <div class="small">Fecha: {{ snapshot.comprobante.emitido_en|slice:":10" }}</div>
+          {% if snapshot.sucursal.punto_venta %}
+          <div class="small">Punto de venta: {{ snapshot.sucursal.punto_venta }}</div>
+          {% endif %}
         </div>
       </td>
     </tr>
   </table>
 
-  {# DATOS DEL CLIENTE #}
+  {# DATOS DEL CLIENTE / FACTURACIÓN #}
   <table class="table tight mb-3">
     <thead>
       <tr>
@@ -108,32 +111,17 @@
       </tr>
     </thead>
     <tbody>
+      {# Cliente operativo (quien trajo el vehículo) #}
       <tr>
         <td class="w-40">
-          <div class="small muted">Nombre / Razón Social</div>
-          <div>{{ snapshot.cliente.nombre }} {% if snapshot.cliente.apellido %}{{ snapshot.cliente.apellido }}{% endif %}</div>
-        </td>
-        <td class="w-30">
-          <div class="small muted">Domicilio</div>
-          <div>{{ snapshot.cliente.domicilio|default:"—" }}</div>
-        </td>
-        <td class="w-20">
-          <div class="small muted">Localidad</div>
-          <div>{{ snapshot.cliente.localidad|default:"—" }}</div>
-        </td>
-        <td class="w-10">
-          <div class="small muted">CUIT</div>
-          <div>{{ snapshot.cliente.cuit|default:"—" }}</div>
-        </td>
-      </tr>
-      <tr>
-        <td class="w-40">
-          <div class="small muted">IVA</div>
-          <div>{{ snapshot.cliente.iva|default:"Consumidor Final" }}</div>
+          <div class="small muted">Cliente</div>
+          <div>{{ snapshot.cliente.nombre }}{% if snapshot.cliente.apellido %} {{ snapshot.cliente.apellido }}{% endif %}</div>
         </td>
         <td class="w-30">
           <div class="small muted">Vehículo</div>
-          <div>{{ snapshot.vehiculo.patente|default:"—" }}{% if snapshot.vehiculo.tipo %} — {{ snapshot.vehiculo.tipo }}{% endif %}</div>
+          <div>
+            {{ snapshot.vehiculo.patente|default:"—" }}{% if snapshot.vehiculo.tipo %} — {{ snapshot.vehiculo.tipo }}{% endif %}
+          </div>
         </td>
         <td class="w-20">
           <div class="small muted">Venta</div>
@@ -144,86 +132,101 @@
           <div>{{ snapshot.comprobante.moneda }}</div>
         </td>
       </tr>
-    </tbody>
-  </table>
 
-  {# CONDICIONES DE VENTA #}
-  <table class="table tight mb-3">
-    <thead>
+      {# Si hay perfil fiscal alternativo, mostrarlo (el snapshot debe traerlo si se quiere imprimir) #}
+      {% if snapshot.cliente_facturacion %}
       <tr>
-        <th>Condiciones de venta</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>
-          <span class="checkbox"></span> Contado
-          &nbsp;&nbsp;&nbsp;
-          <span class="checkbox"></span> Cta. Cte.
-          &nbsp;&nbsp;&nbsp;
-          <span class="checkbox"></span> Factura Nº ______________________
+        <td class="w-40">
+          <div class="small muted">Facturado a</div>
+          <div class="fw-bold">{{ snapshot.cliente_facturacion.razon_social }}</div>
+        </td>
+        <td class="w-30">
+          <div class="small muted">Domicilio fiscal</div>
+          <div>{{ snapshot.cliente_facturacion.domicilio_fiscal|default:"—" }}</div>
+        </td>
+        <td class="w-20">
+          <div class="small muted">Condición IVA</div>
+          <div>{{ snapshot.cliente_facturacion.cond_iva|default:"—" }}</div>
+        </td>
+        <td class="w-10">
+          <div class="small muted">CUIT</div>
+          <div>{{ snapshot.cliente_facturacion.cuit|default:"—" }}</div>
         </td>
       </tr>
+      {% endif %}
     </tbody>
   </table>
 
-  {# DETALLE DE SERVICIOS / PRODUCTOS #}
+  {# DETALLE #}
   <table class="table mb-0 avoid-break">
     <thead>
       <tr>
-        <th class="w-15 text-center">CANTIDAD</th>
+        <th class="w-15 text-center">CANT.</th>
         <th class="w-55">DESCRIPCIÓN</th>
-        <th class="w-15 text-right">PARCIAL</th>
-        <th class="w-15 text-right">TOTAL</th>
+        <th class="w-15 text-right">PRECIO</th>
+        <th class="w-15 text-right">SUBTOTAL</th>
       </tr>
     </thead>
     <tbody>
       {% for it in snapshot.items %}
         <tr>
-          <td class="text-center">
-            {% if it.cantidad %}{{ it.cantidad }}{% else %}1{% endif %}
-          </td>
-          <td>
-            {{ it.servicio_nombre }}
-          </td>
-          <td class="text-right">
-            {{ it.precio_unitario }}
-          </td>
-          <td class="text-right">
-            {{ it.subtotal }}
-          </td>
+          <td class="text-center">{{ it.cantidad|default:"1" }}</td>
+          <td>{{ it.servicio_nombre }}</td>
+          <td class="text-right">{{ it.precio_unitario }}</td>
+          <td class="text-right">{{ it.subtotal }}</td>
         </tr>
       {% empty %}
-        <tr>
-          <td colspan="4" class="text-center">— Sin ítems —</td>
-        </tr>
+        <tr><td colspan="4" class="text-center">— Sin ítems —</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="2" class="text-right fw-bold">Subtotal</td>
-        <td colspan="2" class="text-right">{{ snapshot.venta.subtotal }}</td>
+        <td colspan="2" class="text-right fw-bold">Precio de lista</td>
+        <td colspan="2" class="text-right">{{ snapshot.venta.precio_lista|default:snapshot.venta.subtotal }}</td>
       </tr>
       {% if snapshot.venta.descuento and snapshot.venta.descuento != "0.00" %}
       <tr>
-        <td colspan="2" class="text-right fw-bold">Descuento</td>
+        <td colspan="2" class="text-right fw-bold">Descuentos</td>
         <td colspan="2" class="text-right">-{{ snapshot.venta.descuento }}</td>
       </tr>
       {% endif %}
-      {% if snapshot.venta.propina and snapshot.venta.propina != "0.00" %}
       <tr>
-        <td colspan="2" class="text-right fw-bold">Propina</td>
-        <td colspan="2" class="text-right">{{ snapshot.venta.propina }}</td>
-      </tr>
-      {% endif %}
-      <tr>
-        <td colspan="2" class="text-right fw-bold">TOTAL</td>
+        <td colspan="2" class="text-right fw-bold">TOTAL a pagar</td>
         <td colspan="2" class="text-right fw-bold">{{ snapshot.venta.total }}</td>
       </tr>
     </tfoot>
   </table>
 
-  {# PIE: observaciones y leyendas #}
+  {# DESGLOSE DE DESCUENTOS Y PROMOS (si existen) #}
+  {% if snapshot.ajustes and snapshot.ajustes|length > 0 %}
+  <table class="table tight mt-3 avoid-break">
+    <thead>
+      <tr><th colspan="4">Descuentos y Promociones aplicadas</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th class="w-20">Tipo</th>
+        <th class="w-50">Detalle</th>
+        <th class="w-15">Ámbito</th>
+        <th class="w-15 text-right">Monto</th>
+      </tr>
+      {% for a in snapshot.ajustes %}
+      <tr>
+        <td>{{ a.kind_label }}</td>
+        <td>
+          {{ a.label }}
+          {% if a.target %}<span class="xsmall muted"> (ítem: {{ a.target }})</span>{% endif %}
+          {% if a.porcentaje %}<span class="xsmall muted"> · %</span>{% endif %}
+        </td>
+        <td>{{ a.scope|upper }}</td>
+        <td class="text-right">{{ a.monto }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# LEYENDA / OBSERVACIONES #}
   <table class="table no-border mt-3">
     <tr>
       <td class="border-0 align-top w-60">

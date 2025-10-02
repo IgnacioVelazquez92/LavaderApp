@@ -226,6 +226,17 @@ class Perm(str, Enum):
     PAYMENTS_DELETE = "PAYMENTS_DELETE"       # eliminar/revertir pago
     PAYMENTS_CONFIG = "PAYMENTS_CONFIG"       # gestionar medios de pago
 
+    # === INVOICING ===
+    # ver listados/detalles de comprobantes
+    INVOICING_VIEW = "INVOICING_VIEW"
+    # emitir comprobantes (requiere venta pagada)
+    INVOICING_EMIT = "INVOICING_EMIT"
+    # anular/revocar comprobantes ya emitidos
+    INVOICING_ANNUL = "INVOICING_ANNUL"
+    INVOICING_DOWNLOAD = "INVOICING_DOWNLOAD"     # descargar PDF/HTML
+    # usar vistas públicas (generalmente sin auth)
+    INVOICING_PUBLIC_ACCESS = "INVOICING_PUBLIC_ACCESS"
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -302,6 +313,12 @@ ROLE_POLICY = {
         Perm.PAYMENTS_EDIT,
         Perm.PAYMENTS_DELETE,
         Perm.PAYMENTS_CONFIG,
+
+        Perm.INVOICING_VIEW,
+        Perm.INVOICING_EMIT,
+        Perm.INVOICING_ANNUL,
+        Perm.INVOICING_DOWNLOAD,
+        Perm.INVOICING_PUBLIC_ACCESS,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -343,6 +360,10 @@ ROLE_POLICY = {
         Perm.PAYMENTS_VIEW,
         Perm.PAYMENTS_CREATE,
 
+        Perm.INVOICING_VIEW,
+        Perm.INVOICING_EMIT,        # puede emitir comprobantes de ventas pagadas
+        Perm.INVOICING_DOWNLOAD,    # puede descargar comprobantes emitidos
+
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.
@@ -354,6 +375,8 @@ ROLE_POLICY = {
 
         # Catalog
         Perm.CATALOG_VIEW,
+        Perm.INVOICING_VIEW,
+        Perm.INVOICING_DOWNLOAD,
     },
 }
 

@@ -46,7 +46,7 @@
     </div>
   </div>
 
-  <!-- Alertas informativas según estado (sin lógica compleja) -->
+  <!-- Alertas -->
   {% if not venta_pagada %}
     <div class="alert alert-warning d-flex align-items-center" role="alert">
       <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -69,7 +69,7 @@
         {% csrf_token %}
 
         <div class="row g-3">
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-6">
             <label class="form-label">Tipo de comprobante</label>
             {{ form.tipo }}
             {% if form.tipo.errors %}
@@ -77,16 +77,8 @@
             {% endif %}
           </div>
 
-          <div class="col-12 col-md-4">
-            <label class="form-label">Punto de venta</label>
-            {{ form.punto_venta }}
-            <div class="form-text">Numérico (hasta 4 dígitos). Ej.: 1, 12, 1001.</div>
-            {% if form.punto_venta.errors %}
-              <div class="invalid-feedback d-block">{{ form.punto_venta.errors.0 }}</div>
-            {% endif %}
-          </div>
-
-          <div class="col-12 col-md-4">
+          {% if form.cliente_facturacion %}
+          <div class="col-12 col-md-6">
             <label class="form-label">Cliente de facturación (opcional)</label>
             {{ form.cliente_facturacion }}
             <div class="form-text">Usar un perfil alternativo si difiere del cliente operativo.</div>
@@ -94,16 +86,16 @@
               <div class="invalid-feedback d-block">{{ form.cliente_facturacion.errors.0 }}</div>
             {% endif %}
           </div>
+          {% endif %}
         </div>
 
         <hr class="my-4">
 
         <div class="d-flex justify-content-between align-items-center">
           <div class="small text-body-secondary">
-            Al emitir se generará un número único por sucursal y tipo, y un archivo imprimible.
+            Al emitir se generará un número único y un archivo imprimible.
           </div>
 
-          <!-- Botón que abre modal de confirmación -->
           {% if puede_emitir %}
             <button type="button"
                     class="btn btn-primary"
@@ -121,7 +113,7 @@
     </div>
   </div>
 
-  <!-- Modal de confirmación (sin confirm() nativo) -->
+  <!-- Modal de confirmación -->
   <div class="modal fade" id="modal-confirmar-emision" tabindex="-1" aria-labelledby="modal-confirmar-emision-label" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
@@ -133,14 +125,16 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
         <div class="modal-body">
-          <p class="mb-2">Se asignará un número único y se guardará un snapshot inmutable de la venta.</p>
-          <p class="mb-0"><strong>Esta acción no se puede deshacer.</strong></p>
+          <p class="mb-2">
+            Se generará el comprobante de esta venta con un número único
+            y se guardará para que no pueda modificarse.
+          </p>
+          <p class="mb-0"><strong>Una vez emitido, no se podrá deshacer.</strong></p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
             Cancelar
           </button>
-          <!-- Envía el formulario principal sin JS extra -->
           <button type="submit" class="btn btn-primary" form="emit-form">
             <i class="bi bi-check2-circle"></i> Confirmar y emitir
           </button>
