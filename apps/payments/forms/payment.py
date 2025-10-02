@@ -8,16 +8,27 @@ from apps.payments.models import MedioPago
 
 class PaymentForm(forms.Form):
     medio = forms.ModelChoiceField(
-        queryset=MedioPago.objects.none(), label="Medio de pago")
-    monto = forms.DecimalField(min_value=Decimal(
-        "0.01"), decimal_places=2, max_digits=12, label="Monto")
-    es_propina = forms.BooleanField(
-        required=False, initial=False, label="Es propina")
-    referencia = forms.CharField(required=False, label="Referencia")
+        queryset=MedioPago.objects.none(),
+        label="Medio de pago",
+    )
+    monto = forms.DecimalField(
+        min_value=Decimal("0.01"),
+        decimal_places=2,
+        max_digits=12,
+        label="Monto",
+    )
+    # Quitado: es_propina
+    referencia = forms.CharField(
+        required=False,
+        label="Referencia / N° de operación (opcional)",
+        help_text="Ej.: ID de transacción, Nº de operación bancaria, últimos 4 dígitos de la tarjeta, etc.",
+    )
     notas = forms.CharField(
-        required=False, widget=forms.Textarea, label="Notas")
-    idempotency_key = forms.CharField(
-        required=False, max_length=64, label="Clave de idempotencia")
+        required=False,
+        widget=forms.Textarea,
+        label="Notas",
+    )
+    # Quitado: idempotency_key
 
     def __init__(self, *args, empresa=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,12 +49,13 @@ class PaymentForm(forms.Form):
             else:
                 w.attrs.update({"class": "form-control"})
 
+        # Placeholders útiles
+        self.fields["referencia"].widget.attrs["placeholder"] = "ID MP/Stripe, Nº operación banco, últimos 4, etc."
+        self.fields["notas"].widget.attrs["rows"] = 3
+
     def clean_medio(self):
         medio = self.cleaned_data.get("medio")
         if self.empresa and medio and medio.empresa_id != self.empresa.id:
             raise forms.ValidationError(
                 "El medio de pago no pertenece a la empresa activa.")
         return medio
-
-    def clean_es_propina(self):
-        return bool(self.cleaned_data.get("es_propina", False))

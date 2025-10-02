@@ -24,9 +24,7 @@
   {% if not puede_crear %}
     <div class="alert alert-warning d-flex align-items-start mb-3">
       <i class="bi bi-lock me-2"></i>
-      <div>
-        {% trans "No tenés permiso para registrar pagos. Si necesitás acceso, hablá con un administrador." %}
-      </div>
+      <div>{% trans "No tenés permiso para registrar pagos. Si necesitás acceso, hablá con un administrador." %}</div>
     </div>
   {% endif %}
 
@@ -36,22 +34,23 @@
         <div class="card-header fw-semibold">{% trans "Registrar pago" %}</div>
         <div class="card-body">
 
-          {# fallback server-side si el backend pidió confirmación #}
-          {% if requiere_confirmacion %}
-            <div class="alert alert-warning d-flex align-items-start">
-              <i class="bi bi-exclamation-triangle-fill me-2"></i>
-              <div>
-                {% blocktrans with mi=monto_ingresado sa=saldo_actual dp=diferencia_propina %}
-                  Estás registrando <strong>${{ mi }}</strong> y el saldo actual es
-                  <strong>${{ sa }}</strong>.<br>
-                  ¿Querés aplicar la <strong>diferencia de ${{ dp }}</strong> como <strong>propina</strong>?
-                {% endblocktrans %}
-              </div>
-            </div>
-          {% endif %}
-
-          <form id="payment-form" method="post" novalidate data-saldo="{{ venta.saldo_pendiente }}">
+          {# Sin alertas ni botones de confirmación en body. Todo por modal. #}
+          <form id="payment-form"
+                method="post"
+                novalidate
+                data-saldo="{{ venta.saldo_pendiente }}"
+                {% if requiere_confirmacion %}
+                  data-reqconf="1"
+                  data-mi="{{ monto_ingresado }}"
+                  data-sa="{{ saldo_actual }}"
+                  data-dp="{{ diferencia_propina }}"
+                {% else %}
+                  data-reqconf="0"
+                {% endif %}>
             {% csrf_token %}
+
+            {# Se marca en 1 sólo al confirmar en el modal #}
+            <input type="hidden" name="confirmar_split" id="confirmar_split" value="0">
 
             <div class="mb-3">
               <label class="form-label" for="id_medio">{% trans "Medio" %}</label>
@@ -68,15 +67,12 @@
               {% if form.monto.errors %}<div class="invalid-feedback d-block">{{ form.monto.errors|striptags }}</div>{% endif %}
             </div>
 
-            <div class="mb-3 form-check">
-              {{ form.es_propina }}
-              <label class="form-check-label" for="id_es_propina">{% trans "Marcar como propina" %}</label>
-              {% if form.es_propina.errors %}<div class="invalid-feedback d-block">{{ form.es_propina.errors|striptags }}</div>{% endif %}
-            </div>
-
             <div class="mb-3">
-              <label class="form-label" for="id_referencia">{% trans "Referencia" %}</label>
+              <label class="form-label" for="id_referencia">{% trans "Referencia / N° de operación (opcional)" %}</label>
               {{ form.referencia }}
+              <div class="form-text">
+                {% trans "Ej.: ID de transacción de MercadoPago/Stripe, Nº de operación bancaria, últimos 4 dígitos de la tarjeta, etc." %}
+              </div>
               {% if form.referencia.errors %}<div class="invalid-feedback d-block">{{ form.referencia.errors|striptags }}</div>{% endif %}
             </div>
 
@@ -86,31 +82,11 @@
               {% if form.notas.errors %}<div class="invalid-feedback d-block">{{ form.notas.errors|striptags }}</div>{% endif %}
             </div>
 
-            <div class="mb-3">
-              <label class="form-label" for="id_idempotency_key">{% trans "Clave de idempotencia (opcional)" %}</label>
-              {{ form.idempotency_key }}
-              {% if form.idempotency_key.errors %}<div class="invalid-feedback d-block">{{ form.idempotency_key.errors|striptags }}</div>{% endif %}
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary" {% if not puede_crear %}disabled{% endif %}>
+                {% trans "Registrar pago" %}
+              </button>
             </div>
-
-            {# oculto que controla el split en el backend #}
-            <input type="hidden" name="confirmar_split" id="confirmar_split" value="{% if requiere_confirmacion %}1{% else %}0{% endif %}">
-
-            {% if requiere_confirmacion %}
-              <div class="d-flex gap-2">
-                <a href="{% url 'payments:create' venta_id=venta.pk %}" class="btn btn-outline-secondary">
-                  {% trans "Volver y editar" %}
-                </a>
-                <button type="submit" class="btn btn-primary" {% if not puede_crear %}disabled{% endif %}>
-                  {% trans "Confirmar y aplicar diferencia como propina" %}
-                </button>
-              </div>
-            {% else %}
-              <div class="d-grid">
-                <button type="submit" class="btn btn-primary" {% if not puede_crear %}disabled{% endif %}>
-                  {% trans "Registrar pago" %}
-                </button>
-              </div>
-            {% endif %}
           </form>
 
         </div>
@@ -137,11 +113,10 @@
         </div>
       </div>
     </div>
-
   </div>
 </div>
 
-{# ---------------- MODAL / JS (solo front-end) ---------------- #}
+{# ---------------- MODAL / JS ---------------- #}
 <div class="modal fade" id="modalConfirmOverpay" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -150,12 +125,14 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% trans 'Cerrar' %}"></button>
       </div>
       <div class="modal-body">
-        {% blocktrans %}
-          Estás registrando <strong>$<span id="montoIngresado"></span></strong> y el saldo actual es
-          <strong>$<span id="saldoActual"></span></strong>.<br>
-          La <strong>diferencia</strong> es <strong>$<span id="diferenciaPropina"></span></strong>.<br><br>
-          ¿Querés aplicar esa diferencia como <strong>propina</strong>?
-        {% endblocktrans %}
+        <p class="mb-0">
+          {% blocktrans %}
+            Estás registrando <strong>$<span id="montoIngresado"></span></strong> y el saldo actual es
+            <strong>$<span id="saldoActual"></span></strong>.<br>
+            La <strong>diferencia</strong> es <strong>$<span id="diferenciaPropina"></span></strong>.<br><br>
+            ¿Querés aplicar esa diferencia como <strong>propina</strong>?
+          {% endblocktrans %}
+        </p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-light" data-bs-dismiss="modal">{% trans "Volver y editar" %}</button>
@@ -167,61 +144,84 @@
 
 <script>
 (function() {
-  const form = document.getElementById('payment-form');
-  if (!form) return;
-
-  const inputMonto = document.getElementById('id_monto');
-  const inputEsPropina = document.getElementById('id_es_propina');
-  const hiddenSplit = document.getElementById('confirmar_split');
-  const saldo = parseFloat(String(form.dataset.saldo).replace(',', '.')) || 0;
-
-  // Utils de parseo tolerante (soporta 12.345,67 y 12345.67)
+  function onDOMReady(cb) {
+    if (document.readyState !== 'loading') cb();
+    else document.addEventListener('DOMContentLoaded', cb, { once: true });
+  }
+  function whenBootstrapReady(cb) {
+    if (window.bootstrap && typeof window.bootstrap.Modal === 'function') { cb(); return; }
+    const started = Date.now();
+    const iv = setInterval(() => {
+      if (window.bootstrap && typeof window.bootstrap.Modal === 'function') { clearInterval(iv); cb(); }
+      else if (Date.now() - started > 4000) { clearInterval(iv); }
+    }, 30);
+  }
   function parseDecimal(value) {
     if (typeof value !== 'string') return Number(value) || 0;
     const v = value.trim();
-    if (v.indexOf(',') >= 0 && v.indexOf('.') >= 0) {
-      return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0;
-    }
+    if (v.indexOf(',') >= 0 && v.indexOf('.') >= 0) return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0;
     if (v.indexOf(',') >= 0) return parseFloat(v.replace(',', '.')) || 0;
     return parseFloat(v) || 0;
   }
 
-  // Bootstrap modal
-  let bsModal;
-  function getModal() {
-    const el = document.getElementById('modalConfirmOverpay');
-    if (!bsModal) bsModal = new bootstrap.Modal(el);
-    return { el, bsModal };
+  function init() {
+    const form = document.getElementById('payment-form');
+    if (!form) return;
+
+    const inputMonto  = document.getElementById('id_monto');
+    const hiddenSplit = document.getElementById('confirmar_split');
+    const saldo       = parseFloat(String(form.dataset.saldo).replace(',', '.')) || 0;
+
+    const reqconf  = form.dataset.reqconf === '1';
+    const miServer = form.dataset.mi ? parseFloat(String(form.dataset.mi).toString().replace(',', '.')) : null;
+    const saServer = form.dataset.sa ? parseFloat(String(form.dataset.sa).toString().replace(',', '.')) : null;
+    const dpServer = form.dataset.dp ? parseFloat(String(form.dataset.dp).toString().replace(',', '.')) : null;
+
+    function getModal() {
+      const el = document.getElementById('modalConfirmOverpay');
+      if (!el) return null;
+      return new window.bootstrap.Modal(el);
+    }
+    function fillAndShowModal(monto, saldoActual, diferencia) {
+      const montoEl = document.getElementById('montoIngresado');
+      const saldoEl = document.getElementById('saldoActual');
+      const difEl   = document.getElementById('diferenciaPropina');
+      if (montoEl) montoEl.textContent = Number(monto).toFixed(2);
+      if (saldoEl) saldoEl.textContent = Number(saldoActual).toFixed(2);
+      if (difEl)   difEl.textContent   = Number(diferencia).toFixed(2);
+      const modal = getModal();
+      if (!modal) return;
+
+      const oldBtn = document.getElementById('btnConfirmarSplit');
+      const newBtn = oldBtn.cloneNode(true);
+      oldBtn.replaceWith(newBtn);
+
+      newBtn.addEventListener('click', function() {
+        hiddenSplit.value = '1';
+        modal.hide();
+        form.submit();
+      }, { once: true });
+
+      modal.show();
+    }
+
+    // Auto-modal del backend (incluye el caso saldo=0)
+    if (reqconf && miServer != null && saServer != null && dpServer != null) {
+      fillAndShowModal(miServer, saServer, dpServer);
+    }
+
+    // Modal en submit si el front detecta sobrepago con saldo>0
+    form.addEventListener('submit', function(ev) {
+      if (hiddenSplit && hiddenSplit.value === '1') return;
+      const monto = parseDecimal(inputMonto ? inputMonto.value : '0');
+      if (monto > saldo && saldo > 0) {
+        ev.preventDefault();
+        fillAndShowModal(monto, saldo, (monto - saldo));
+      }
+    }, false);
   }
 
-  form.addEventListener('submit', function(ev) {
-    // Si el backend ya pidió confirmación, dejamos pasar
-    if (hiddenSplit && hiddenSplit.value === '1') return;
-
-    const monto = parseDecimal(inputMonto ? inputMonto.value : '0');
-    const esPropina = !!(inputEsPropina && inputEsPropina.checked);
-
-    // Mostrar modal SOLO si es sobrepago y no marcaron propina manual
-    if (!esPropina && monto > saldo && saldo > 0) {
-      ev.preventDefault();
-
-      document.getElementById('montoIngresado').textContent = monto.toFixed(2);
-      document.getElementById('saldoActual').textContent = saldo.toFixed(2);
-      document.getElementById('diferenciaPropina').textContent = (monto - saldo).toFixed(2);
-
-      const { bsModal } = getModal();
-      bsModal.show();
-
-      const btn = document.getElementById('btnConfirmarSplit');
-      const handler = function() {
-        hiddenSplit.value = '1';
-        bsModal.hide();
-        btn.removeEventListener('click', handler);
-        form.submit();
-      };
-      btn.addEventListener('click', handler, { once: true });
-    }
-  }, false);
+  onDOMReady(function(){ whenBootstrapReady(init); });
 })();
 </script>
 {% endblock %}

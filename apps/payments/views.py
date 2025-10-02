@@ -10,7 +10,7 @@ from apps.payments.forms.payment import PaymentForm
 from apps.payments.models import Pago
 from apps.payments.services.payments import registrar_pago, OverpayNeedsConfirmation
 
-# apps/payments/views.py
+
 from apps.org.permissions import EmpresaPermRequiredMixin, Perm, has_empresa_perm
 
 
@@ -27,8 +27,10 @@ class PaymentCreateView(EmpresaPermRequiredMixin, View):
     def get(self, request, venta_id):
         venta = get_object_or_404(
             Venta, pk=venta_id, empresa=self.empresa_activa)
+        tip_mode = request.GET.get("propina") == "1"
         form = PaymentForm(empresa=self.empresa_activa)
-        ctx = {"form": form, "venta": venta, **self._ctx_flags(request)}
+        ctx = {"form": form, "venta": venta,
+               "tip_mode": tip_mode, **self._ctx_flags(request)}
         return render(request, self.template_name, ctx)
 
     def post(self, request, venta_id):
@@ -52,26 +54,35 @@ class PaymentCreateView(EmpresaPermRequiredMixin, View):
 
         confirmar_split = request.POST.get("confirmar_split") == "1"
 
+        # >>> CLAVE: si saldo==0 y se confirmó, es propina pura (no split)
+        es_propina_pura = confirmar_split and (venta.saldo_pendiente == 0)
+        usar_split = confirmar_split and (venta.saldo_pendiente > 0)
+
         try:
             pagos = registrar_pago(
                 venta=venta,
                 medio=medio,
                 monto=form.cleaned_data["monto"],
-                es_propina=form.cleaned_data.get("es_propina", False),
+                es_propina=es_propina_pura,           # True solo en propina pura
                 referencia=form.cleaned_data.get("referencia") or "",
                 notas=form.cleaned_data.get("notas") or "",
                 creado_por=request.user,
-                idempotency_key=form.cleaned_data.get("idempotency_key"),
-                auto_split_propina=confirmar_split,
+                idempotency_key=None,
+                auto_split_propina=usar_split,        # split solo si hay saldo>0
             )
-            if confirmar_split and len(pagos) == 2:
+
+            if es_propina_pura:
+                messages.success(request, "Propina registrada correctamente.")
+            elif usar_split and len(pagos) == 2:
                 messages.success(
                     request, "Pago registrado: saldo cubierto y diferencia aplicada como propina.")
             else:
                 messages.success(request, "Pago registrado correctamente.")
+
             return redirect("sales:detail", pk=venta.pk)
 
         except OverpayNeedsConfirmation as e:
+            # re-render con auto-modal (sin botones en body)
             ctx = {
                 "form": form,
                 "venta": venta,
