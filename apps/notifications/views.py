@@ -4,17 +4,17 @@ Vistas de apps.notifications
 
 Incluye:
 - CRUD de PlantillaNotif (List/Create/Update).
-- Enviar notificación desde una venta (GET/POST).
+- Enviar notificación desde una venta (GET/POST) [WhatsApp en MVP].
 - Preview de plantilla.
 - (Opcional) listado de logs.
 
-Convenciones:
-- Tenancy: se filtra por request.empresa_activa en todos los QuerySets.
-- Seguridad: en MVP verificamos autenticación + pertenencia de venta/plantilla a la empresa.
-- Estados habilitantes: SOLO se permite enviar cuando venta.estado == "terminado"
-  (la validación principal vive en dispatcher.enviar_desde_venta()).
+Refactor de seguridad/tenancy:
+- ✅ Usa EmpresaPermRequiredMixin (no mezclar con LoginRequiredMixin).
+- ✅ required_perms por vista con Perm.* (fuente de verdad).
+- ✅ Filtra por empresa activa y setea flags de permiso en el contexto.
+- ✅ La validación “solo ventas TERMINADAS” vive en dispatcher.enviar_desde_venta().
 
-Templates esperados (según la doc que compartiste):
+Templates esperados:
 - notifications/templates_list.html
 - notifications/template_form.html
 - notifications/send_from_sale.html
@@ -27,14 +27,21 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 import uuid
+
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import ListView, CreateView, UpdateView, FormView
+
+from apps.org.permissions import (
+    EmpresaPermRequiredMixin,
+    Perm,
+    has_empresa_perm,
+)
+
 from .forms import TemplateForm, SendFromSaleForm, PreviewForm
 from .models import PlantillaNotif, LogNotif, Canal
 from .services import dispatcher, renderers
@@ -42,54 +49,23 @@ from . import selectors
 
 
 # --------------------------
-# Mixins utilitarios (MVP)
-# --------------------------
-class EmpresaContextMixin:
-    """Inyecta empresa_activa en self.empresa y en el contexto."""
-
-    empresa_attr_name = "empresa_activa"
-
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        self.empresa = getattr(request, self.empresa_attr_name, None)
-        if not self.empresa:
-            raise PermissionDenied("No hay empresa activa en la sesión.")
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx["empresa"] = self.empresa
-        return ctx
-
-
-class RoleGuardMixin:
-    """
-    Guardado para permisos “suaves” en MVP.
-    - allow_manage_templates: quién puede crear/editar plantillas (default: todos los autenticados).
-    - allow_send_notifications: quién puede enviar (default: todos los autenticados).
-    Cambiá estos métodos cuando tengas el módulo de permisos finos.
-    """
-
-    def allow_manage_templates(self, request: HttpRequest) -> bool:
-        # MVP: permitir a cualquier autenticado; tu comment indicó “sería solo admin”,
-        # pero lo dejamos abierto para ajustar luego.
-        return request.user.is_authenticated
-
-    def allow_send_notifications(self, request: HttpRequest) -> bool:
-        return request.user.is_authenticated
-
-
-# --------------------------
 # CRUD Plantillas
 # --------------------------
-class TemplateListView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, ListView):
+class TemplateListView(EmpresaPermRequiredMixin, ListView):
+    """
+    Listado de plantillas de la empresa activa.
+    Permiso requerido: NOTIF_TEMPLATES_MANAGE (admin).
+    """
+    required_perms = (Perm.NOTIF_TEMPLATES_MANAGE,)
+
     model = PlantillaNotif
     template_name = "notifications/templates_list.html"
     context_object_name = "plantillas"
     paginate_by = 20
 
     def get_queryset(self):
-        qs = PlantillaNotif.objects.filter(
-            empresa=self.empresa).order_by("clave")
+        emp = self.empresa_activa
+        qs = PlantillaNotif.objects.filter(empresa=emp).order_by("clave")
         canal = self.request.GET.get("canal")
         # "activos" | "inactivos" | None
         estado = self.request.GET.get("estado")
@@ -104,26 +80,47 @@ class TemplateListView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, 
             qs = qs.filter(clave__icontains=q)
         return qs
 
-    def dispatch(self, request, *args, **kwargs):
-        if not self.allow_manage_templates(request):
-            raise PermissionDenied("No tenés permisos para ver plantillas.")
-        return super().dispatch(request, *args, **kwargs)
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        emp = self.empresa_activa
+        user = self.request.user
+        # Flags UI
+        ctx["empresa"] = emp
+        ctx["puede_crear"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        ctx["puede_editar"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        ctx["puede_enviar"] = has_empresa_perm(user, emp, Perm.NOTIF_SEND)
+        ctx["puede_ver_logs"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_LOGS_VIEW)
+        return ctx
 
 
-class TemplateCreateView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, CreateView):
+class TemplateCreateView(EmpresaPermRequiredMixin, CreateView):
+    """
+    Alta de plantilla (WhatsApp o Email).
+    Permiso requerido: NOTIF_TEMPLATES_MANAGE (admin).
+    """
+    required_perms = (Perm.NOTIF_TEMPLATES_MANAGE,)
+
     model = PlantillaNotif
     template_name = "notifications/template_form.html"
     form_class = TemplateForm
     success_url = reverse_lazy("notifications:templates_list")
 
-    def dispatch(self, request, *args, **kwargs):
-        if not self.allow_manage_templates(request):
-            raise PermissionDenied("No tenés permisos para crear plantillas.")
-        return super().dispatch(request, *args, **kwargs)
+    def get_initial(self):
+        """
+        Para nuevas plantillas, default canal = whatsapp.
+        Esto permite que el form quite el campo asunto_tpl
+        en la primera carga (no aparece nunca para WhatsApp).
+        """
+        initial = super().get_initial()
+        initial.setdefault("canal", Canal.WHATSAPP)
+        return initial
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        kwargs["empresa"] = self.empresa
+        kwargs["empresa"] = self.empresa_activa
         kwargs["creado_por"] = self.request.user
         return kwargs
 
@@ -135,25 +132,37 @@ class TemplateCreateView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin
         messages.error(self.request, _("Revisá los errores en el formulario."))
         return super().form_invalid(form)
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        emp = self.empresa_activa
+        user = self.request.user
+        ctx["empresa"] = emp
+        ctx["puede_crear"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        ctx["puede_editar"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        return ctx
 
-class TemplateUpdateView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, UpdateView):
+
+class TemplateUpdateView(EmpresaPermRequiredMixin, UpdateView):
+    """
+    Edición de plantilla (WhatsApp o Email).
+    Permiso requerido: NOTIF_TEMPLATES_MANAGE (admin).
+    """
+    required_perms = (Perm.NOTIF_TEMPLATES_MANAGE,)
+
     model = PlantillaNotif
     template_name = "notifications/template_form.html"
     form_class = TemplateForm
     success_url = reverse_lazy("notifications:templates_list")
 
-    def dispatch(self, request, *args, **kwargs):
-        if not self.allow_manage_templates(request):
-            raise PermissionDenied("No tenés permisos para editar plantillas.")
-        return super().dispatch(request, *args, **kwargs)
-
     def get_queryset(self):
-        # Tenancy
-        return PlantillaNotif.objects.filter(empresa=self.empresa)
+        # Tenancy: aseguramos que solo se pueda editar plantillas de la empresa activa
+        return PlantillaNotif.objects.filter(empresa=self.empresa_activa)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        kwargs["empresa"] = self.empresa
+        kwargs["empresa"] = self.empresa_activa
         kwargs["creado_por"] = self.request.user
         return kwargs
 
@@ -165,36 +174,40 @@ class TemplateUpdateView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin
         messages.error(self.request, _("Revisá los errores en el formulario."))
         return super().form_invalid(form)
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        emp = self.empresa_activa
+        user = self.request.user
+        ctx["empresa"] = emp
+        ctx["puede_crear"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        ctx["puede_editar"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_TEMPLATES_MANAGE)
+        return ctx
 
 # --------------------------
-# Enviar desde venta
+# Enviar desde venta (WhatsApp en MVP)
 # --------------------------
 
 
-class SendFromSaleView(LoginRequiredMixin, RoleGuardMixin, FormView):
+class SendFromSaleView(EmpresaPermRequiredMixin, FormView):
     """
     GET: formulario con plantillas ACTIVAS de WhatsApp + destinatario prellenado.
-    POST: renderiza, registra Log 'preparado' y muestra botón 'Abrir WhatsApp Web'.
+    POST: usa dispatcher.enviar_desde_venta() (valida estado=terminado),
+          registra Log y muestra botón 'Abrir WhatsApp Web'.
     """
+    required_perms = (Perm.NOTIF_SEND,)
+
     template_name = "notifications/send_from_sale.html"
     form_class = SendFromSaleForm
 
     def dispatch(self, request, *args, **kwargs):
-        if not self.allow_send_notifications(request):
-            raise PermissionDenied(
-                "No tenés permisos para enviar notificaciones.")
-
-        empresa = getattr(request, "empresa_activa", None)
-        if not empresa:
-            raise PermissionDenied("No hay empresa activa en la sesión.")
-        self.empresa = empresa
-
+        emp = self.empresa_activa
         from apps.sales.models import Venta  # evitar ciclos
         self.venta = get_object_or_404(Venta, pk=kwargs.get("venta_id"))
-        if self.venta.empresa_id != self.empresa.id:
+        if self.venta.empresa_id != emp.id:
             raise PermissionDenied(
                 "La venta no pertenece a la empresa activa.")
-
         return super().dispatch(request, *args, **kwargs)
 
     def get_success_url(self):
@@ -202,16 +215,17 @@ class SendFromSaleView(LoginRequiredMixin, RoleGuardMixin, FormView):
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
+        emp = self.empresa_activa
 
         # SOLO plantillas WhatsApp
-        qs_plantillas = selectors.plantillas_activas_whatsapp(self.empresa.id)
+        qs_plantillas = selectors.plantillas_activas_whatsapp(emp.id)
 
         # destinatario sugerido: teléfono WhatsApp del cliente
         cliente = getattr(self.venta, "cliente", None)
         initial_dest = getattr(cliente, "tel_wpp", "") or ""
 
         kwargs.update({
-            "empresa": self.empresa,
+            "empresa": emp,
             "venta": self.venta,
             "queryset_plantillas": qs_plantillas,
             "initial_destinatario": initial_dest,
@@ -219,60 +233,34 @@ class SendFromSaleView(LoginRequiredMixin, RoleGuardMixin, FormView):
         return kwargs
 
     def form_valid(self, form: SendFromSaleForm):
-        from .models import Canal, EstadoEnvio  # usar enums reales
-
         plantilla: PlantillaNotif = form.cleaned_data["plantilla"]
         destinatario = form.cleaned_data["destinatario"]
         nota_extra = form.cleaned_data.get("nota_extra") or ""
         idempotency_key = form.cleaned_data.get("idempotency_key") or ""
 
-        # 1) Render (tu renderer devuelve RenderResult / dict / str)
-        render_out = renderers.render(
-            plantilla=plantilla,
-            venta=self.venta,
-            extras={"nota_extra": nota_extra} if nota_extra else {},
-        )
-        # Normalizá a texto
-        if hasattr(render_out, "cuerpo"):
-            cuerpo_renderizado = render_out.cuerpo
-            asunto_renderizado = getattr(render_out, "asunto", "") or ""
-        elif isinstance(render_out, dict):
-            cuerpo_renderizado = render_out.get("cuerpo", "")
-            asunto_renderizado = render_out.get("asunto", "")
-        else:
-            cuerpo_renderizado = str(render_out)
-            asunto_renderizado = ""
-
-        # 2) Deep link para WhatsApp Web (tolerante a bytes/str)
-        wa_url = dispatcher.build_whatsapp_web_url(
-            destinatario, cuerpo_renderizado)
-
-        # 3) Registrar Log como 'enviado' (MVP simulado)
+        # Orquestación centralizada (valida estado TERMINADO, canal, tenant, etc.)
         try:
-            LogNotif.objects.create(
-                id=uuid.uuid4(),
-                empresa=self.empresa,                # <-- requerido por tu modelo
-                venta=self.venta,
+            log = dispatcher.enviar_desde_venta(
                 plantilla=plantilla,
-                canal=Canal.WHATSAPP,
+                venta=self.venta,
                 destinatario=destinatario,
-                asunto_renderizado=asunto_renderizado,
-                cuerpo_renderizado=cuerpo_renderizado,
-                estado=EstadoEnvio.ENVIADO,         # <-- tus choices reales
-                error_msg="",
+                actor=self.request.user,
+                extras={"nota_extra": nota_extra} if nota_extra else None,
                 idempotency_key=idempotency_key,
-                meta={"nota_extra": nota_extra, "simulado": True},
-                creado_por=self.request.user,
             )
-        except Exception as e:
-            # Si fallara el log, no rompemos la UX de WhatsApp; mostramos warning.
-            messages.warning(self.request, f"No se pudo registrar el log: {e}")
+        except dispatcher.NotificationError as e:
+            messages.error(self.request, str(e))
+            return super().form_invalid(form)
 
-        # 4) Feedback + render con botón a WhatsApp
+        # Deep link WhatsApp Web con el cuerpo renderizado que quedó en el Log
+        wa_url = dispatcher.build_whatsapp_web_url(
+            log.destinatario, log.cuerpo_renderizado
+        )
+
         messages.success(self.request, "Mensaje preparado para WhatsApp Web.")
         context = self.get_context_data(form=form, venta=self.venta)
         context.update({
-            "cuerpo_renderizado": cuerpo_renderizado,
+            "cuerpo_renderizado": log.cuerpo_renderizado,
             "wa_url": wa_url,
             "was_prepared": True,
         })
@@ -288,38 +276,39 @@ class SendFromSaleView(LoginRequiredMixin, RoleGuardMixin, FormView):
         tanto en GET como en POST (éxito o inválido).
         """
         ctx = super().get_context_data(**kwargs)
-        # Venta siempre presente (la cargamos en dispatch)
+        emp = self.empresa_activa
+        user = self.request.user
         ctx.setdefault("venta", getattr(self, "venta", None))
-        # Flags por defecto para evitar err 500 por variables no definidas
         ctx.setdefault("was_prepared", False)
         ctx.setdefault("wa_url", "")
         ctx.setdefault("cuerpo_renderizado", "")
+        # Flags UI
+        ctx["empresa"] = emp
+        ctx["puede_enviar"] = has_empresa_perm(user, emp, Perm.NOTIF_SEND)
         return ctx
+
+
 # --------------------------
 # Preview
 # --------------------------
-
-
-class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormView):
+class PreviewView(EmpresaPermRequiredMixin, FormView):
     """
     Renderiza vista previa de una plantilla.
     Si se provee venta_id válido (y de la empresa), usa datos reales.
     Si no, construye un contexto de muestra (mínimo) sin romper.
+    Permiso: NOTIF_TEMPLATES_MANAGE (admin), ya que expone cuerpo/variables.
     """
+    required_perms = (Perm.NOTIF_TEMPLATES_MANAGE,)
+
     template_name = "notifications/preview.html"
     form_class = PreviewForm
 
-    def dispatch(self, request, *args, **kwargs):
-        if not self.allow_manage_templates(request):
-            raise PermissionDenied(
-                "No tenés permisos para previsualizar plantillas.")
-        return super().dispatch(request, *args, **kwargs)
-
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        kwargs["empresa"] = self.empresa
+        kwargs["empresa"] = self.empresa_activa
         kwargs["queryset_plantillas"] = PlantillaNotif.objects.filter(
-            empresa=self.empresa).order_by("clave")
+            empresa=self.empresa_activa
+        ).order_by("clave")
         return kwargs
 
     def form_valid(self, form: PreviewForm):
@@ -331,7 +320,7 @@ class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormV
         if venta_id:
             from apps.sales.models import Venta
             venta = get_object_or_404(Venta, pk=venta_id)
-            if venta.empresa_id != self.empresa.id:
+            if venta.empresa_id != self.empresa_activa.id:
                 raise PermissionDenied(
                     "La venta no pertenece a la empresa activa.")
 
@@ -344,7 +333,7 @@ class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormV
             venta.id = "UUID-DE-EJEMPLO"
             venta.total = "—"
             venta.estado = "terminado"
-            venta.empresa = self.empresa
+            venta.empresa = self.empresa_activa
 
             cliente = Dummy()
             cliente.nombre = "Juana"
@@ -357,15 +346,18 @@ class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormV
             vehiculo.marca = "Toyota"
             vehiculo.modelo = "Etios"
 
-            sucursal = getattr(self, "request").sucursal_activa
+            # sucursal_activa la expone el middleware; si no existe, toleramos
+            sucursal = getattr(self.request, "sucursal_activa", None)
             venta.cliente = cliente
             venta.vehiculo = vehiculo
             venta.sucursal = sucursal
 
-        result = renderers.render(plantilla, venta, extras={
-                                  "nota_extra": nota_extra} if nota_extra else None)
+        result = renderers.render(
+            plantilla,
+            venta,
+            extras={"nota_extra": nota_extra} if nota_extra else None,
+        )
 
-        # Pasamos el resultado al template
         ctx = self.get_context_data(form=form)
         ctx.update(
             {
@@ -373,6 +365,7 @@ class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormV
                 "asunto_renderizado": result.asunto,
                 "cuerpo_renderizado": result.cuerpo,
                 "contexto_usado": result.contexto,
+                "empresa": self.empresa_activa,
             }
         )
         return self.render_to_response(ctx)
@@ -381,15 +374,24 @@ class PreviewView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, FormV
 # --------------------------
 # (Opcional) Listado de logs
 # --------------------------
-class LogListView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, ListView):
+class LogListView(EmpresaPermRequiredMixin, ListView):
+    """
+    Listado de logs de notificaciones.
+    Permiso: NOTIF_LOGS_VIEW (admin y operador).
+    """
+    required_perms = (Perm.NOTIF_LOGS_VIEW,)
+
     model = LogNotif
     template_name = "notifications/logs_list.html"
     context_object_name = "logs"
     paginate_by = 30
 
     def get_queryset(self):
-        qs = LogNotif.objects.filter(
-            empresa=self.empresa).select_related("venta", "plantilla")
+        emp = self.empresa_activa
+        qs = (
+            LogNotif.objects.filter(empresa=emp)
+            .select_related("venta", "plantilla")
+        )
         canal = self.request.GET.get("canal")
         estado = self.request.GET.get("estado")
         venta_id = (self.request.GET.get("venta") or "").strip()
@@ -416,3 +418,13 @@ class LogListView(LoginRequiredMixin, EmpresaContextMixin, RoleGuardMixin, ListV
                 pass
 
         return qs.order_by("-enviado_en")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        emp = self.empresa_activa
+        user = self.request.user
+        ctx["empresa"] = emp
+        ctx["puede_ver_logs"] = has_empresa_perm(
+            user, emp, Perm.NOTIF_LOGS_VIEW)
+        ctx["puede_enviar"] = has_empresa_perm(user, emp, Perm.NOTIF_SEND)
+        return ctx

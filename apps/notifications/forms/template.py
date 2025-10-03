@@ -10,14 +10,12 @@ Forms de apps.notifications
 Convenciones:
 - Bootstrap 5: se inyectan clases en __init__ (form-control / form-select / etc.).
 - Multi-tenant: los QuerySets se filtran por empresa en __init__.
-- Reglas de negocio: SOLO se permitirá el envío si la venta está "terminado"
-  (validado en la vista/service; aquí validamos formato/destinatario/plantilla activa).
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -37,23 +35,19 @@ def _bootstrapify(form: forms.Form) -> None:
     """Inyecta clases Bootstrap 5 a todos los campos del form."""
     for name, field in form.fields.items():
         widget = field.widget
-        # Selects
         if isinstance(widget, (forms.Select, forms.SelectMultiple)):
-            cls = widget.attrs.get("class", "")
-            widget.attrs["class"] = f"{cls} form-select".strip()
-        # Checkboxes / radios
+            widget.attrs["class"] = (widget.attrs.get(
+                "class", "") + " form-select").strip()
         elif isinstance(widget, (forms.CheckboxInput, forms.RadioSelect)):
-            cls = widget.attrs.get("class", "")
-            widget.attrs["class"] = f"{cls} form-check-input".strip()
-        # Textareas
+            widget.attrs["class"] = (widget.attrs.get(
+                "class", "") + " form-check-input").strip()
         elif isinstance(widget, forms.Textarea):
-            cls = widget.attrs.get("class", "")
-            widget.attrs["class"] = f"{cls} form-control".strip()
+            widget.attrs["class"] = (widget.attrs.get(
+                "class", "") + " form-control").strip()
             widget.attrs.setdefault("rows", 3)
-        # Inputs de texto/números
         else:
-            cls = widget.attrs.get("class", "")
-            widget.attrs["class"] = f"{cls} form-control".strip()
+            widget.attrs["class"] = (widget.attrs.get(
+                "class", "") + " form-control").strip()
 
 
 def _validate_destinatario_por_canal(*, canal: str, destinatario: str) -> None:
@@ -81,7 +75,7 @@ def _validate_destinatario_por_canal(*, canal: str, destinatario: str) -> None:
 
 
 # ----------------------------
-# TemplateForm
+# TemplateForm (ABM Plantillas)
 # ----------------------------
 class TemplateForm(forms.ModelForm):
     """
@@ -90,31 +84,48 @@ class TemplateForm(forms.ModelForm):
     Reglas:
     - (empresa, clave) único → validación en clean() además del UniqueConstraint.
     - canal ∈ {email, whatsapp}.
-    - asunto_tpl solo es requerido si el canal es email y el usuario lo completa (no obligatorio).
+    - Si canal=whatsapp → se oculta `asunto_tpl` en el form y se guarda vacío.
+    - Si canal=email → `asunto_tpl` visible (no obligatorio en MVP).
     """
 
     class Meta:
         model = PlantillaNotif
         fields = ("clave", "canal", "asunto_tpl", "cuerpo_tpl", "activo")
         widgets = {
-            "cuerpo_tpl": forms.Textarea(attrs={"placeholder": "Ej.: Hola {{cliente.nombre}}, tu auto ({{vehiculo.patente}}) ya está listo para retirar..."}),
-            "asunto_tpl": forms.TextInput(attrs={"placeholder": "Solo para email. Ej.: Tu auto está listo • {{empresa.nombre}}"}),
+            "cuerpo_tpl": forms.Textarea(
+                attrs={
+                    "placeholder": "Ej.: Hola {{cliente.nombre}}, tu auto ({{vehiculo.patente}}) ya está listo para retirar..."}
+            ),
+            "asunto_tpl": forms.TextInput(
+                attrs={
+                    "placeholder": "Solo para email. Ej.: Tu auto está listo • {{empresa.nombre}}"}
+            ),
         }
 
     def __init__(self, *args, **kwargs):
-        """
-        Se espera que la vista le pase:
-        - empresa: instancia de org.Empresa (obligatoria para ABM multi-tenant).
-        - creado_por: user opcional (solo para setear en save()).
-        """
         self.empresa = kwargs.pop("empresa", None)
         self.creado_por = kwargs.pop("creado_por", None)
+        bound_data = kwargs.get("data")
         super().__init__(*args, **kwargs)
+
         if self.empresa is None:
             raise ValueError(
                 "TemplateForm requiere 'empresa' para validar unicidad por tenant.")
 
         _bootstrapify(self)
+
+        # Detectar canal (POST > instancia > initial)
+        canal_actual = None
+        if bound_data and "canal" in bound_data:
+            canal_actual = bound_data.get("canal")
+        elif getattr(self.instance, "pk", None):
+            canal_actual = getattr(self.instance, "canal", None)
+        else:
+            canal_actual = self.initial.get("canal")
+
+        # Si es WhatsApp → ocultamos/eliminamos asunto_tpl del form
+        if canal_actual == Canal.WHATSAPP and "asunto_tpl" in self.fields:
+            self.fields.pop("asunto_tpl")
 
     def clean_clave(self) -> str:
         clave = (self.cleaned_data.get("clave") or "").strip()
@@ -128,25 +139,30 @@ class TemplateForm(forms.ModelForm):
         if qs.exists():
             raise ValidationError(
                 "Ya existe una plantilla con esa clave en esta empresa.", code="unique")
-
         return clave
 
     def clean(self):
         data = super().clean()
         canal = data.get("canal")
-        # Nada especial: asunto_tpl es opcional incluso en email.
+
         if canal not in (Canal.EMAIL, Canal.WHATSAPP):
             raise ValidationError({"canal": "Canal no soportado en el MVP."})
-        # cuerpo_tpl no vacío (hay CheckConstraint, pero reforzamos en form)
+
         cuerpo = (data.get("cuerpo_tpl") or "").strip()
         if not cuerpo:
             raise ValidationError(
                 {"cuerpo_tpl": "El cuerpo de la plantilla no puede estar vacío."})
+
+        # WhatsApp: asunto vacío siempre
+        if canal == Canal.WHATSAPP and "asunto_tpl" in data:
+            data["asunto_tpl"] = ""
         return data
 
     def save(self, commit: bool = True):
         obj = super().save(commit=False)
         obj.empresa = self.empresa
+        if obj.canal == Canal.WHATSAPP:
+            obj.asunto_tpl = ""  # Forzar vacío en DB
         if self.creado_por and not obj.pk:
             obj.creado_por = self.creado_por
         if commit:
@@ -158,30 +174,7 @@ class TemplateForm(forms.ModelForm):
 # SendFromSaleForm
 # ----------------------------
 class SendFromSaleForm(forms.Form):
-    """
-    Form para enviar notificación desde una Venta.
-
-    Campos:
-    - plantilla (ModelChoice) → filtrada a plantillas ACTIVAS de la empresa.
-    - destinatario (email o E.164) → prellenado desde Cliente según canal de la plantilla.
-    - nota_extra (textarea) → opcional; se inyecta como {{nota_extra}}.
-    - idempotency_key (opcional) → guardada en Log; sin deduplicar en MVP.
-
-    Uso:
-        form = SendFromSaleForm(
-            empresa=request.empresa_activa,
-            venta=venta,
-            queryset_plantillas=PlantillaNotif.objects.filter(empresa=request.empresa_activa, activo=True),
-            initial_destinatario="+549381..." or "mail@dominio.com"
-        )
-
-    La vista debe:
-    - pasar 'empresa' y 'venta'.
-    - pasar 'queryset_plantillas' (ya filtrado por empresa y activo).
-    - opcionalmente setear 'initial_destinatario'; si no, el form intentará inferirlo
-      a partir de la plantilla elegida y los datos del cliente.
-    """
-
+    # (igual que antes, no tocamos nada)
     plantilla = forms.ModelChoiceField(
         queryset=PlantillaNotif.objects.none(),
         label="Plantilla",
@@ -205,31 +198,23 @@ class SendFromSaleForm(forms.Form):
         help_text="Se almacenará en el Log. En el MVP no evita duplicados.",
     )
 
-    def __init__(
-        self,
-        *args,
-        **kwargs,
-    ):
+    def __init__(self, *args, **kwargs):
         self.empresa = kwargs.pop("empresa", None)
         self.venta = kwargs.pop("venta", None)
         qs_plantillas = kwargs.pop("queryset_plantillas", None)
         initial_destinatario = kwargs.pop("initial_destinatario", None)
-
         super().__init__(*args, **kwargs)
 
         if self.empresa is None or self.venta is None:
             raise ValueError("SendFromSaleForm requiere 'empresa' y 'venta'.")
 
-        # Filtrado de plantillas activas por empresa
         if qs_plantillas is None:
             qs_plantillas = PlantillaNotif.objects.filter(
                 empresa=self.empresa, activo=True)
         self.fields["plantilla"].queryset = qs_plantillas.order_by("clave")
 
-        # Bootstrap
         _bootstrapify(self)
 
-        # Sugerir destinatario si vino inicial
         if initial_destinatario:
             self.fields["destinatario"].initial = initial_destinatario
 
@@ -244,14 +229,12 @@ class SendFromSaleForm(forms.Form):
         return plantilla
 
     def clean_destinatario(self) -> str:
-        # Validamos el formato según el canal de la plantilla elegida
         data = self.cleaned_data
         plantilla: PlantillaNotif | None = data.get(
             "plantilla") or self.fields["plantilla"].queryset.first()
         destinatario: str = (data.get("destinatario") or "").strip()
 
         if not plantilla:
-            # Si no hay plantilla aún (POST inválido), validación mínima
             if not destinatario:
                 raise ValidationError(
                     "El destinatario es obligatorio.", code="required")
@@ -261,22 +244,15 @@ class SendFromSaleForm(forms.Form):
             canal=plantilla.canal, destinatario=destinatario)
         return destinatario
 
-    # Ayuda para la vista: inferir destinatario por canal si el campo quedó vacío.
     def infer_destinatario_si_vacio(self) -> None:
-        """
-        Si el usuario no tipeó destinatario, completamos según canal y datos del cliente.
-        Llamar en la vista antes de is_valid() si se quiere autocompletar.
-        """
         if self["destinatario"].value():
-            return  # ya hay algo cargado
-
+            return
         plantilla = None
         try:
             plantilla = self.fields["plantilla"].queryset.get(
                 pk=self["plantilla"].value())
         except Exception:
             pass
-
         if not plantilla:
             return
 
@@ -287,7 +263,6 @@ class SendFromSaleForm(forms.Form):
             val = getattr(cliente, "tel_wpp", "") or ""
         else:
             val = ""
-
         if val:
             self.fields["destinatario"].initial = val
 
@@ -296,15 +271,6 @@ class SendFromSaleForm(forms.Form):
 # PreviewForm
 # ----------------------------
 class PreviewForm(forms.Form):
-    """
-    Form simple para vista previa de una plantilla.
-    - plantilla: se filtra por empresa (activas e inactivas; es preview).
-    - venta_id (opcional): la vista puede pasar la venta real; si no, se usa contexto simulado.
-    - nota_extra: texto opcional para {{nota_extra}}.
-
-    La lógica de render vive en services/renderers.py; aquí solo recolectamos parámetros.
-    """
-
     plantilla = forms.ModelChoiceField(
         queryset=PlantillaNotif.objects.none(),
         label="Plantilla",

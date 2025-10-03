@@ -237,6 +237,12 @@ class Perm(str, Enum):
     # usar vistas públicas (generalmente sin auth)
     INVOICING_PUBLIC_ACCESS = "INVOICING_PUBLIC_ACCESS"
 
+    NOTIF_TEMPLATES_MANAGE = "notifications.templates.manage"   # CRUD plantillas
+    # Enviar notificaciones (cualquier canal)
+    NOTIF_SEND = "notifications.send"
+    # Listar logs históricos
+    NOTIF_LOGS_VIEW = "notifications.logs.view"
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -319,6 +325,10 @@ ROLE_POLICY = {
         Perm.INVOICING_ANNUL,
         Perm.INVOICING_DOWNLOAD,
         Perm.INVOICING_PUBLIC_ACCESS,
+
+        Perm.NOTIF_TEMPLATES_MANAGE,
+        Perm.NOTIF_SEND,
+        Perm.NOTIF_LOGS_VIEW,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -364,6 +374,8 @@ ROLE_POLICY = {
         Perm.INVOICING_EMIT,        # puede emitir comprobantes de ventas pagadas
         Perm.INVOICING_DOWNLOAD,    # puede descargar comprobantes emitidos
 
+        Perm.NOTIF_SEND,
+        Perm.NOTIF_LOGS_VIEW,
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.

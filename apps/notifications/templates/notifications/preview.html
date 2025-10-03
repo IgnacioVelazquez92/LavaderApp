@@ -97,7 +97,13 @@
           <span class="fw-semibold">Resultado</span>
           {% if plantilla %}
             <span class="badge {% if plantilla.canal == 'email' %}text-bg-primary{% elif plantilla.canal == 'whatsapp' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
-              {% if plantilla.canal == 'email' %}<i class="bi bi-envelope-fill me-1"></i>Email{% elif plantilla.canal == 'whatsapp' %}<i class="bi bi-whatsapp me-1"></i>WhatsApp{% else %}{{ plantilla.get_canal_display }}{% endif %}
+              {% if plantilla.canal == 'email' %}
+                <i class="bi bi-envelope-fill me-1"></i>Email
+              {% elif plantilla.canal == 'whatsapp' %}
+                <i class="bi bi-whatsapp me-1"></i>WhatsApp
+              {% else %}
+                {{ plantilla.get_canal_display }}
+              {% endif %}
             </span>
           {% endif %}
         </div>
@@ -132,15 +138,23 @@
               <div class="col-12 col-md-6">
                 <div class="border rounded p-2 h-100">
                   <div class="fw-semibold text-muted text-uppercase small mb-2">{{ group }}</div>
-                  {% if data.items %}
-                    <dl class="row mb-0 small">
-                      {% for k, v in data.items %}
-                        <dt class="col-5 text-muted">{{ k }}</dt>
-                        <dd class="col-7 mb-1">{{ v }}</dd>
-                      {% endfor %}
-                    </dl>
+
+                  {# Si el grupo es nota_extra (o cualquier escalar), lo mostramos directo #}
+                  {% if group == "nota_extra" %}
+                    <div class="small">{{ data|default:"—" }}</div>
+
+                  {# Caso general: asumimos dict con items (cliente, vehiculo, venta, empresa, sucursal) #}
                   {% else %}
-                    <div class="small text-muted">—</div>
+                    {% if data.items %}
+                      <dl class="row mb-0 small">
+                        {% for k, v in data.items %}
+                          <dt class="col-5 text-muted">{{ k }}</dt>
+                          <dd class="col-7 mb-1">{{ v|default:"—" }}</dd>
+                        {% endfor %}
+                      </dl>
+                    {% else %}
+                      <div class="small text-muted">{{ data|default:"—" }}</div>
+                    {% endif %}
                   {% endif %}
                 </div>
               </div>
