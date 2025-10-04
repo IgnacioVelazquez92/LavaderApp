@@ -8,7 +8,9 @@
   <div class="d-flex align-items-center justify-content-between mb-3">
     <div>
       <h1 class="h3 mb-0">Enviar notificación al cliente</h1>
-      <p class="text-muted mb-0">Elegí una plantilla de WhatsApp, confirmá el destinatario y prepará el mensaje.</p>
+      <p class="text-muted mb-0">
+        Elegí una plantilla (Email o WhatsApp), confirmá el destinatario y enviá/prepará el mensaje.
+      </p>
     </div>
     <div>
       <a href="{% url 'sales:detail' venta.id %}" class="btn btn-outline-secondary">
@@ -16,6 +18,25 @@
       </a>
     </div>
   </div>
+
+  {# Banner SMTP #}
+  {% if not smtp_activo %}
+    <div class="alert alert-warning d-flex align-items-center" role="alert">
+      <div class="me-2">⚠️</div>
+      <div>
+        <strong>No hay servidor SMTP activo.</strong>
+        <div class="small text-muted">
+          Los envíos por <b>Email</b> fallarán hasta que un administrador configure un servidor SMTP.
+          Los envíos por <b>WhatsApp</b> siguen funcionando normalmente.
+        </div>
+      </div>
+      {% if puede_crear_smtp %}
+        <a class="btn btn-sm btn-outline-secondary ms-auto" href="{% url 'notifications:emailserver_list' %}">
+          Configurar SMTP
+        </a>
+      {% endif %}
+    </div>
+  {% endif %}
 
   <form method="post" novalidate>
     {% csrf_token %}
@@ -31,17 +52,21 @@
           {% if form.plantilla.errors %}
             <div class="invalid-feedback d-block">{{ form.plantilla.errors|striptags }}</div>
           {% else %}
-            <div class="form-text">Se listan solo las plantillas <strong>activas</strong> de WhatsApp.</div>
+            <div class="form-text">
+              Se listan solo las plantillas <strong>activas</strong> del sistema (Email y WhatsApp).
+            </div>
           {% endif %}
         </div>
 
         <div class="mb-3">
-          <label for="{{ form.destinatario.id_for_label }}" class="form-label fw-semibold">Destinatario (WhatsApp)</label>
+          <label for="{{ form.destinatario.id_for_label }}" class="form-label fw-semibold">Destinatario</label>
           {{ form.destinatario }}
           {% if form.destinatario.errors %}
             <div class="invalid-feedback d-block">{{ form.destinatario.errors|striptags }}</div>
           {% else %}
-            <div class="form-text">Formato E.164 (ej.: +549381XXXXXXX).</div>
+            <div class="form-text">
+              Si la plantilla es <b>Email</b>, usá un correo válido. Si es <b>WhatsApp</b>, usá formato E.164 (ej.: +549381XXXXXXX).
+            </div>
           {% endif %}
         </div>
 
@@ -64,14 +89,14 @@
       <div class="card-footer d-flex justify-content-between">
         <a href="{% url 'sales:detail' venta.id %}" class="btn btn-outline-secondary">Cancelar</a>
         <button type="submit" class="btn btn-primary">
-          <i class="bi bi-send me-1"></i>Preparar mensaje
+          <i class="bi bi-send me-1"></i>Enviar / Preparar
         </button>
       </div>
     </div>
   </form>
 </div>
 
-{# ===== Modal de Vista Previa ===== #}
+{# ===== Modal de Vista Previa (solo WhatsApp) ===== #}
 <div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">

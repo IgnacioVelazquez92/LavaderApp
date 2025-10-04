@@ -1,0 +1,227 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="container-fluid px-0">
+
+  <!-- Header + Breadcrumb -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-1">
+          <li class="breadcrumb-item"><a href="{% url 'notifications:emailserver_list' %}">{% trans "Servidores SMTP" %}</a></li>
+          <li class="breadcrumb-item active" aria-current="page">
+            {% if object %}{% trans "Editar" %}{% else %}{% trans "Nuevo" %}{% endif %}
+          </li>
+        </ol>
+      </nav>
+      <h1 class="h4 mb-0">
+        {% if object %}{% trans "Editar servidor SMTP" %}{% else %}{% trans "Nuevo servidor SMTP" %}{% endif %}
+      </h1>
+    </div>
+
+    <div class="text-end">
+      {% if object %}
+        <span class="badge bg-{% if object.activo %}success{% else %}secondary{% endif %}">
+          {% if object.activo %}{% trans "Activo" %}{% else %}{% trans "Inactivo" %}{% endif %}
+        </span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Info compacta -->
+  <div class="alert alert-light border d-flex align-items-start gap-2 mb-4">
+    <div class="flex-grow-1">
+      <strong class="d-block mb-1">{% trans "Configuración segura y simple" %}</strong>
+      <small class="text-muted">
+        {% trans "Elegí un único modo de seguridad (STARTTLS o SSL). El puerto sugerido se completa automáticamente. La contraseña no se mostrará; dejá el campo vacío para mantener la actual." %}
+      </small>
+    </div>
+  </div>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <div class="row gy-4">
+      <!-- Card: Cuenta y Remitente -->
+      <div class="col-12 col-lg-6">
+        <div class="card shadow-sm h-100">
+          <div class="card-header py-2">
+            <strong>{% trans "Cuenta y remitente" %}</strong>
+          </div>
+          <div class="card-body">
+            <!-- nombre -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.nombre.id_for_label }}">{{ form.nombre.label }}</label>
+              {{ form.nombre }}
+              {% if form.nombre.help_text %}<div class="form-text">{{ form.nombre.help_text }}</div>{% endif %}
+              <div class="invalid-feedback d-block">{{ form.nombre.errors }}</div>
+            </div>
+
+            <!-- username -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+              <div class="input-group">
+                <span class="input-group-text">@</span>
+                {{ form.username }}
+              </div>
+              <div class="invalid-feedback d-block">{{ form.username.errors }}</div>
+            </div>
+
+            <!-- new_password (write-only) -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.new_password.id_for_label }}">{{ form.new_password.label }}</label>
+              {{ form.new_password }}
+              <div class="form-text">
+                {% trans "Dejar vacío para mantener la contraseña actual. No se mostrará por seguridad." %}
+              </div>
+              <div class="invalid-feedback d-block">{{ form.new_password.errors }}</div>
+            </div>
+
+            <!-- remitente_por_defecto -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.remitente_por_defecto.id_for_label }}">{{ form.remitente_por_defecto.label }}</label>
+              {{ form.remitente_por_defecto }}
+              <div class="form-text">
+                {% trans "Ejemplo: “Mi Empresa <info@dominio.com>”. Si se deja vacío, se usará la configuración global del sistema." %}
+              </div>
+              <div class="invalid-feedback d-block">{{ form.remitente_por_defecto.errors }}</div>
+            </div>
+
+            <!-- activo -->
+            <div class="form-check form-switch">
+              {{ form.activo }}
+              <label class="form-check-label ms-2" for="{{ form.activo.id_for_label }}">{{ form.activo.label }}</label>
+              <div class="invalid-feedback d-block">{{ form.activo.errors }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Servidor y Seguridad -->
+      <div class="col-12 col-lg-6">
+        <div class="card shadow-sm h-100">
+          <div class="card-header py-2">
+            <strong>{% trans "Servidor y seguridad" %}</strong>
+          </div>
+          <div class="card-body">
+            <!-- host -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.host.id_for_label }}">{{ form.host.label }}</label>
+              {{ form.host }}
+              <div class="form-text">
+                {% trans "Ej: smtp.gmail.com, smtp.office365.com, mail.tudominio.com" %}
+              </div>
+              <div class="invalid-feedback d-block">{{ form.host.errors }}</div>
+            </div>
+
+            <!-- Seguridad (radio UX) -->
+            <div class="mb-3">
+              <label class="form-label d-block">{% trans "Seguridad" %}</label>
+
+              <!-- Radios UX: una sola elección -->
+              <div class="btn-group" role="group" aria-label="{% trans 'Modo de seguridad' %}">
+                <input type="radio" class="btn-check" name="sec_mode" id="sec_none" value="none" autocomplete="off">
+                <label class="btn btn-outline-secondary" for="sec_none">{% trans "Ninguno" %}</label>
+
+                <input type="radio" class="btn-check" name="sec_mode" id="sec_tls" value="tls" autocomplete="off">
+                <label class="btn btn-outline-secondary" for="sec_tls">STARTTLS (587)</label>
+
+                <input type="radio" class="btn-check" name="sec_mode" id="sec_ssl" value="ssl" autocomplete="off">
+                <label class="btn btn-outline-secondary" for="sec_ssl">SSL (465)</label>
+              </div>
+
+              <div class="form-text mt-1">
+                {% trans "Elegí un modo. El puerto se sugerirá automáticamente." %}
+              </div>
+            </div>
+
+            <!-- port -->
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.port.id_for_label }}">{{ form.port.label }}</label>
+              <div class="input-group">
+                <span class="input-group-text">:</span>
+                {{ form.port }}
+              </div>
+              <div class="invalid-feedback d-block">{{ form.port.errors }}</div>
+            </div>
+
+            <!-- Campos reales del form (ocultos): use_tls / use_ssl -->
+            <div class="d-none">
+              {{ form.use_tls }}
+              {{ form.use_ssl }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer de acciones -->
+    <div class="d-flex align-items-center gap-2 mt-4">
+      <button type="submit" class="btn btn-primary">
+        {% trans "Guardar" %}
+      </button>
+      <a href="{% url 'notifications:emailserver_list' %}" class="btn btn-outline-secondary">
+        {% trans "Cancelar" %}
+      </a>
+
+      {% if object and puede_testear %}
+        <a href="{% url 'notifications:emailserver_test' object.pk %}" class="btn btn-info ms-auto">
+          {% trans "Probar conexión" %}
+        </a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<!-- Script UX: asegura un único modo y sugiere puerto -->
+<script>
+(function() {
+  const useTls = document.getElementById('{{ form.use_tls.id_for_label }}') || document.getElementById('{{ form.use_tls.auto_id }}');
+  const useSsl = document.getElementById('{{ form.use_ssl.id_for_label }}') || document.getElementById('{{ form.use_ssl.auto_id }}');
+  const port   = document.getElementById('{{ form.port.id_for_label }}') || document.getElementById('{{ form.port.auto_id }}');
+
+  const rNone = document.getElementById('sec_none');
+  const rTls  = document.getElementById('sec_tls');
+  const rSsl  = document.getElementById('sec_ssl');
+
+  function setMode(mode, suggest=true) {
+    if (!useTls || !useSsl) return;
+    if (mode === 'tls') {
+      useTls.checked = true;
+      useSsl.checked = false;
+      if (suggest && port && (!port.value || port.value === '25' || port.value === '465')) port.value = '587';
+    } else if (mode === 'ssl') {
+      useTls.checked = false;
+      useSsl.checked = true;
+      if (suggest && port && (!port.value || port.value === '25' || port.value === '587')) port.value = '465';
+    } else {
+      useTls.checked = false;
+      useSsl.checked = false;
+      if (suggest && port && (!port.value || port.value === '587' || port.value === '465')) port.value = '25';
+    }
+  }
+
+  // Inicializar radios según valores actuales (edición)
+  function initFromHidden() {
+    const tls = useTls && useTls.checked;
+    const ssl = useSsl && useSsl.checked;
+    if (tls) {
+      rTls.checked = true;
+    } else if (ssl) {
+      rSsl.checked = true;
+    } else {
+      rNone.checked = true;
+    }
+  }
+
+  // Bind events
+  if (rNone) rNone.addEventListener('change', () => setMode('none'));
+  if (rTls)  rTls.addEventListener('change',  () => setMode('tls'));
+  if (rSsl)  rSsl.addEventListener('change',  () => setMode('ssl'));
+
+  initFromHidden();
+})();
+</script>
+{% endblock %}

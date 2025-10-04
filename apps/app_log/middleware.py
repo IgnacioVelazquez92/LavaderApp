@@ -71,13 +71,16 @@ class RequestLogMiddleware(MiddlewareMixin):
                     try:
                         data = json.loads(raw.decode("utf-8", errors="ignore"))
                         request._app_log_body_preview = _redact_dict(
-                            data if isinstance(data, dict) else {})
+                            data if isinstance(data, dict) else {}
+                        )
                     except Exception:
                         request._app_log_body_preview = {
-                            "_raw": raw.decode("utf-8", errors="ignore")}
+                            "_raw": raw.decode("utf-8", errors="ignore")
+                        }
                 elif "application/x-www-form-urlencoded" in ctype or "multipart/form-data" in ctype:
                     request._app_log_body_preview = _redact_dict(
-                        request.POST.dict())
+                        request.POST.dict()
+                    )
         except Exception:
             # No romper el request; mejor nada que tirar excepción en middleware
             pass
@@ -90,14 +93,18 @@ class RequestLogMiddleware(MiddlewareMixin):
         dur_ms = None
         if hasattr(request, "_app_log_started_at"):
             dur_ms = int(
-                (time.perf_counter() - request._app_log_started_at) * 1000)
+                (time.perf_counter() - request._app_log_started_at) * 1000
+            )
 
         status = getattr(response, "status_code", 0)
         level = "error" if status >= 500 else (
-            "warning" if status >= 400 else "info")
+            "warning" if status >= 400 else "info"
+        )
 
         redirect_to = getattr(response, "url", None) or getattr(
-            getattr(response, "headers", None), "get", lambda *_: None)("Location")
+            getattr(response, "headers", None), "get", lambda *_: None
+        )("Location")
+
         tmpl = getattr(response, "template_name", None)
         if hasattr(tmpl, "__iter__") and not isinstance(tmpl, (str, bytes)):
             try:
@@ -107,12 +114,20 @@ class RequestLogMiddleware(MiddlewareMixin):
         else:
             template_name = str(tmpl) if tmpl else None
 
-        msgs = []
+        # 👇 Captura de mensajes sin consumirlos definitivamente
+        msgs = None
         try:
-            for m in get_messages(request):
-                msgs.append({"level": m.level_tag, "message": str(m)})
+            storage = getattr(request, "_messages", None)
+            if storage is not None:
+                queued = list(getattr(storage, "_queued_messages", []) or [])
+                loaded = list(getattr(storage, "_loaded_messages", []) or [])
+                all_msgs = queued + loaded
+                if all_msgs:
+                    # Para el .log, serializamos a texto plano (evita __proxy__)
+                    msgs = [{"level": m.level_tag,
+                             "message": str(m)} for m in all_msgs]
         except Exception:
-            pass
+            msgs = None
 
         ctx = _request_context(request)
         meta = {
@@ -151,11 +166,6 @@ class RequestLogMiddleware(MiddlewareMixin):
             },
         )
         return response
-
-    def process_exception(self, request, exception):
-        log_exception("http", "unhandled_exception",
-                      exception, request=request)
-        return None
 
 
 class AppLogExceptionMiddleware(MiddlewareMixin):

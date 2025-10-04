@@ -1,4 +1,5 @@
 # apps/notifications/admin.py
+from .models import EmailServer
 from django.contrib import admin
 from .models import PlantillaNotif, LogNotif, Canal, EstadoEnvio
 
@@ -66,3 +67,12 @@ class LogNotifAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Los logs se crean desde los services; no desde el admin.
         return False
+
+
+@admin.register(EmailServer)
+class EmailServerAdmin(admin.ModelAdmin):
+    list_display = ("empresa", "nombre", "host", "port",
+                    "use_tls", "use_ssl", "activo", "updated_at")
+    list_filter = ("empresa", "activo", "use_tls", "use_ssl")
+    search_fields = ("nombre", "host", "username", "remitente_por_defecto")
+    readonly_fields = ("updated_at", "created_at")

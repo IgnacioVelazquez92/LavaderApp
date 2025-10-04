@@ -243,6 +243,13 @@ class Perm(str, Enum):
     # Listar logs históricos
     NOTIF_LOGS_VIEW = "notifications.logs.view"
 
+    # --- Notifications: Email Servers ---
+    NOTIF_SMTP_VIEW = "notif.smtp.view"
+    NOTIF_SMTP_CREATE = "notif.smtp.create"
+    NOTIF_SMTP_EDIT = "notif.smtp.edit"
+    NOTIF_SMTP_DELETE = "notif.smtp.delete"
+    NOTIF_SMTP_TEST = "notif.smtp.test"
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -329,6 +336,12 @@ ROLE_POLICY = {
         Perm.NOTIF_TEMPLATES_MANAGE,
         Perm.NOTIF_SEND,
         Perm.NOTIF_LOGS_VIEW,
+
+        Perm.NOTIF_SMTP_VIEW,
+        Perm.NOTIF_SMTP_CREATE,
+        Perm.NOTIF_SMTP_EDIT,
+        Perm.NOTIF_SMTP_DELETE,
+        Perm.NOTIF_SMTP_TEST,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -376,6 +389,11 @@ ROLE_POLICY = {
 
         Perm.NOTIF_SEND,
         Perm.NOTIF_LOGS_VIEW,
+
+
+        Perm.NOTIF_SMTP_VIEW,
+
+
     },
 
     # Supervisor: perfil de solo consulta, también puede ver catálogo.

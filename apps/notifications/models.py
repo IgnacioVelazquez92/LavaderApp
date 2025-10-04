@@ -22,6 +22,8 @@ Notas:
 """
 
 from __future__ import annotations
+from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils.translation import gettext_lazy as _
 
 import uuid
 from django.conf import settings
@@ -221,3 +223,62 @@ class LogNotif(models.Model):
     @property
     def fallo(self) -> bool:
         return self.estado == EstadoEnvio.ERROR
+
+
+class EmailServer(models.Model):
+    """
+    Configuración SMTP por Empresa (multi-tenant).
+    Si hubiera necesidad, en el futuro se puede extender con un FK a Usuario para override granular.
+    """
+    empresa = models.ForeignKey(
+        "org.Empresa", on_delete=models.CASCADE, related_name="email_servers"
+    )
+    nombre = models.CharField(max_length=120, help_text=_(
+        "Alias visible, p. ej. 'Cuenta Gmail Administración'"))
+
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField(
+        default=587, validators=[MinValueValidator(1), MaxValueValidator(65535)])
+    use_tls = models.BooleanField(
+        default=True, help_text=_("STARTTLS (común en 587)"))
+    use_ssl = models.BooleanField(
+        default=False, help_text=_("SSL implícito (común en 465)"))
+
+    username = models.CharField(max_length=255, blank=True, default="")
+    # Guardamos la contraseña ofuscada/encriptada. Ver utils más abajo.
+    password_encrypted = models.BinaryField(
+        blank=True, null=True, editable=False)
+
+    remitente_por_defecto = models.CharField(
+        max_length=255, blank=True, default="", help_text=_("Ej: 'Mi Empresa <info@dominio.com>'")
+    )
+
+    activo = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("empresa", "nombre")]
+        verbose_name = _("Servidor de Email (SMTP)")
+        verbose_name_plural = _("Servidores de Email (SMTP)")
+
+    def __str__(self):
+        return f"{self.empresa_id} • {self.nombre} ({self.host}:{self.port})"
+
+    # Helpers de password
+    def set_password(self, raw: str | None):
+        from .utils.crypto import encrypt_bytes
+        if raw:
+            self.password_encrypted = encrypt_bytes(raw.encode("utf-8"))
+        else:
+            self.password_encrypted = None
+
+    def get_password(self) -> str | None:
+        from .utils.crypto import decrypt_bytes
+        if not self.password_encrypted:
+            return None
+        try:
+            return decrypt_bytes(self.password_encrypted).decode("utf-8")
+        except Exception:
+            return None

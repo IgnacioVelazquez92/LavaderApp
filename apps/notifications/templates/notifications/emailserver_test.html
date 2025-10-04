@@ -1,0 +1,104 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="container-fluid px-0">
+
+  <!-- Breadcrumb + título -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-1">
+          <li class="breadcrumb-item"><a href="{% url 'notifications:emailserver_list' %}">{% trans "Servidores SMTP" %}</a></li>
+          <li class="breadcrumb-item active" aria-current="page">{% trans "Probar conexión" %}</li>
+        </ol>
+      </nav>
+      <h1 class="h4 mb-0">{% trans "Probar conexión SMTP" %}</h1>
+    </div>
+    <div class="text-end">
+      <span class="badge bg-{% if obj.activo %}success{% else %}secondary{% endif %}">
+        {% if obj.activo %}{% trans "Activo" %}{% else %}{% trans "Inactivo" %}{% endif %}
+      </span>
+    </div>
+  </div>
+
+  <!-- Resumen del servidor -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <div class="row gy-2">
+        <div class="col-12 col-md-6">
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Nombre" %}:</div>
+            <div>{{ obj.nombre }}</div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Host" %}:</div>
+            <div><code>{{ obj.host }}</code></div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Puerto" %}:</div>
+            <div>{{ obj.port }}</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Seguridad" %}:</div>
+            <div>
+              {% if obj.use_ssl %}
+                <span class="badge text-bg-secondary">SSL (465)</span>
+              {% elif obj.use_tls %}
+                <span class="badge text-bg-secondary">STARTTLS (587)</span>
+              {% else %}
+                <span class="badge text-bg-secondary">{% trans "Ninguno" %} (25)</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Usuario" %}:</div>
+            <div class="text-truncate" style="max-width: 320px;">
+              {% if obj.username %}<code>{{ obj.username }}</code>{% else %}<span class="text-muted">—</span>{% endif %}
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="fw-semibold">{% trans "Remitente por defecto" %}:</div>
+            <div class="text-truncate" style="max-width: 320px;">
+              {% if obj.remitente_por_defecto %}{{ obj.remitente_por_defecto }}{% else %}<span class="text-muted">—</span>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="small text-muted mt-2">
+        {% trans "La contraseña no se muestra por seguridad. Esta prueba sólo abre y cierra la conexión al servidor SMTP." %}
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA de prueba -->
+  <form method="post" class="d-flex align-items-center gap-2">
+    {% csrf_token %}
+    <button id="btn-test" type="submit" class="btn btn-info">
+      <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
+      {% trans "Probar conexión" %}
+    </button>
+    <a href="{% url 'notifications:emailserver_list' %}" class="btn btn-outline-secondary">{% trans "Volver" %}</a>
+  </form>
+
+    <!-- Mensajes globales -->
+    {% include "includes/_messages.html" %}
+
+</div>
+
+<!-- UX: loading state en el botón -->
+<script>
+(function() {
+  const btn = document.getElementById('btn-test');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    const sp = btn.querySelector('.spinner-border');
+    if (sp) sp.classList.remove('d-none');
+    btn.setAttribute('disabled', 'disabled');
+    btn.form && btn.form.submit();
+  });
+})();
+</script>
+{% endblock %}
