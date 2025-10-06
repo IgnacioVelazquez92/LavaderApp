@@ -21,6 +21,7 @@ class Venta(models.Model):
     - Estado de pago separado en `payment_status`: no_pagada | parcial | pagada.
     - Entidad madre: pagos, comprobantes, notificaciones, etc.
     - Totales se recalculan cuando cambian los ítems (ver calculations.py y signals.py).
+    - Turno operativo: al crear, se asigna el turno abierto de la sucursal (cashbox.TurnoCaja).
     """
 
     # Estados del PROCESO (no confundir con pago)
@@ -41,21 +42,31 @@ class Venta(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     empresa = models.ForeignKey(
-        Empresa, on_delete=models.CASCADE, related_name="ventas"
+        "org.Empresa", on_delete=models.CASCADE, related_name="ventas"
     )
     sucursal = models.ForeignKey(
-        Sucursal, on_delete=models.PROTECT, related_name="ventas"
+        "org.Sucursal", on_delete=models.PROTECT, related_name="ventas"
     )
     cliente = models.ForeignKey(
-        Cliente, on_delete=models.PROTECT, related_name="ventas"
+        "customers.Cliente", on_delete=models.PROTECT, related_name="ventas"
     )
     vehiculo = models.ForeignKey(
-        Vehiculo, on_delete=models.PROTECT, related_name="ventas"
+        "vehicles.Vehiculo", on_delete=models.PROTECT, related_name="ventas"
+    )
+
+    # Turno operativo (asignado al crear la venta si hay turno abierto)
+    turno = models.ForeignKey(
+        "cashbox.TurnoCaja",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ventas",
+        help_text="Turno operativo asignado al crear la venta.",
     )
 
     # Estado operativo (proceso)
     estado = models.CharField(
-        max_length=20, choices=ESTADOS, default="borrador")
+        max_length=20, choices=ESTADOS, default="borrador", db_index=True)
 
     # Estado de pago (nuevo, reemplaza el uso de 'pagado' en estado)
     payment_status = models.CharField(
@@ -88,6 +99,8 @@ class Venta(models.Model):
             models.Index(fields=["empresa", "sucursal", "estado"]),
             models.Index(fields=["cliente"]),
             models.Index(fields=["payment_status"]),  # consultas por pago
+            # consultas/conciliación por turno
+            models.Index(fields=["turno"]),
         ]
 
     def __str__(self):

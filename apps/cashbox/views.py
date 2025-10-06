@@ -1,258 +1,269 @@
 # apps/cashbox/views.py
 from __future__ import annotations
+from apps.cashbox.services.totals import cierre_z_totales_dia
+from django.views.generic import TemplateView
 
 from datetime import datetime
 from typing import Optional
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse, reverse_lazy
+from django.db.models import Sum, F
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime, parse_date
+from django.utils.dateparse import parse_date
 from django.views.generic import DetailView, FormView, ListView, View
 
-from apps.cashbox.forms import CloseCashboxForm, OpenCashboxForm
-from apps.cashbox.models import CierreCaja
-from apps.cashbox import selectors
-from apps.cashbox.services import cashbox as cashbox_services
-from apps.cashbox.services.cashbox import (
-    CierreAbiertoExistenteError,
-    CierreNoAbiertoError,
-)
-from apps.cashbox.services.totals import TotalesMetodo
+from apps.org.permissions import EmpresaPermRequiredMixin, Perm, has_empresa_perm
+from apps.cashbox.models import TurnoCaja
+from apps.cashbox.services.cashbox import abrir_turno, cerrar_turno
+from apps.cashbox.services.guards import get_turno_abierto
+from apps.cashbox.forms import OpenCashboxForm, CloseCashboxForm
+from apps.payments.models import Pago
+from apps.cashbox.services.totals import preview_totales_turno
 
 
-# -------------------------
-# Helpers / Permisos básicos
-# -------------------------
+def _parse_date_range(request) -> tuple[Optional[datetime], Optional[datetime]]:
+    def _p(name: str) -> Optional[datetime]:
+        val = request.GET.get(name)
+        if not val:
+            return None
+        d = parse_date(val)
+        if not d:
+            return None
+        if name == "desde":
+            return timezone.make_aware(datetime(d.year, d.month, d.day, 0, 0, 0))
+        return timezone.make_aware(datetime(d.year, d.month, d.day, 23, 59, 59))
 
-class TenancyRequiredMixin(LoginRequiredMixin):
-    """
-    Requiere empresa y sucursal activas en la sesión (inyectadas por el TenancyMiddleware).
-    """
-
-    def dispatch(self, request, *args, **kwargs):
-        empresa = getattr(request, "empresa_activa", None)
-        sucursal = getattr(request, "sucursal_activa", None)
-
-        if empresa is None:
-            messages.error(request, "Debés seleccionar un lavadero activo.")
-            # En muchos flujos el selector de empresa/sucursal vive en /org/seleccionar/
-            return redirect(reverse("org:selector"))
-
-        # Para **abrir/cerrar** caja pedimos sucursal activa.
-        if self.requires_branch() and sucursal is None:
-            messages.error(
-                request, "Debés seleccionar una sucursal activa para operar la caja.")
-            return redirect(reverse("org:selector"))
-
-        return super().dispatch(request, *args, **kwargs)
-
-    def requires_branch(self) -> bool:
-        """Por defecto, todas las vistas de cashbox requieren sucursal activa."""
-        return True
+    return _p("desde"), _p("hasta")
 
 
-class CashboxPermissionMixin(TenancyRequiredMixin):
-    """
-    Verificación suave de rol. Intenta usar helpers de `apps.accounts.permissions`
-    si están disponibles; si no, deja pasar a usuarios autenticados (MVP).
-    Roles esperados: admin / operador.
-    """
+# --- Reemplazar SOLO esta función ---
 
-    allowed_roles = {"admin", "operador"}
+def _preview_totales_turno(turno: TurnoCaja) -> list[dict]:
+    desde, hasta = turno.rango()
+    qs = (
+        Pago.objects.filter(
+            turno=turno, creado_en__gte=desde, creado_en__lte=hasta)
+        .select_related("medio")
+        # ⬇️ sin alias "es_propina=F('es_propina')" (eso rompe)
+        .values("medio__nombre", "es_propina")
+        .annotate(total=Sum("monto"))
+    )
 
-    def dispatch(self, request, *args, **kwargs):
-        # Ya validó TenancyRequiredMixin
-        try:
-            from apps.accounts.permissions import user_has_role  # type: ignore
-        except Exception:
-            return super().dispatch(request, *args, **kwargs)
+    acc: dict[str, dict] = {}
+    for row in qs:
+        medio = row.get("medio__nombre") or "—"
+        is_tip = bool(row.get("es_propina"))
+        total = row.get("total") or 0
+        acc.setdefault(medio, {"medio": medio, "monto": 0, "propinas": 0})
+        if is_tip:
+            acc[medio]["propinas"] += total
+        else:
+            acc[medio]["monto"] += total
 
-        empresa = request.empresa_activa
-        if not user_has_role(request.user, empresa, roles=self.allowed_roles):
-            raise PermissionDenied("No tenés permisos para operar la caja.")
-        return super().dispatch(request, *args, **kwargs)
+    return sorted(acc.values(), key=lambda r: r["medio"])
 
 
-# -------------------------
-# Vistas
-# -------------------------
-
-class CashboxListView(CashboxPermissionMixin, ListView):
-    """
-    Listado de cierres por empresa (filtrable por sucursal, rango y estado).
-    GET params:
-      - sucursal: id (opcional; si no se envía, trae todas las de la empresa)
-      - desde / hasta: YYYY-MM-DD (filtran por `abierto_en`)
-      - abiertos: "1" (solo abiertos) | "0" (solo cerrados)
-    """
-    model = CierreCaja
+class TurnoListView(EmpresaPermRequiredMixin, ListView):
+    required_perms = (Perm.PAYMENTS_VIEW,)
+    model = TurnoCaja
     template_name = "cashbox/list.html"
-    context_object_name = "cierres"
+    context_object_name = "turnos"
     paginate_by = 20
 
     def get_queryset(self):
-        empresa = self.request.empresa_activa
-        sucursal = None
-        if self.request.GET.get("sucursal"):
-            # Seguridad: no asumimos acceso si no pertenece a la empresa
-            from apps.org.models import Sucursal
-            sucursal = get_object_or_404(
-                Sucursal, id=self.request.GET["sucursal"], empresa=empresa)
+        empresa = self.empresa_activa
+        qs = TurnoCaja.objects.filter(empresa=empresa).select_related(
+            "sucursal", "abierto_por", "cerrado_por"
+        )
 
-        def _parse_date(name: str) -> Optional[datetime]:
-            val = self.request.GET.get(name)
-            if not val:
-                return None
-            # YYYY-MM-DD → inicio/fin del día según convenga
-            try:
-                d = parse_date(val)
-                if not d:
-                    return None
-                # Usamos comienzo/fin del día para incluir todo el rango
-                if name == "desde":
-                    return timezone.make_aware(datetime(d.year, d.month, d.day, 0, 0, 0))
-                return timezone.make_aware(datetime(d.year, d.month, d.day, 23, 59, 59))
-            except Exception:
-                return None
+        sucursal_id = self.request.GET.get("sucursal")
+        if sucursal_id:
+            qs = qs.filter(sucursal_id=sucursal_id)
 
-        desde = _parse_date("desde")
-        hasta = _parse_date("hasta")
+        desde, hasta = _parse_date_range(self.request)
+        if desde:
+            qs = qs.filter(abierto_en__gte=desde)
+        if hasta:
+            qs = qs.filter(abierto_en__lte=hasta)
+
         abiertos = self.request.GET.get("abiertos")
         if abiertos == "1":
-            abiertos = True
+            qs = qs.filter(cerrado_en__isnull=True)
         elif abiertos == "0":
-            abiertos = False
-        else:
-            abiertos = None
+            qs = qs.filter(cerrado_en__isnull=False)
 
-        return selectors.cierres_por_fecha(
-            empresa=empresa, sucursal=sucursal, desde=desde, hasta=hasta, abiertos=abiertos
-        )
+        return qs.order_by("-abierto_en")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
+        emp = self.empresa_activa
+        suc = getattr(self.request, "sucursal_activa", None)
+        ctx["sucursales"] = emp.sucursales.all() if emp else []
         ctx["sucursal_filtro"] = self.request.GET.get("sucursal") or ""
         ctx["desde"] = self.request.GET.get("desde") or ""
         ctx["hasta"] = self.request.GET.get("hasta") or ""
         ctx["abiertos"] = self.request.GET.get("abiertos") or ""
+        # turno abierto actual de la sucursal activa (para CTA de cabecera)
+        from apps.cashbox.services.guards import get_turno_abierto
+        ctx["turno_abierto"] = get_turno_abierto(
+            emp, suc) if (emp and suc) else None
         return ctx
 
 
-class CashboxOpenView(CashboxPermissionMixin, FormView):
-    """
-    Apertura de cierre de caja para la sucursal activa.
-    """
+class TurnoOpenView(EmpresaPermRequiredMixin, FormView):
+    required_perms = (Perm.PAYMENTS_CREATE,)
     form_class = OpenCashboxForm
     template_name = "cashbox/form.html"
-
-    def form_valid(self, form: OpenCashboxForm):
-        empresa = self.request.empresa_activa
-        sucursal = self.request.sucursal_activa
-        try:
-            result = cashbox_services.abrir_cierre(
-                empresa=empresa,
-                sucursal=sucursal,
-                usuario=self.request.user,
-                abierto_en=form.cleaned_data.get("abierto_en"),
-                notas=form.cleaned_data.get("notas") or "",
-            )
-            messages.success(self.request, "Caja abierta correctamente.")
-            return redirect(reverse("cashbox:detail", kwargs={"id": str(result.cierre.id)}))
-        except CierreAbiertoExistenteError:
-            # Si ya hay una abierta, redirigimos a esa
-            existente = selectors.get_cierre_abierto(
-                empresa=empresa, sucursal=sucursal)
-            messages.warning(
-                self.request, "Ya existe un cierre abierto en esta sucursal.")
-            if existente:
-                return redirect(reverse("cashbox:detail", kwargs={"id": str(existente.id)}))
-            # Fallback si no lo encontramos
-            return redirect(reverse("cashbox:list"))
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["accion"] = "abrir"
-        ctx["sucursal"] = self.request.sucursal_activa
+        ctx["sucursal"] = getattr(self.request, "sucursal_activa", None)
         return ctx
 
+    def form_valid(self, form: OpenCashboxForm):
+        empresa = self.empresa_activa
+        sucursal = getattr(self.request, "sucursal_activa", None)
 
-class CashboxCloseView(CashboxPermissionMixin, FormView):
-    """
-    Cierre de un CierreCaja abierto. Muestra **preview** de totales y al confirmar
-    persiste los `CierreCajaTotal` y sella `cerrado_en`.
-    """
+        if not sucursal:
+            messages.error(
+                self.request, "Debés seleccionar una sucursal activa para abrir turno.")
+            return redirect("org:selector")
+
+        existente = get_turno_abierto(empresa, sucursal)
+        if existente:
+            messages.warning(
+                self.request, "Ya existe un turno abierto en esta sucursal.")
+            next_url = self.request.GET.get("next")
+            return redirect(next_url or reverse("cashbox:detalle", kwargs={"id": str(existente.id)}))
+
+        turno = abrir_turno(
+            empresa=empresa,
+            sucursal=sucursal,
+            user=self.request.user,
+            responsable_nombre=form.cleaned_data.get(
+                "responsable_nombre", "").strip(),
+            observaciones=form.cleaned_data.get("observaciones", "").strip(),
+        )
+        messages.success(self.request, "Turno abierto correctamente.")
+        next_url = self.request.GET.get("next")
+        return redirect(next_url or reverse("cashbox:detalle", kwargs={"id": str(turno.id)}))
+
+
+class TurnoCloseView(EmpresaPermRequiredMixin, FormView):
+    required_perms = (Perm.PAYMENTS_CREATE,)
     form_class = CloseCashboxForm
     template_name = "cashbox/form.html"
 
     def dispatch(self, request, *args, **kwargs):
-        self.cierre = get_object_or_404(
-            CierreCaja, id=kwargs.get("id"), empresa=request.empresa_activa
+        self.turno = get_object_or_404(
+            TurnoCaja, id=kwargs.get("id"), empresa=self.empresa_activa
         )
-        if not self.cierre.esta_abierta:
-            messages.info(request, "Este cierre ya está cerrado.")
-            return redirect(reverse("cashbox:detail", kwargs={"id": str(self.cierre.id)}))
+        if not self.turno.esta_abierto:
+            messages.info(request, "Este turno ya está cerrado.")
+            return redirect(reverse("cashbox:detalle", kwargs={"id": str(self.turno.id)}))
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["accion"] = "cerrar"
-        ctx["cierre"] = self.cierre
-        # Preview de totales hasta ahora (o hasta lo que el usuario elija luego)
-        ctx["preview_totales"] = cashbox_services.preview_totales_actuales(
-            cierre=self.cierre)
+        ctx["turno"] = self.turno
+        ctx["preview_totales"] = preview_totales_turno(turno=self.turno)
         return ctx
 
     def form_valid(self, form: CloseCashboxForm):
         try:
-            cerrado_en = form.cleaned_data.get("cerrado_en") or timezone.now()
-            res = cashbox_services.cerrar_cierre(
-                cierre=self.cierre,
-                actor=self.request.user,
-                cerrado_en=cerrado_en,
-                notas_append=form.cleaned_data.get("notas_append") or None,
-                recalcular_y_guardar_totales=True,
+            contado = form.cleaned_data.get("monto_contado_total")
+            # ⬇️ guardar el resultado
+            res = cerrar_turno(
+                turno=self.turno,
+                user=self.request.user,
+                monto_contado_total=contado,
             )
-            messages.success(self.request, "Cierre realizado correctamente.")
-            return redirect(reverse("cashbox:detail", kwargs={"id": str(res.cierre.id)}))
-        except CierreNoAbiertoError:
-            messages.error(self.request, "El cierre ya se encontraba cerrado.")
-            return redirect(reverse("cashbox:detail", kwargs={"id": str(self.cierre.id)}))
+            messages.success(self.request, "Turno cerrado correctamente.")
+            # ⬇️ usar el turno dentro del resultado
+            return redirect(reverse("cashbox:detalle", kwargs={"id": str(res.turno.id)}))
         except Exception as e:
-            messages.error(self.request, f"No fue posible cerrar la caja: {e}")
-            return redirect(reverse("cashbox:detail", kwargs={"id": str(self.cierre.id)}))
+            messages.error(
+                self.request, f"No fue posible cerrar el turno: {e}")
+            return redirect(reverse("cashbox:detalle", kwargs={"id": str(self.turno.id)}))
 
 
-class CashboxDetailView(CashboxPermissionMixin, DetailView):
-    """
-    Detalle del cierre con desglose por método.
-    Si el cierre está **abierto**, muestra también un **preview** de totales al momento.
-    """
+class TurnoDetailView(EmpresaPermRequiredMixin, DetailView):
+    required_perms = (Perm.PAYMENTS_VIEW,)
     template_name = "cashbox/detail.html"
     pk_url_kwarg = "id"
-    context_object_name = "cierre"
-    model = CierreCaja
+    context_object_name = "turno"
+    model = TurnoCaja
 
     def get_object(self, queryset=None):
         return get_object_or_404(
-            CierreCaja.objects.select_related(
-                "empresa", "sucursal", "usuario", "cerrado_por"),
+            TurnoCaja.objects.select_related(
+                "empresa", "sucursal", "abierto_por", "cerrado_por"),
             id=self.kwargs.get("id"),
-            empresa=self.request.empresa_activa,
+            empresa=self.empresa_activa,
         )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        cierre: CierreCaja = ctx["cierre"]
-        # Totales persistidos (si ya fue cerrado) o al menos los existentes
-        ctx["totales"] = selectors.totales_de_cierre(cierre=cierre)
-        # Preview en vivo si está abierto
-        ctx["preview_totales"] = None
-        if cierre.esta_abierta:
-            ctx["preview_totales"] = cashbox_services.preview_totales_actuales(
-                cierre=cierre)
+        turno: TurnoCaja = ctx["turno"]
+        ctx["preview_totales"] = _preview_totales_turno(turno)
+        emp = self.empresa_activa
+        ctx["puede_cerrar"] = turno.esta_abierto and has_empresa_perm(
+            self.request.user, emp, Perm.PAYMENTS_CREATE)
+        return ctx
+
+
+# --- Cierre Z (resumen diario por método, sin depender de turnos) ---------
+
+
+class CierreZView(EmpresaPermRequiredMixin, TemplateView):
+    """
+    Muestra totales del día (Cierre Z) por método de pago, separando monto (sin propina) y propinas.
+    Filtros opcionales por fecha (?fecha=YYYY-MM-DD) y sucursal (?sucursal=<id>).
+    """
+    required_perms = (Perm.PAYMENTS_VIEW,
+                      )  # podés crear un Perm específico luego
+    template_name = "cashbox/z.html"
+
+    def get_context_data(self, **kwargs):
+        from apps.org.models import Sucursal
+
+        ctx = super().get_context_data(**kwargs)
+        empresa = self.empresa_activa
+
+        # --- filtros ---
+        fecha_str = self.request.GET.get("fecha") or ""
+        fecha = parse_date(fecha_str) or timezone.localdate()
+
+        sucursal = None
+        sucursal_id = self.request.GET.get("sucursal")
+        if sucursal_id:
+            # seguridad de tenant
+            sucursal = get_object_or_404(
+                Sucursal, id=sucursal_id, empresa=empresa)
+
+        # --- datos ---
+        totales = cierre_z_totales_dia(
+            empresa=empresa, sucursal=sucursal, fecha=fecha)
+
+        total_monto = sum(t.monto for t in totales)
+        total_prop = sum(t.propinas for t in totales)
+        total_gral = total_monto + total_prop
+
+        # --- contexto ---
+        ctx.update(
+            {
+                "fecha": fecha,
+                "fecha_str": fecha.strftime("%Y-%m-%d"),
+                "sucursal_sel": sucursal,
+                "sucursales": list(empresa.sucursales.all()) if empresa else [],
+                "totales": totales,
+                "total_monto": total_monto,
+                "total_propinas": total_prop,
+                "total_general": total_gral,
+            }
+        )
         return ctx

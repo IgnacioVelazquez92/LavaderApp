@@ -1,12 +1,11 @@
 # apps/cashbox/admin.py
 from __future__ import annotations
+from .models import TurnoCaja, TurnoCajaTotal, CierreCaja, CierreCajaTotal
 
 from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.timezone import localtime
-
-from apps.cashbox.models import CierreCaja, CierreCajaTotal
 
 
 class CierreCajaTotalInline(admin.TabularInline):
@@ -135,3 +134,23 @@ class CierreCajaTotalAdmin(admin.ModelAdmin):
         if not self.has_delete_permission(request):
             actions.pop("delete_selected", None)
         return actions
+
+
+# apps/cashbox/admin.py
+
+
+@admin.register(TurnoCaja)
+class TurnoCajaAdmin(admin.ModelAdmin):
+    list_display = ("id", "empresa", "sucursal", "abierto_en",
+                    "cerrado_en", "abierto_por", "cerrado_por", "monto_contado_total")
+    list_filter = ("empresa", "sucursal", "abierto_en", "cerrado_en")
+    search_fields = ("responsable_nombre", "observaciones")
+    date_hierarchy = "abierto_en"
+
+
+@admin.register(TurnoCajaTotal)
+class TurnoCajaTotalAdmin(admin.ModelAdmin):
+    list_display = ("id", "turno", "medio_nombre",
+                    "monto_teorico", "monto_contado", "dif_monto")
+    list_filter = ("turno__empresa", "turno__sucursal")
+    search_fields = ("medio_nombre",)

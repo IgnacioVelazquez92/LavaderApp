@@ -1361,7 +1361,7 @@ apps/org/
 ├─ admin.py
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                 # Empresa, EmpresaConfig (opcional), Sucursal
+├─ models.py                 # Empresa (+ cashbox_policy), EmpresaConfig (opcional), Sucursal
 ├─ urls.py                   # /org/...
 ├─ views.py                  # CBVs: empresas, sucursales, empleados, selector, post-login
 ├─ forms/
@@ -1371,8 +1371,9 @@ apps/org/
 │  ├─ __init__.py
 │  ├─ empresa.py             # (opcional)
 │  └─ sucursal.py            # (opcional)
-├─ selectors.py              # empresas_para_usuario, etc. (sin hardcode de límites)
+├─ selectors.py              # empresas_para_usuario, etc.
 ├─ permissions.py            # Perm, ROLE_POLICY, mixins (centraliza permisos)
+├─ utils.py                  # get_cashbox_policy(empresa)  ← NUEVO helper liviano
 ├─ templatetags/
 │  ├─ __init__.py
 │  └─ org_perms.py           # {% can "perm.code" %} en templates
@@ -1394,10 +1395,11 @@ apps/org/
 
 **Notas de diseño**
 
-- **Vistas delgadas**: permisos en `permissions.py`; vistas declaran `required_perms`.
-- **Bootstrap** en templates; forms “limpios”.
+- **Vistas delgadas**: la lógica de permisos y contexto vive en `permissions.py`; las vistas declaran `required_perms` y heredan de los mixins de `org`.
+- **Bootstrap 5** en templates; formularios “limpios” (sin seguridad).
 - **Onboarding** guiado (signup → empresa → primera sucursal).
-- **Límites por plan**: ya **no** se usan constantes en `settings`. Todo gating pasa por `apps.saas.limits` y la suscripción activa de la empresa.
+- **Límites por plan**: todo el gating pasa por `apps.saas.limits` y la suscripción vigente de la empresa.
+- **Política de Caja (empresa)**: `Empresa.cashbox_policy` define cómo otros módulos (p. ej. `payments`, `cashbox`) exigen caja abierta.
 
 ---
 
@@ -1405,94 +1407,82 @@ apps/org/
 
 ### `Empresa`
 
-- `nombre`, `subdominio` (único), `logo`, `activo`, timestamps.
-- Relaciones: `memberships` (`accounts.EmpresaMembership`), `sucursales`, **`suscripcion` (OneToOne con `saas.SuscripcionSaaS`)**.
-- Se fija en sesión como `empresa_id`.
+- Campos principales: `nombre`, `subdominio` (único), `logo`, `activo`, timestamps.
+- Relaciones: `memberships` (`accounts.EmpresaMembership`), `sucursales`, **`suscripcion`** (OneToOne con `saas.SuscripcionSaaS`).
+- Contexto en sesión: `empresa_id`.
+
+**Política de Caja (nuevo campo):**
+
+- `cashbox_policy: CharField(choices=CashboxPolicy, default=PAYMENTS_ONLY)`
+- `CashboxPolicy`:
+  - `STRICT` → ventas **y** pagos requieren caja abierta.
+  - `PAYMENTS_ONLY` (default) → solo los pagos requieren caja abierta.
+  - `BY_METHOD` → enforcement por medio de pago (granular, si el resto del sistema lo implementa).
+
+> Uso recomendado desde otros módulos: **no** leer el campo directamente; usar `org.utils.get_cashbox_policy(empresa)`.
 
 ### `Sucursal`
 
-- `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado en `save()`**).
-- Se fija como `sucursal_id`.
+- Campos: `empresa` (FK), `nombre`, `direccion` (opcional), `codigo_interno` (único por empresa, **autogenerado en `save()`**).
+- Contexto en sesión: `sucursal_id`.
 
 ### `EmpresaConfig` (opcional)
 
-- Par `clave/valor` JSON por empresa.
+- Par `clave/valor` JSON por empresa para parámetros no críticos.
 
 ---
 
 ## 3) Formularios (`forms/org.py`)
 
-- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en alta, forzado a `True`).
+- `EmpresaForm`: `nombre`, `subdominio`, `logo`, `activo` (en alta, forzado a `True`), **`cashbox_policy`** (desplegable con las 3 opciones).
 - `SucursalForm`: `nombre`, `direccion` (sin `codigo_interno`).
-- `EmpleadoForm`: `email`, `rol` (`admin`/`operador`), `sucursal_asignada`, `password_inicial` (solo crear).
+- `EmpleadoForm`: `email`, `rol` (`admin` / `operador`), `sucursal_asignada`, `password_inicial` (solo crear).
 
 ---
 
 ## 4) Permisos centralizados (`permissions.py`)
 
-- **`Perm`**:
-  - `ORG_VIEW`, `ORG_EMPRESAS_MANAGE`, `ORG_SUCURSALES_MANAGE`, `ORG_EMPLEADOS_MANAGE`
-  - (extensibles: `CATALOG_SERVICES_MANAGE`, `CATALOG_PRICES_MANAGE`, etc.)
-- **`ROLE_POLICY`** define permisos por rol (admin/operador/…).
-- **Mixins**:
-  - `EmpresaPermRequiredMixin` resuelve **contexto** y **membership** y valida `required_perms`.
-  - Evita loops con `SAFE_VIEWNAMES`.
+- **`Perm`** (extracto org): `ORG_VIEW`, `ORG_EMPRESAS_MANAGE`, `ORG_SUCURSALES_MANAGE`, `ORG_EMPLEADOS_MANAGE` (extensible con otros módulos).
+- **`ROLE_POLICY`** asigna el conjunto de permisos efectivos por rol (admin/operador/…).
+- **Mixins clave**:
+  - `EmpresaPermRequiredMixin`: resuelve **contexto** (empresa/membership), valida `required_perms` y evita loops con `SAFE_VIEWNAMES`.
 - **Helper**:
-  - `has_empresa_perm(user, empresa, perm)`.
+  - `has_empresa_perm(user, empresa, perm)`: única función para verificar permisos desde cualquier módulo.
+
+> `org` no “decide” reglas de negocio de otros módulos; solo provee **contexto + permisos** consistentes.
 
 ---
 
 ## 5) Gating por Plan (integración con `apps.saas`)
 
-- Consultas de límite vía **`apps.saas.limits`**:
-  - `can_create_empresa(user)`
-  - `can_create_sucursal(empresa)`
-  - `can_add_usuario_a_empresa(empresa)`
-  - `can_add_empleado(sucursal)`
+- Consultas de límite vía **`apps.saas.limits`** (p. ej., `can_create_empresa(user)`, `can_create_sucursal(empresa)`, `can_add_usuario_a_empresa(empresa)`, `can_add_empleado(sucursal)`).
 - **Enforcement**:
-  - **Soft** (por defecto): se **muestra mensaje** y se **deshabilitan CTAs** en UI; el `POST` valida y devuelve alerta si no corresponde.
-  - **Hard** (`settings.SAAS_ENFORCE_LIMITS = True`): además del mensaje, **se bloquean las creaciones** en los `POST`.
-- **Suscripción por defecto**:
-  - Tras crear empresa, se llama a `ensure_default_subscription_for_empresa(empresa)` para asignar plan default (con trial si corresponde).
+  - **Soft** (default): UI muestra mensajes y deshabilita CTAs; el `POST` valida y devuelve alerta si corresponde.
+  - **Hard** (`settings.SAAS_ENFORCE_LIMITS = True`): además, los `POST` bloquean la creación si `should_block()` es `True`.
+- **Suscripción por defecto**: tras crear empresa se llama a `ensure_default_subscription_for_empresa(empresa)`.
 
 ---
 
 ## 6) Vistas (CBVs) y comportamiento
 
-- **`EmpresaListView`** (`/org/empresas/`): `required_perms = (ORG_VIEW,)`  
-  Muestra “Mi Lavadero”. Contexto incluye `puede_crear_empresa` y `gate_empresa_msg` (desde `can_create_empresa(user)`).
+- **`EmpresaListView`** (`/org/empresas/`): `required_perms = (ORG_VIEW,)`.  
+  Contexto: `puede_crear_empresa`, `gate_empresa_msg` (de `limits`).
 
-- **`EmpresaCreateView`** (`/org/empresas/nueva/`): onboarding  
-  Valida con `can_create_empresa(user)`. Crea `Empresa` + `EmpresaMembership` (**OWNER/ADMIN/ACTIVA**), setea sesión y ejecuta `ensure_default_subscription_for_empresa`. Redirige a crear primera sucursal.
+- **`EmpresaCreateView`** (onboarding): valida `can_create_empresa(user)` → crea Empresa + `EmpresaMembership` (owner/admin/activa) → guarda `empresa_id` en sesión → `ensure_default_subscription_for_empresa` → redirige a crear la primera sucursal.  
+  El formulario incluye `cashbox_policy` (default `PAYMENTS_ONLY`).
 
-- **`EmpresaUpdateView`**: `ORG_EMPRESAS_MANAGE`.
+- **`EmpresaUpdateView`**: `ORG_EMPRESAS_MANAGE` (incluye edición de `cashbox_policy`).
 
-- **`SucursalListView`**: `ORG_VIEW`  
-  Lista sucursales y pasa `puede_crear_sucursal` / `gate_sucursal_msg` desde `can_create_sucursal(empresa)`.
+- **`SucursalListView`** / **`SucursalCreateView`** / **`SucursalUpdateView`**: `ORG_VIEW` / `ORG_SUCURSALES_MANAGE` (sin cambios funcionales).
 
-- **`SucursalCreateView`**: `ORG_SUCURSALES_MANAGE`  
-  Valida con `can_create_sucursal(empresa)`; primera sucursal → redirige a `/` con “Listo para operar”; si no, vuelve a `/org/sucursales/`.
+- **Empleados** (`List/Create/Update/Acciones`): `ORG_EMPLEADOS_MANAGE`.  
+  `EmpleadoCreateView` valida `can_add_usuario_a_empresa(empresa)` y, si hay sucursal, `can_add_empleado(sucursal)`.
 
-- **`SucursalUpdateView`**: `ORG_SUCURSALES_MANAGE`.
-
-- **`EmpleadoListView`**: `ORG_EMPLEADOS_MANAGE`  
-  Pasa `puede_agregar_empleado` / `gate_empleado_msg` (empresa).
-
-- **`EmpleadoCreateView`**: `ORG_EMPLEADOS_MANAGE`  
-  GET: calcula `can_add_usuario_a_empresa(empresa)` para la UI.  
-  POST: valida `can_add_usuario_a_empresa(empresa)` y, si hay sucursal, `can_add_empleado(sucursal)`. Crea/actualiza `User` + `EmpresaMembership`.
-
-- **`EmpleadoUpdateView`**: `ORG_EMPLEADOS_MANAGE` (no edita `owner`).
-
-- **`EmpleadoResetPasswordView` / `EmpleadoToggleActivoView` / `EmpleadoDestroyUserView`**: `ORG_EMPLEADOS_MANAGE` (con protecciones: no `owner`, no auto-eliminarse, etc.).
-
-- **`SelectorEmpresaView`**: segura, sanea sesión, activa empresa/sucursal.
-
-- **`PostLoginRedirectView`**: decide onboarding o panel según membership/sucursales.
+- **`SelectorEmpresaView`** / **`PostLoginRedirectView`**: mantienen/sanean contexto (empresa/sucursal) y evitan loops.
 
 ---
 
-## 7) URLs (namespace `org`) — **incluye empleados**
+## 7) URLs (namespace `org`) — incluye empleados
 
 ```
 /org/empresas/                      name="org:empresas"
@@ -1521,33 +1511,28 @@ apps/org/
 
 ## 8) Templates (UI/UX + permisos + límites)
 
-- Siempre cargar `{% load org_perms %}` cuando haya CTAs condicionados.
-- Mostrar **mensajes** con `{% include "includes/_messages.html" %}` (ya en `base_auth.html`).
-- Variables de gating usadas por UI (cuando la vista las provee):
-  - `puede_crear_empresa`, `gate_empresa_msg`
-  - `puede_crear_sucursal`, `gate_sucursal_msg`
-  - `puede_agregar_empleado`, `gate_empleado_msg`
-- Ejemplos:
-  - `org/empresas.html`: “Nueva sucursal” visible si permiso y si `puede_crear_sucursal`.
-  - `org/sucursales.html`: banner informativo cuando no se puede crear más.
-  - `org/empleados.html` / `org/empleado_form.html`: botón “Nuevo/Crear empleado” deshabilitado si no se puede.
+- Cargar `{% load org_perms %}` para CTAs condicionados por permisos.
+- Mostrar mensajes con `{% include "includes/_messages.html" %}` (ya en `base_auth.html`).
+- Variables de UI típicas (si la vista las provee):  
+  `puede_crear_empresa`, `gate_empresa_msg`, `puede_crear_sucursal`, `gate_sucursal_msg`, `puede_agregar_empleado`, `gate_empleado_msg`.
+- `org` no renderiza estado de caja; si la UI global lo muestra, esa lógica vive en `cashbox`/`payments` y consulta permisos/política.
 
 ---
 
 ## 9) Sesión y Middleware (Tenancy)
 
-- Claves: `empresa_id`, `sucursal_id`.
-- `TenancyMiddleware` inyecta `request.empresa_activa` / `request.sucursal_activa`; limpia inconsistencias.
-- `SelectorEmpresaView` evita loops.
+- Claves de sesión: `empresa_id`, `sucursal_id`.
+- `TenancyMiddleware` inyecta `request.empresa_activa` / `request.sucursal_activa` y limpia inconsistencias.
+- `EmpresaPermRequiredMixin` y `SelectorEmpresaView` evitan redirecciones cíclicas con `SAFE_VIEWNAMES`.
 
 ---
 
 ## 10) Seguridad y reglas
 
-- Solo **miembros activos** operan en una empresa.
-- `owner`: no editable/deshabilitable/eliminable desde UI de empleados.
-- Acciones destructivas: **POST-only** + **CSRF** + **modales**.
-- Si una membresía queda inactiva y el usuario no tiene otras activas, se marca `user.is_active=False`.
+- Solo **miembros activos** operan sobre una empresa.
+- `owner`: no editable/deshabilitable/eliminable desde la UI de empleados.
+- Acciones destructivas: **POST-only** + **CSRF** + modales de confirmación.
+- Si una membresía queda inactiva y el usuario no tiene otras activas, se puede marcar `user.is_active = False` (criterio del producto).
 
 ---
 
@@ -1564,8 +1549,8 @@ sequenceDiagram
 
   alt sin lavadero
     U->>WEB: POST /org/empresas/nueva/
-    WEB->>DB: create Empresa + EmpresaMembership(admin)
-    DB-->>WEB: Empresa {id}
+    WEB->>DB: create Empresa + EmpresaMembership(admin/owner)
+    DB-->>WEB: Empresa {id, cashbox_policy=PAYMENTS_ONLY}
     note over WEB,U: session.empresa_id = id
     WEB-->>U: redirect /org/sucursales/nueva/
   end
@@ -1579,62 +1564,54 @@ sequenceDiagram
   else mas sucursales
     WEB-->>U: redirect /org/sucursales/ + success
   end
-
-  U->>WEB: Sidebar -> POST sucursal=[id] a /org/seleccionar/
-  WEB->>DB: validar sucursal pertenece a empresa_activa
-  DB-->>WEB: OK
-  note over WEB,U: session.sucursal_id = id
-  WEB-->>U: success seleccion de sucursal
 ```
 
 ---
 
-## 12) Planes (SaaS) — **(actualizado)**
+## 12) Planes (SaaS)
 
 - **Límites por plan** en `saas.PlanSaaS` (p. ej., `max_sucursales_por_empresa`, `max_usuarios_por_empresa`, `max_empleados_por_sucursal`, etc.).
-- **Gating centralizado** en `saas/limits.py`:
-  - `can_create_empresa(user)`
-  - `can_create_sucursal(empresa)`
-  - `can_add_usuario_a_empresa(empresa)`
-  - `can_add_empleado(sucursal)`
-  - Cada función retorna un objeto con `message` y `should_block()`.
-- **Enforcement**:
-  - `SAAS_ENFORCE_LIMITS = False` (default “soft”: solo avisos, la vista decide).
-  - Si `True`: los `POST` deben **bloquear** creaciones cuando `should_block()` sea `True`.
-- **Suscripciones**:
-  - `SuscripcionSaaS` (1:1 con Empresa) define `estado`, `payment_status`, `vigente`, `is_trialing`, etc.
-  - Onboarding llama `ensure_default_subscription_for_empresa(empresa)` para asignar plan **default** (con `trial_days` si corresponde).
-
-> **Eliminado:** `SAAS_MAX_EMPRESAS_POR_USUARIO`. No se usa más hardcode; todo sale del **Plan vigente**.
+- **Gating centralizado** en `saas/limits.py` (cada función retorna mensaje y `should_block()`).
+- **Enforcement** configurable: `SAAS_ENFORCE_LIMITS = False` (soft, default) / `True` (hard).
+- **Suscripción por defecto**: `ensure_default_subscription_for_empresa(empresa)` tras crear empresa.
 
 ---
 
 ## 13) Auditoría y datos históricos
 
-- Al **eliminar usuario**, solo se borra el `User` y sus `EmpresaMembership`.  
-  **Registros de negocio** (ventas, etc.) deben quedar ligados a la **empresa/sucursal**, no al usuario, o con FK `SET_NULL` + campos de “autor” denormalizados (ej. `autor_email`, `autor_nombre`).  
-  → Recomendado para MVP: usar FK `SET_NULL` y denormalizar autor en entidades críticas para preservar historial.
+- Al eliminar usuarios, **preservar** trazabilidad del negocio: usar FK `SET_NULL` + campos denormalizados de autor (p. ej., `autor_email`, `autor_nombre`) en entidades críticas.
+- Las entidades de negocio deben ligar historial a **empresa/sucursal**, no al usuario.
+
+---
 
 ## 14) Errores comunes
 
-- **No se ven avisos de límites** → asegurarse de incluir `_messages.html` y de pasar las variables `puede_*`/`gate_*` desde las vistas (ya contemplado en nuestras vistas).
-- **Se puede crear más allá del plan** → verificar `SAAS_ENFORCE_LIMITS` y que los `POST` llamen a `limits.*` (hecho).
+- No se ven avisos de límites → incluir `_messages.html` y pasar variables `puede_*`/`gate_*` desde las vistas.
+- Se crean recursos fuera de plan → verificar `SAAS_ENFORCE_LIMITS` y usar `limits.*` en los `POST`.
+- Permisos “no aplican” → confirmar que todas las CBVs usan `EmpresaPermRequiredMixin` y definen `required_perms`.
 
 ---
 
 ## 15) Extensiones previstas
 
-- Nuevos permisos: `CATALOG_SERVICIOS_MANAGE`, `CATALOG_PRECIOS_MANAGE` (para permitir operadores que gestionen catálogo pero no sucursales/empleados).
-- Invitaciones por correo con token (alta de empleados sin setear password directo).
-- Auditoría (quién hizo qué/cuándo) y logs por empresa.
+- Invitaciones por correo con token (alta de empleados sin password directo).
+- Auditoría fina (quién cambió `cashbox_policy`, cuándo).
+- `SucursalConfig` si hubiera políticas específicas a nivel sucursal.
+
+---
+
+## 16) Integraciones que consultan `org`
+
+- **Cashbox/Payments/Sales** obtienen el contexto de empresa/sucursal y verifican permisos vía `has_empresa_perm(...)`.
+- **Política de Caja**: usar `org.utils.get_cashbox_policy(empresa)` para decidir enforcement de caja abierta en flujos de pago/venta.
 
 ---
 
 ### Resumen ejecutivo
 
-- **Gating por plan 100% centralizado** en `apps.saas` (nada hardcodeado en `org`).
-- **UI consciente de límites**: muestra banners y deshabilita CTAs cuando corresponde.
-- **Enforcement conmutable** (`SAAS_ENFORCE_LIMITS`) sin tocar vistas.
+- `apps/org` concentra **contexto**, **permisos** y **onboarding** de empresas/sucursales/empleados.
+- Introduce `cashbox_policy` por empresa y un helper mínimo (`get_cashbox_policy`) para que otros módulos apliquen reglas de caja sin acoplarse al modelo.
+- El gating por plan y suscripciones es **externo** (`apps.saas`) y configurable (soft/hard) sin tocar vistas.
 
 # Módulo 3 — `apps/customers` (Clientes)
 
@@ -2401,6 +2378,12 @@ erDiagram
 
 Sistema de gestión de **ventas** (órdenes de servicio) para lavaderos. Cubre: alta y edición de ventas, manejo de **ítems** (servicios), **estados de proceso (FSM)**, **pagos**, **comprobantes**, **notificaciones** y un módulo completo de **promociones/descuentos** con control de permisos.
 
+> **Novedades relevantes**
+>
+> - **Auditoría por turno**: `Venta.turno` (FK a `cashbox.TurnoCaja`) se asigna **al crear** la venta si hay turno abierto.
+> - **Enforcement de caja abierta** en la creación de ventas (redirige a abrir turno si aplica).
+> - La política de caja se toma desde `apps.org` (`Empresa.cashbox_policy`, helper `org.utils.get_cashbox_policy`).
+
 ---
 
 ## 1) Propósito y alcance
@@ -2409,12 +2392,11 @@ Sistema de gestión de **ventas** (órdenes de servicio) para lavaderos. Cubre: 
 - **Experiencia operativa:** flujo claro desde el **borrador** hasta el **terminado/pagado**, con reglas que impiden errores comunes (editar ítems en estados finales, facturar si no está pagada, etc.).
 - **Multi-empresa / multi-sucursal:** toda la lógica respeta empresa activa y sucursal activa.
 - **Seguridad por roles:** capacidades diferenciadas para **Administrador** y **Operador** (ver §6).
+- **Trazabilidad operativa:** enlace de la venta con el **turno de caja** vigente (si corresponde).
 
 ---
 
 ## 2) Mapa del módulo (qué es cada cosa)
-
-Estructura lógica (archivos y carpetas) y su razón de ser. No se incluyen fragmentos de código aquí: el objetivo es entender **qué hace** cada pieza.
 
 ```
 apps/sales/
@@ -2454,25 +2436,19 @@ apps/sales/
 - **Servicios** encapsulan la lógica de negocio; las **vistas** coordinan entrada/salida y contextos; los **templates** renderizan sin lógica compleja (reciben _flags_).
 - **FSM** y **calculation engine** están separados para ser testeables y reusables.
 - **Promos/descuentos** viven en su propio _service_ con validaciones estrictas e integridad en DB.
+- **Integración con Cashbox**: la capa de servicios resuelve y exige el turno cuando corresponde (ver §9 y §10).
 
 ---
 
 ## 3) Data Model — visión conceptual
 
-No se muestran campos específicos; esto es una vista funcional con las relaciones relevantes.
-
 ```mermaid
 erDiagram
     Empresa ||--o{ Sucursal : tiene
-    Empresa ||--o{ Cliente  : tiene
     Cliente ||--o{ Vehiculo : posee
-
-    Empresa ||--o{ Promotion       : define
-    Sucursal ||--o{ Promotion      : "restringe a sucursal (opcional)"
-
-    Sucursal ||--o{ Venta          : opera
-    Cliente  ||--o{ Venta          : solicita
-    Vehiculo ||--o{ Venta          : se_atiende_en
+    Sucursal ||--o{ Venta   : opera
+    Cliente  ||--o{ Venta   : solicita
+    Vehiculo ||--o{ Venta   : se_atiende_en
 
     Venta ||--o{ VentaItem         : compone
     VentaItem }o--|| Servicio      : referencia
@@ -2480,22 +2456,20 @@ erDiagram
     VentaItem ||--o{ SalesAdjustment : ajusta_subtotal
     Promotion ||--o{ SalesAdjustment : aplica_promocion
 
-    %% Extras fuera del módulo (no definidas aquí)
-    Venta ||..|| Comprobante : emite
+    %% Integraciones
     Venta ||..o{ Pago        : registra
+    Venta ||..|| Comprobante : emite
+    Venta }o--|| TurnoCaja   : turno      %% NUEVO: trazabilidad de caja
 ```
 
-**Significado práctico**
+**Aclaraciones**
 
-- `Venta` es la entidad madre: su **estado**, **totales** y **relaciones** determinan qué acciones son válidas.
-- `Promotion` describe reglas de descuento parametrizadas; `SalesAdjustment` es la **aplicación** concreta a una venta o a un ítem.
-- `VentaItem` cachea precio/condiciones al momento del agregado (para trazabilidad).
+- `Venta.turno` es **opcional en DB** (NULL permitido), pero el **service de creación** lo asigna cuando hay turno **abierto** y la política lo exige.
+- La relación con `TurnoCaja` habilita trazabilidad por turno en reportes/arqueos.
 
 ---
 
 ## 4) Máquina de estados (FSM) de la Venta
-
-Flujo operativo de trabajo (independiente del pago).
 
 ```mermaid
 stateDiagram-v2
@@ -2508,7 +2482,7 @@ stateDiagram-v2
     en_proceso --> pagado: saldo_pendiente=0
     terminado --> pagado: saldo_pendiente=0
 
-    %% Cancelación (regla de negocio) antes de estados finales
+    %% Cancelación
     borrador --> cancelado: cancelar
     en_proceso --> cancelado: cancelar
     terminado --> cancelado: cancelar
@@ -2519,16 +2493,13 @@ stateDiagram-v2
 
 **Políticas asociadas**
 
-- **Edición de ítems y ajustes** permitida en `borrador` y `en_proceso`; **bloqueada** desde `terminado`.
-- **Comprobante** solo cuando la venta está **pagada** (independiente del proceso).
-- **Notificaciones** al cliente cuando la venta está **terminada** (pago puede ser antes o después).
-- El cambio de estado respeta reglas de **`fsm.py`** y se canaliza por **servicios**.
+- **Edición** de ítems/ajustes: permitida en `borrador`/`en_proceso`; bloqueada desde `terminado`.
+- **Comprobante**: solo con venta **pagada**.
+- **Notificaciones**: al pasar a **terminado**.
 
 ---
 
 ## 5) Totales: cómo se calculan
-
-Pipeline conceptual de cómputo de montos.
 
 ```mermaid
 flowchart TD
@@ -2543,238 +2514,175 @@ flowchart TD
     I --> J[Saldo pendiente]
 ```
 
-**Puntos a entender**
-
-- Los **ajustes** pueden ser **por ítem** o **por venta**; cada uno aplica en su etapa correspondiente.
-- Un ajuste puede ser **porcentaje** o **monto**; la lógica y validación viven en `services/discounts.py`.
-- **Recalcular** sucede automáticamente tras mutaciones (agregar/quitar ítems, aplicar/quitar ajustes, registrar pagos).
+- Ajustes por **ítem** y por **venta** (porcentaje o monto).
+- **Recalcular** tras cada mutación relevante (servicios centralizan).
 
 ---
 
 ## 6) Roles y permisos (quién puede hacer qué)
 
-El módulo no decide roles, sino que **consume** permisos desde `apps.org.permissions`. La matriz operativa es:
+El módulo **consume** permisos desde `apps.org.permissions`:
 
-```mermaid
-classDiagram
-    class Permisos {
-      SALES_VIEW
-      SALES_CREATE
-      SALES_EDIT
-      SALES_FINALIZE
-      SALES_CANCEL
-      SALES_ITEM_ADD
-      SALES_ITEM_UPDATE_QTY
-      SALES_ITEM_REMOVE
+- `SALES_VIEW`, `SALES_CREATE`, `SALES_EDIT`, `SALES_FINALIZE`, `SALES_CANCEL`
+- Ítems: `SALES_ITEM_ADD`, `SALES_ITEM_UPDATE_QTY`, `SALES_ITEM_REMOVE`
+- Promos/Descuentos: `SALES_PROMO_MANAGE`, `SALES_PROMO_APPLY`, `SALES_DISCOUNT_ADD`, `SALES_DISCOUNT_REMOVE`
 
-      SALES_PROMO_MANAGE     %% admin: gestionar promociones
-      SALES_PROMO_APPLY      %% admin + operador: aplicar a ventas
-      SALES_DISCOUNT_ADD     %% admin: desc. manuales
-      SALES_DISCOUNT_REMOVE  %% admin: quitar cualquier ajuste
-    }
+**Admin**: todas las capacidades.  
+**Operador**: operación diaria (crear/editar, ítems, aplicar promos; no gestiona catálogo de promos ni descuentos manuales).
 
-    class Admin {
-      +ver ventas
-      +crear/editar ventas
-      +gestionar ítems
-      +transiciones (iniciar/finalizar/cancelar)
-      +gestionar promociones (CRUD/activar)
-      +aplicar promociones
-      +aplicar descuentos manuales
-      +eliminar ajustes
-    }
-
-    class Operador {
-      +ver ventas
-      +crear/editar ventas
-      +gestionar ítems
-      +transiciones (según política)
-      +aplicar promociones
-      -gestionar promociones (no)
-      -descuentos manuales (no)
-      -eliminar ajustes (no)
-    }
-
-    Permisos <.. Admin
-    Permisos <.. Operador
-```
-
-**Defensa en profundidad**
-
-- Los **templates** muestran/ocultan CTAs según flags de permiso.
-- Las **vistas** validan permisos requeridos.
-- Los **servicios** vuelven a validar permisos críticos (p. ej., descuentos manuales).
+Defensa en profundidad: **templates** (flags), **vistas** (required_perms), **servicios** (validaciones).
 
 ---
 
 ## 7) Flujos UI principales
 
-### 7.1 Crear Venta (2 pasos)
+### 7.1 Crear Venta (2 pasos + enforcement de caja)
 
 1. GET: seleccionar **Cliente** → habilita **Vehículo** (solo del cliente).
-2. POST: checkboxes de **Servicios** disponibles (filtrados por sucursal/tipo de vehículo/precio vigente).
+2. POST: elegir **Servicios** vigentes.
+3. **Si la política de caja exige turno abierto y no hay turno**, la vista redirige a **abrir turno** con `next=` para volver.
+4. Al crear, el service **asigna** `venta.turno` con el turno abierto.
 
 ```mermaid
 sequenceDiagram
     participant U as Usuario
     participant V as Vista Create
-    participant S as Service (sales)
+    participant S as services.sales
+    participant C as cashbox.guards
+
     U->>V: GET /ventas/nueva/
-    V-->>U: Form Cliente + Vehículo (auto-submit)
-    U->>V: GET con cliente seleccionado
-    V-->>U: Vehículos del cliente + Servicios disponibles
-    U->>V: POST (cliente, vehiculo, servicios, notas)
-    V->>S: crear_venta + agregar_items
-    S-->>V: OK (venta en borrador)
-    V-->>U: Redirect a Detail
+    V-->>U: Form Cliente + Vehículo
+    U->>V: POST alta
+    V->>S: crear_venta(...)
+    S->>C: require_turno_abierto(empresa, sucursal)
+    alt sin turno
+      C-->>S: SinTurnoAbierto
+      S-->>V: excepción
+      V-->>U: redirect /caja/abrir/?next=/ventas/nueva/...
+    else con turno
+      C-->>S: TurnoCaja
+      S->>S: create Venta(turno=TurnoCaja)
+      S-->>V: OK
+      V-->>U: Redirect a Detail
+    end
 ```
 
 ### 7.2 Detalle de Venta
 
-- **Secciones:** Meta (cliente/vehículo/sucursal/fechas), **Ítems**, **Resumen**, **Comprobante**, **Notificaciones**, **Descuentos y promociones**.
-- **Acciones rápidas** según estado/permiso: iniciar, finalizar, cancelar; agregar/quitar ítems; aplicar promos; descuentos manuales (solo admin).
+Secciones y CTAs como antes (ítems, resumen, pagos, promos/desc., transiciones).
 
-### 7.3 Aplicar Promoción
+### 7.3 Promos/Descuentos y 7.4 Finalización
 
-```mermaid
-sequenceDiagram
-    participant U as Usuario (Admin u Operador)
-    participant D as View Detail
-    participant P as View PromotionApply
-    participant S as Service discounts
-    U->>D: Abrir modal Promo (venta o ítem)
-    U->>P: POST promotion_id [+ item_id]
-    P->>S: aplicar_promocion(...)
-    S-->>P: Ajuste creado + recalcular totales
-    P-->>U: Mensaje éxito + redirect a Detail
-```
-
-### 7.4 Descuento Manual (solo Admin)
-
-Igual a la promo, pero con formularios de modo/valor/motivo y validación de permisos más estricta (no visible ni permitido al operador).
+Sin cambios de contrato; ver documentación existente.
 
 ---
 
 ## 8) Rutas (enrutamiento público)
 
-> Prefijo típico en `urls.py` del proyecto: `path("ventas/", include(("apps.sales.urls", "sales"), namespace="sales"))`
-
 **Ventas**
 
-- `GET /ventas/` — listado, con filtros por estado/pago/sucursal, acciones rápidas por fila.
-- `GET|POST /ventas/nueva/` — flujo de alta (cliente/vehículo/servicios).
-- `GET /ventas/<uuid:pk>/` — detalle integral.
+- `GET /ventas/` — listado con filtros.
+- `GET|POST /ventas/nueva/` — alta; **redirige a caja/abrir** si la política de caja lo exige y no hay turno.
+- `GET /ventas/<uuid:pk>/` — detalle.
 - `POST /ventas/<uuid:pk>/iniciar/` — iniciar trabajo.
 - `POST /ventas/<uuid:pk>/finalizar/` — finalizar trabajo.
 - `POST /ventas/<uuid:pk>/cancelar/` — cancelar venta.
-- `POST /ventas/<uuid:pk>/items/agregar/` — agregar servicio.
-- `POST /ventas/<uuid:pk>/items/<int:item_id>/eliminar/` — quitar servicio.
+- Ítems: agregar/quitar/actualizar (POST).
 
-**Promos/Ajustes sobre ventas**
-
-- `POST /ventas/<uuid:pk>/promos/aplicar/` — aplicar promoción (admin + operador).
-- `POST /ventas/<uuid:pk>/descuentos/agregar/venta/` — descuento manual (solo admin).
-- `POST /ventas/<uuid:pk>/descuentos/agregar/item/` — descuento manual por ítem (solo admin).
-- `POST /ventas/<uuid:pk>/descuentos/<int:adj_id>/eliminar/` — quitar ajuste (solo admin).
-
-**Gestión de Promos (solo Admin)**
-
-- `GET /ventas/promos/` — listado de promociones.
-- `GET|POST /ventas/promos/nueva/` — crear.
-- `GET|POST /ventas/promos/<int:pk>/editar/` — editar.
-- `POST /ventas/promos/<int:pk>/eliminar/` — eliminar.
-- `POST /ventas/promos/<int:pk>/toggle/` — activar/desactivar.
+**Promos/Ajustes**: aplicar/quitar (POST).  
+**Gestión de Promos** (admin): CRUD/toggle.
 
 ---
 
-## 9) Integraciones y dependencias externas
+## 9) Integraciones y dependencias relevantes
 
-- **Pricing**: resolución de precios vigentes por sucursal y tipo de vehículo. El selector de servicios **solo** ofrece lo que tiene precio vigente.
-- **Payments**: registra pagos y recalcula saldo; si el saldo llega a 0 y la venta no está cancelada, el ciclo normal marca **pagado**.
-- **Invoicing**: emisión de comprobantes únicamente si la venta está **pagada**; puede ser **auto** desde un hook si está habilitado.
-- **Notifications**: envío por WhatsApp cuando la venta está **terminada** y existen plantillas activas.
+- **Org**: contexto de empresa/sucursal y permisos; política de caja vía `org.utils.get_cashbox_policy(empresa)`.
+- **Cashbox**:
+  - `cashbox.services.guards.require_turno_abierto(empresa, sucursal)` → usado en **crear venta**.
+  - `Venta.turno` almacena el turno asignado (auditoría/arqueo).
+- **Pricing**: selector de servicios según precios vigentes.
+- **Payments**: registra pagos; puede marcar la venta **pagada** si el saldo llega a 0.
+- **Invoicing**: emisión cuando la venta está **pagada**.
+- **Notifications**: mensajes cuando la venta pasa a **terminado**.
 
 ---
 
-## 10) Seguridad y Tenancy
+## 10) Contratos clave (lo que cambió y cómo usarlo)
+
+### 10.1 Modelo `Venta` (extracto)
+
+- **Nuevo campo**:
+  - `turno: ForeignKey(cashbox.TurnoCaja, null=True, blank=True, on_delete=SET_NULL, related_name="ventas")`  
+    “Turno operativo asignado al crear la venta.”
+
+### 10.2 Servicio `services/sales.py`
+
+- **`crear_venta(...)`**:
+  - **Enforcement**: llama a `require_turno_abierto(empresa, sucursal)`; si no hay, propaga `SinTurnoAbierto`.
+  - **Asignación**: setea `venta.turno = turno` devuelto por el guard.
+  - Estado inicial: `borrador`; `payment_status = "no_pagada"` (default del modelo).
+
+### 10.3 Vista `VentaCreateView`
+
+- En `POST`, envuelve la llamada a `crear_venta`.  
+  Si recibe `SinTurnoAbierto`, **redirige** a `cashbox:abrir` con `?next=` hacia el formulario actual para retomar el flujo tras abrir la caja.
+
+> Importante: los **tests** que creen ventas deben considerar que ahora el **service** exige turno (o se debe _mockear_ el guard).
+
+---
+
+## 11) Seguridad y Tenancy
 
 - Todas las vistas usan el **mixin de empresa** y filtran por **empresa activa**.
-- **Sucursal activa** proviene del middleware y limita precios/promos/servicios a mostrar/aplicar.
-- **Permisos** se evalúan en **tres capas**:
-  1. **Templates**: ocultan/inhabilitan CTAs (usabilidad).
-  2. **Vistas**: bloquean acceso (seguridad).
-  3. **Servicios**: vuelven a validar (defensa en profundidad).
+- **Sucursal activa** limita catálogo de servicios, precios y promos.
+- **Permisos** evaluados en: templates (flags), vistas (required_perms) y servicios (reglas).
 
 ---
 
-## 11) Promociones y Descuentos — reglas de negocio
+## 12) Promociones y Descuentos — reglas de negocio (sin cambios)
 
-- **Vigencia**: promo activa y dentro de su ventana (`valido_desde`/`valido_hasta`).
-- **Scope**: `venta` o `ítem`. Si es por ítem, exige target explícito.
-- **Unicidad**: la **misma** promoción no puede aplicarse dos veces al **mismo** target; lo garantiza la base con constraints.
-- **Stacking**: por defecto se permite acumular (configurable por `stackable`, prioridad y reglas futuras).
-- **Permisos**:
-  - **Aplicar promoción**: Admin y Operador.
-  - **Descuento manual** y **Eliminar ajustes**: solo Admin.
-  - **Gestionar promociones** (CRUD/activar): solo Admin.
-- **Estados**: ajustes solo en `borrador` / `en_proceso` (bloqueo en `terminado`/`cancelado`).
+- Vigencia, scope (venta/ítem), unicidad, stacking según configuración.
+- Permisos: aplicar (admin/operador), descuentos manuales y eliminar ajustes (solo admin).
+- Estados válidos: `borrador`/`en_proceso` (bloqueo en finales).
 
 ---
 
-## 12) Performance y calidad
+## 13) Performance y calidad
 
-- **Querysets** en vistas: `select_related` / `prefetch_related` donde corresponde (cliente, vehículo, ítems, ajustes, pagos).
-- **Plantillas** simples con fragmentos parciales reutilizables.
-- **Recalcular** solo tras cambios; operaciones idempotentes donde es razonable.
-- **Mensajería** coherente: todas las acciones informan éxito/error en la UI.
-
----
-
-## 13) Testing recomendado (enfoque)
-
-- **Unit**:
-  - `fsm`: transiciones válidas e inválidas.
-  - `calculations`: totales ante combinaciones de ítems y ajustes.
-  - `discounts`: vigencia, unicidad, permisos, aplicar/eliminar y side-effects (recalcular).
-- **Integration**:
-  - Flujos UI (crear → detalle → aplicar promo → finalizar → pagar → emitir).
-  - Permisos (operador vs admin) en vistas y services.
-- **E2E feliz y con errores**:
-  - Promo duplicada → error legible.
-  - Descuento manual por operador → prohibido.
-  - Editar ítems en terminado → bloqueado.
+- `select_related`/`prefetch_related` en vistas.
+- Recalcular solo tras cambios; idempotencia donde aplica.
+- Mensajería consistente en UI.
 
 ---
 
-## 14) Operación diaria (guía breve)
+## 14) Testing recomendado
 
-- **Operador**:
-  1. Crea venta (selecciona cliente/vehículo) y agrega servicios.
-  2. Aplica **promociones** vigentes (si hay).
-  3. Inicia/finaliza el trabajo.
-  4. Registra pagos del cliente.
-  5. Cuando el saldo sea 0, la venta queda **pagada**; si corresponde, emissão del comprobante.
-- **Admin**:
-  - Configura **promociones** (empresa/sucursal, vigencia, modo, valor, prioridad, stacking).
-  - Puede aplicar **descuentos manuales** (casos excepcionales) y **eliminar ajustes**.
-  - Supervisa cierre de ventas, emisión y reportes.
+- **Unit**: FSM, cálculos, discounts.
+- **Integration**: crear → detalle → promos → finalizar → pagar → emitir.
+- **Nuevo**: casos con/ sin turno abierto en `crear_venta()`; asserts de redirección a `cashbox:abrir` en la vista.
 
 ---
 
-## 15) Glosario mínimo
+## 15) Operación diaria (guía breve)
+
+- **Operador**: crea venta (si hay caja abierta según política), agrega servicios, aplica promos, finaliza, registra pagos, verifica saldo 0 (pagada).
+- **Admin**: además gestiona promociones, descuentos manuales y auditoría por turno (reportes en cashbox).
+
+---
+
+## 16) Glosario mínimo
 
 - **Venta**: orden de servicio; unidad de trabajo sobre un vehículo para un cliente.
 - **Ítem**: servicio prestado dentro de la venta.
-- **Ajuste**: modificación del subtotal (por ítem o por venta), originada por **promoción**, **descuento manual** o **método de pago**.
-- **Promoción**: regla parametrizable (vigencia, modo, valor, alcance) que genera ajustes al aplicarse.
-- **Saldo**: total menos pagos aplicados; si llega a 0 → **pagada**.
-- **Terminado**: estado operativo que indica que el trabajo finalizó (independiente del pago).
+- **Ajuste**: modificación del subtotal (promo o descuento).
+- **Saldo**: total menos pagos aplicados (0 → **pagada**).
+- **Turno**: período operativo de caja; en ventas, deja **rastro** del turno vigente al crear.
 
 ---
 
-## 16) Diagramas de referencia
+## 17) Diagramas de referencia
 
-### 16.1 Arquitectura lógica (capas)
+### 17.1 Arquitectura lógica (capas)
 
 ```mermaid
 graph TD
@@ -2787,64 +2695,27 @@ graph TD
     S3 --> M
     V --> FSM[fsm]
     V --> CALC[calculations]
-    V --> EXT[(Pricing/Payments\nInvoicing/Notifications)]
+    V --> EXT[(Org/Cashbox/Pricing/Payments\nInvoicing/Notifications)]
 ```
 
-### 16.2 Secuencia aplicar descuento/promoción
+### 17.2 Crear venta con política de caja
 
 ```mermaid
 sequenceDiagram
-    participant U as Usuario
-    participant VW as Vista Venta (Detail)
-    participant VP as Vista Acción (Promo/Desc)
-    participant SD as services.discounts
-    participant CALC as calculations
-
-    U->>VW: Abrir modal
-    U->>VP: POST (datos)
-    VP->>SD: Validar permisos/estado/vigencia/unicidad
-    SD->>M: Crear ajuste
-    SD->>CALC: Recalcular totales
-    CALC-->>SD: Totales actualizados
-    SD-->>VP: OK
-    VP-->>U: Mensaje + redirect
+    participant V as VentaCreateView
+    participant S as services.sales
+    participant G as cashbox.guards
+    V->>S: crear_venta(...)
+    S->>G: require_turno_abierto(empresa, sucursal)
+    alt hay turno
+      G-->>S: turno
+      S-->>V: Venta(turno=turno)
+    else no hay turno
+      G-->>S: SinTurnoAbierto
+      S-->>V: excepción
+      V-->>V: redirect a cashbox:abrir?next=...
+    end
 ```
-
-### 16.3 Matriz de edición por estado
-
-```mermaid
-classDiagram
-    class Borrador {
-      +Editar ítems: Sí
-      +Aplicar promos: Sí
-      +Desc. manuales: Sí (Admin)
-      +Eliminar ajustes: Sí (Admin)
-    }
-    class EnProceso {
-      +Editar ítems: Sí
-      +Aplicar promos: Sí
-      +Desc. manuales: Sí (Admin)
-      +Eliminar ajustes: Sí (Admin)
-    }
-    class Terminado {
-      +Editar ítems: No
-      +Aplicar promos: No
-      +Desc. manuales: No
-      +Eliminar ajustes: No
-    }
-    class Cancelado {
-      +Acciones: No
-    }
-```
-
----
-
-## 17) Buenas prácticas operativas
-
-- Mantener **precios** por sucursal y tipo de vehículo al día para que el selector ofrezca solo servicios vigentes.
-- Usar **promociones** para políticas comerciales recurrentes y **descuentos manuales** solo como excepción (admin).
-- Revisar **mensajería** de error/éxito para asegurar visibilidad de las acciones a los usuarios.
-- Monitorear el **listado de ventas** con filtros para trabajo en curso (en proceso) y pendientes de notificación o pago.
 
 ---
 
@@ -2852,6 +2723,12 @@ classDiagram
 
 > **Objetivo del módulo:** Registrar **pagos** para una venta (medio, monto, propina), mantener **saldo** consistente y, cuando el saldo llegue a **0**, pasar la venta a **`pagado`** (aunque esté en `borrador`/`en_proceso`). El módulo garantiza **idempotencia** básica, maneja **sobrepago** con confirmación (puede **dividir** en pago + propina) y aporta trazabilidad (`referencia`, `idempotency_key`).  
 > **Stack:** Django + CBVs server-rendered, Bootstrap 5 (modales; sin `confirm()` nativo).
+
+> **Novedades relevantes**
+>
+> - **Vínculo operativo con caja:** `Pago.turno` (FK a `cashbox.TurnoCaja`) se completa **al registrar** el pago.
+> - **Enforcement de caja abierta**: al crear un pago se exige **turno abierto** en la sucursal de la venta; si no existe, se redirige a **abrir turno** con `next=` para retomar el flujo.
+> - Los services usan `cashbox.services.guards.require_turno_abierto(empresa, sucursal)` para resolver el turno y **asignarlo** al pago.
 
 ---
 
@@ -2870,13 +2747,13 @@ apps/payments/
 ├─ views_medios.py               # Vistas de gestión de medios de pago (list/create/update/toggle)
 ├─ forms/
 │  ├─ __init__.py
-│  ├─ payment.py                 # PaymentForm (medio, monto, es_propina, referencia, idempotency_key, notas)
+│  ├─ payment.py                 # PaymentForm (medio, monto, referencia, notas)
 │  └─ medio_pago.py              # MedioPagoForm (nombre, activo) con validaciones por empresa
 ├─ services/
 │  ├─ __init__.py
 │  └─ payments.py                # registrar_pago(), recalcular_saldo(), OverpayNeedsConfirmation
 ├─ selectors.py                  # Consultas (pagos por venta, por rango/medio/sucursal)
-├─ validators.py                 # (Opcional) Reglas extra; parte quedó en services/models
+├─ validators.py                 # (Opcional) Reglas extra
 ├─ templates/
 │  └─ payments/
 │     ├─ form.html               # Alta de pago (desde detalle de venta), modal de sobrepago
@@ -2890,15 +2767,10 @@ apps/payments/
       └─ payments.css            # (Opcional) Estilos
 ```
 
-**Cambios clave vs. borrador anterior**
+**Notas clave**
 
-- **Permisos granulares por rol** integrados con la infraestructura común (`apps.org.permissions`).
-  - Nuevos **Perm**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`, `PAYMENTS_EDIT`, `PAYMENTS_DELETE`, `PAYMENTS_CONFIG`.
-  - Mapeo en `ROLE_POLICY`: **admin** acceso total; **operador** crear/ver; **supervisor** ver.
-- Todas las CBVs usan **`EmpresaPermRequiredMixin`** (no `LoginRequiredMixin` directo) y **Tenancy** desde `EmpresaContextMixin`.
-  - Las vistas definen `required_perms = (Perm.XXX,)` y **filtran por `self.empresa_activa`**.
-- **Flags de UI** en contextos: `puede_crear`, `puede_configurar`, etc. para habilitar/ocultar CTAs en templates — **sin lógica de seguridad en front**.
-- Se incorporó **gestión de medios de pago** por empresa (`MedioPago`), con **CRUD** protegido por `PAYMENTS_CONFIG`.
+- Permisos granulares y tenancy se resuelven vía `apps.org.permissions` y `EmpresaPermRequiredMixin` (vistas).
+- El **turno** se resuelve en **services** y se persiste en el `Pago` (trazabilidad de caja).
 
 ---
 
@@ -2928,12 +2800,24 @@ POST /pagos/medios/<int:pk>/toggle/                      name="payments:medios_t
 ### 3.1 `MedioPago`
 
 - Campos: `empresa(FK)`, `nombre`, `activo`, timestamps.
-- Constraint: **único** por `empresa+nombre` (evita duplicados: “Efectivo”, “Transferencia BBVA”, etc.).
+- Constraint: **único** por `empresa+nombre` (evita duplicados).
 
 ### 3.2 `Pago`
 
 - Campos: `id(UUID pk)`, `venta(FK)`, `medio(FK)`, `monto(>0)`, `es_propina(bool)`, `referencia`, `notas`, `idempotency_key`, `creado_por(FK user)`, timestamps.
-- Índices: por fecha y `(venta, es_propina)`.
+- **Nuevo**:
+  ```python
+  # Turno operativo (se completa en el service al registrar el pago)
+  turno = models.ForeignKey(
+      "cashbox.TurnoCaja",
+      on_delete=models.SET_NULL,
+      null=True,
+      blank=True,
+      related_name="pagos",
+      help_text=_("Turno operativo en el momento del pago."),
+  )
+  ```
+- Índices sugeridos: por fecha y `(venta, es_propina)`.
 - Constraint: `monto > 0`. Idempotencia condicional por `(venta, idempotency_key)` (cuando la key no es `NULL`).
 
 **Reglas de negocio**
@@ -2946,14 +2830,19 @@ POST /pagos/medios/<int:pk>/toggle/                      name="payments:medios_t
 
 ---
 
-## 4) Services
+## 4) Services (negocio)
 
 ### 4.1 `registrar_pago(venta, medio, monto, es_propina, referencia, notas, creado_por, idempotency_key=None, auto_split_propina=False) -> list[Pago]`
 
+- **Turno requerido** (enforcement centralizado):
+  ```python
+  turno = require_turno_abierto(venta.empresa, venta.sucursal)  # SinTurnoAbierto si no existe
+  ```
+  El turno resultante se **asigna** a cada `Pago` creado (`turno=turno`).
 - Bloquea la venta con `select_for_update()` (consistencia en concurrencia).
 - Valida `monto > 0` y `medio.empresa == venta.empresa` (tenancy).
 - Idempotencia simple (cuando **no hay split**).
-- Recalcula saldo **antes y después**; si queda en 0 y venta no está “cancelado” → `sales.services.marcar_pagada(venta)`.
+- Recalcula saldo **antes y después**; si queda en 0 y la venta no está cancelada → `sales.services.marcar_pagada(venta)`.
 - Casuística:
   - `es_propina=True` → crea pago propina, recalcula.
   - `es_propina=False` y `monto <= saldo` → crea pago normal, recalcula.
@@ -2962,279 +2851,183 @@ POST /pagos/medios/<int:pk>/toggle/                      name="payments:medios_t
 ### 4.2 `recalcular_saldo(venta)`
 
 - Suma pagos **no propina** y setea `venta.saldo_pendiente = max(venta.total - sum, 0)` (update atómico).
-- **No** toca FSM; la transición a “pagado” se hace en `_post_recalculo_y_pagado()` del service.
+- **No** toca FSM; la transición a “pagado” se hace en el propio service tras recalcular.
 
-> **Nota operativa:** una venta puede quedar **`pagado`** aun en `borrador` o `en_proceso`. Luego puede marcarse `terminado` para notificar.
+> **Efecto práctico:** una venta puede quedar **`pagado`** aun en `borrador`/`en_proceso`. Luego puede marcarse `terminado` para notificar.
 
 ---
 
-## 5) Permisos y roles (integración con `apps.org.permissions`)
+## 5) Vistas y seguridad declarativa (CBVs)
 
-### 5.1 Enumeración de permisos (`Perm`)
+### 5.1 Patrón común
 
-```text
+- Heredar de **`EmpresaPermRequiredMixin`** (maneja login + empresa/membership y `required_perms`).
+- Filtrar por empresa activa en `get_object()` / `get_queryset()`.
+- Usar flags de UI (`puede_crear`, `puede_configurar`) **solo** para experiencia de usuario (no seguridad).
+
+### 5.2 `PaymentCreateView` (alta de pago)
+
+- `required_perms = (Perm.PAYMENTS_CREATE,)`.
+- **Enforcement de turno abierto** ANTES de renderizar/registrar:
+  ```python
+  try:
+      require_turno_abierto(empresa=venta.empresa, sucursal=venta.sucursal)
+  except TurnoInexistenteError:
+      messages.warning(request, "Antes de registrar pagos debés abrir un turno de caja para esta sucursal.")
+      return redirect(f"{reverse('cashbox:abrir')}?next={request.get_full_path()}")
+  ```
+- Rechaza pagos sobre ventas `cancelado`.
+- Defensa multi-tenant extra: `medio.empresa_id == venta.empresa_id` (si no, error de usuario).
+- Sobrepago: captura `OverpayNeedsConfirmation` y re-renderiza con confirmación (o usa split automático si viene `confirmar_split=1`).
+
+### 5.3 Vistas de Medios (`views_medios.py`)
+
+- CRUD protegido por `PAYMENTS_CONFIG`.
+- Querysets limitados por `empresa=self.empresa_activa`.
+
+---
+
+## 6) Permisos y roles (integración con `apps.org.permissions`)
+
+### 6.1 `Perm` (resumen)
+
+```
 PAYMENTS_VIEW     # ver pagos (listados / lectura)
 PAYMENTS_CREATE   # registrar pago
 PAYMENTS_EDIT     # editar pago (si se habilita en roadmap)
 PAYMENTS_DELETE   # eliminar/revertir pago (si se habilita)
-PAYMENTS_CONFIG   # gestionar medios de pago (CRUD + activar/desactivar)
+PAYMENTS_CONFIG   # gestionar medios de pago
 ```
 
-### 5.2 Política por rol (`ROLE_POLICY`)
+### 6.2 Política por rol (`ROLE_POLICY`)
 
-- **admin**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`, `PAYMENTS_EDIT`, `PAYMENTS_DELETE`, `PAYMENTS_CONFIG`
-- **operador**: `PAYMENTS_VIEW`, `PAYMENTS_CREATE`
-- **supervisor**: `PAYMENTS_VIEW`
+- **admin**: ver/crear/editar/borrar pagos + configurar medios.
+- **operador**: ver/crear pagos.
+- **supervisor**: ver pagos.
 
-> **Fuente de verdad**: `apps.org.permissions.Perm` + `ROLE_POLICY`. **No se consultan roles directos** (`EmpresaMembership.rol`) en vistas/plantillas.
-
-```mermaid
-classDiagram
-  class Perm {
-    +PAYMENTS_VIEW
-    +PAYMENTS_CREATE
-    +PAYMENTS_EDIT
-    +PAYMENTS_DELETE
-    +PAYMENTS_CONFIG
-  }
-  class Admin {
-    +ver/crear/editar/borrar pagos
-    +configurar medios
-  }
-  class Operador {
-    +ver/crear pagos
-    -editar/borrar
-    -configurar medios
-  }
-  class Supervisor {
-    +ver
-  }
-  Perm <.. Admin
-  Perm <.. Operador
-  Perm <.. Supervisor
-```
-
----
-
-## 6) Vistas y seguridad declarativa (CBVs)
-
-### 6.1 Patrón de uso
-
-- Todas las vistas heredan de **`EmpresaPermRequiredMixin`** (que ya incluye `LoginRequiredMixin` + contexto de empresa).
-- Cada vista declara `required_perms = (Perm.XXX,)` y **filtra** por `self.empresa_activa` en `get_queryset()` / `get_object()`.
-
-**Helpers disponibles**
-
-- `has_empresa_perm(user, empresa, perm)` para **flags de UI** (no para seguridad).
-- **No** crear helpers alternativos tipo `membership.has_perm` ni mezclar `LoginRequiredMixin` con `EmpresaPermRequiredMixin`.
-
-### 6.2 Vistas de pagos (`apps/payments/views.py`)
-
-- `PaymentCreateView`
-
-  - `required_perms = (Perm.PAYMENTS_CREATE,)`
-  - Flags en contexto: `puede_crear`, `puede_configurar` (para botones/avisos).
-  - Rechaza pagos sobre ventas `cancelado`.
-  - Defensa multi-tenant extra: `medio.empresa_id == venta.empresa_id`.
-  - Sobrepago: `OverpayNeedsConfirmation` → render con aviso y `<input hidden name="confirmar_split" value="1">` al confirmar.
-
-- `PaymentListView` (opcional)
-  - `required_perms = (Perm.PAYMENTS_VIEW,)`
-  - Queryset filtrado por `venta__empresa=self.empresa_activa`.
-  - Flags en contexto: `puede_crear`, `puede_configurar`.
-
-### 6.3 Vistas de medios (`apps/payments/views_medios.py`)
-
-- `MedioPagoListView`, `MedioPagoCreateView`, `MedioPagoUpdateView`, `MedioPagoToggleActivoView`
-  - `required_perms = (Perm.PAYMENTS_CONFIG,)`
-  - Tenancy estricto: `empresa=self.empresa_activa` en queryset/objeto.
-  - Mixin auxiliar interno **`_PermCtxMixin`** inyecta `puede_configurar` en el contexto para **todas** estas vistas.
+> **Fuente de verdad**: `Perm` + `ROLE_POLICY` en `apps.org.permissions`. No consultar roles directos en vistas/plantillas.
 
 ---
 
 ## 7) Templates (flags y UX)
 
-### 7.1 `payments/form.html` (registrar pago)
+### 7.1 `payments/form.html`
 
-- Muestra aviso si `requiere_confirmacion` (fallback servidor).
-- **Flags**:
-  - `puede_crear` → habilita botón “Registrar pago” o “Confirmar y aplicar diferencia…”.
-  - `puede_configurar` → botón “Configurar medios”.
-- Modal Bootstrap de sobrepago (JS) para confirmar el split **antes** del submit.
+- Aviso si `requiere_confirmacion` (fallback servidor) y `confirmar_split` oculto cuando aplica.
+- Flags de UI:
+  - `puede_crear`: habilita “Registrar pago”/“Confirmar y aplicar diferencia”.
+  - `puede_configurar`: CTA “Configurar medios”.
 
-### 7.2 `payments/list.html` (listado de pagos)
+### 7.2 `payments/list.html` (opcional)
 
-- **Flags**:
-  - `puede_crear` → CTA “Registrar pago” (opcional).
-  - `puede_configurar` → CTA “Configurar medios”.
-- Tabla con: fecha, venta, método, monto, propina, usuario, referencia.
+- Tabla con fecha, venta, método, monto, propina, usuario, referencia.
+- `puede_configurar` → CTAs de medios.
 
-### 7.3 `payments/medios_list.html`
+### 7.3 `medios_*`
 
-- **Flag** `puede_configurar`: muestra/oculta “Nuevo medio”, “Editar” y “Activar/Desactivar”.
-- Confirmación simple en toggle con `onsubmit="return confirm(...)"`.
+- Formularios y listado con gating por `PAYMENTS_CONFIG`.
+- Confirmación simple en toggle activo/inactivo.
 
-### 7.4 `payments/medios_form.html`
-
-- **Flag** `puede_configurar`: aviso si no tiene permiso y deshabilita el botón **(defensa visual; el mixin ya bloquea)**.
-
-### 7.5 `_summary_sale.html`
-
-- Solo lectura (cliente/vehículo/total/saldo). **No requiere flags**, salvo que se decida agregar CTAs.
-
-> **Importante**: los templates **no implementan la seguridad**; solo mejoran la UX. La seguridad está en **mixins** y **services**.
+> Los templates no implementan seguridad; solo mejoran la UX. La seguridad está en **mixins** y **services**.
 
 ---
 
-## 8) Integración con `sales` e `invoicing`
+## 8) Integraciones con `sales` / `cashbox` / `invoicing`
 
-- `sales:detail` incluye **tabla de pagos** y botón “Registrar pago” si `puede_crear`.
-- El service recalcula **saldo** tras cada operación y si llega a 0 (y venta no está cancelada) marca estado **`pagado`**.
-- `invoicing`: emisión permitida únicamente con **venta pagada**. Operador puede **ver** comprobantes y **emitir** si corresponde; Admin puede **anular** y **configurar plantillas** (alineado al esquema global de permisos).
+- **Sales**: `sales:detail` muestra pagos y CTA “Registrar pago”.
+- **Cashbox**: cada `Pago` queda asociado al **TurnoCaja** vigente → reportes y cierres por método/propinas funcionan sin ambigüedades.
+- **Invoicing**: emisión permitida únicamente con venta **pagada**; hooks pueden autoemitir si la política lo permite.
 
 ---
 
 ## 9) Tenancy (multi-empresa / sucursal)
 
-- `EmpresaPermRequiredMixin` asegura: usuario autenticado, **empresa activa** válida, **membership activa**.
-- Querysets y objetos en vistas de `payments` y `medios` se limitan a `self.empresa_activa`.
+- `EmpresaPermRequiredMixin` valida empresa/membership.
+- Querysets limitados por empresa activa.
 - `PaymentForm` filtra `medio` por empresa activa y solo **activos**.
-- Validación extra en service y vistas: `medio.empresa_id == venta.empresa_id`.
+- Service y vista validan `medio.empresa_id == venta.empresa_id`.
 
 ---
 
 ## 10) Seguridad (defensa en profundidad)
 
-1. **Templates** → Flags de UI (`puede_*`) para mostrar/ocultar/habilitar CTAs.
+1. **Templates** → Flags de UI (`puede_*`).
 2. **Vistas** → `EmpresaPermRequiredMixin` + `required_perms` + filtros por empresa.
-3. **Services** → Validaciones de negocio críticas (monto>0, tenant, idempotencia, sobrepago, recalcular saldo + FSM).
+3. **Services** → Reglas críticas (monto>0, tenant, idempotencia, sobrepago, recalcular saldo + FSM, **resolver y asignar turno**).
 
-**Prohibido**:
-
-- Consultar `EmpresaMembership.rol` directo en vistas o templates.
-- Mezclar `LoginRequiredMixin` con `EmpresaPermRequiredMixin`.
-- Crear helpers alternativos de permisos (`membership.has_perm`, etc.).
-- Dejar restricciones solo en frontend.
+Evitar: leer `rol` directo, mezclar mixins, helpers alternativos de permisos, confiar en front para seguridad.
 
 ---
 
 ## 11) Errores tratados / Idempotencia / Concurrencia
 
-- **Idempotencia**: reintentos con la misma `idempotency_key` no duplican pagos; en split se usan claves derivadas.
-- **Concurrencia**: `select_for_update()` sobre la Venta durante el registro y recálculo de saldo.
-- **Sobrepago**: excepción `OverpayNeedsConfirmation` para confirmar split a propina; modal en front y fallback en server.
+- **Idempotencia**: `(venta, idempotency_key)` evita duplicar; en split se usan `key:saldo` y `key:propina`.
+- **Concurrencia**: `select_for_update()` sobre Venta al registrar y recalcular saldo.
+- **Sobrepago**: `OverpayNeedsConfirmation` → confirmación/split; mensajes claros en UI.
 
 ---
 
 ## 12) QA Manual (checklist)
 
-1. **Medios** por empresa: crear “Efectivo”, “Transferencia” (activos).
-2. Crear **Venta** con total ≈ 30.000 y **saldo_pendiente** = total.
-3. Registrar **pago parcial** (10.000, no propina) → saldo = 20.000; estado **no** cambia a `pagado`.
-4. Registrar **pago exacto** por el **saldo restante** → saldo = 0; estado pasa a **`pagado`**.
-5. Registrar **propina** (marcada) → saldo **no** cambia; propinas suman aparte.
-6. Intentar **sobrepago** (p. ej. 35.000 con saldo 30.000 y `es_propina=False`) → ver **modal/aviso de confirmación**; aceptar → se crean **2 pagos** (30.000 no propina + 5.000 propina); saldo = 0; estado `pagado`.
-7. Reintentar el submit con la **misma `idempotency_key`** → no duplica (mismo pago/split), saldo consistente.
-8. En `sales:detail`, ver **tabla de pagos** y **saldo** correcto tras cada operación.
-9. Si la venta está `cancelado`, intentar registrar pagos → **bloquear** (mensaje).
-10. Verificar que **operador** no ve “Configurar medios” ni puede acceder a rutas de medios (403/redirect con mensaje).
+1. Crear **Medios** (“Efectivo”, “Transferencia”).
+2. Intentar registrar pago **sin turno abierto** → redirección a **/caja/abrir/** con `next=`.
+3. Abrir turno y volver → formulario de pago disponible.
+4. Pago **parcial** → saldo disminuye, venta **no pagada**.
+5. Pago **exacto** → saldo = 0; venta **pagada**.
+6. **Propina** marcada → saldo no cambia; propina suma aparte.
+7. **Sobrepago** no marcado como propina → confirmación y split (saldo + propina).
+8. Reintento con misma **idempotency_key** → no duplica.
+9. Ver en reportes de caja que los pagos figuran con su **turno**.
+10. Operador sin `PAYMENTS_CONFIG` no puede acceder a rutas de medios (403/redirect).
 
 ---
 
-## 13) Roadmap inmediato
+## 13) Roadmap breve
 
-- **Reversa de pago** (soft delete/estado `revertido` + recalcular saldo + auditoría).
-- **Cierres de caja**: resumen por medio, sucursal, rango. Monto de propinas separado.
-- **Integración pasarelas** (MP/Stripe): usar `referencia` como id externo y **`idempotency_key`** origen pasarela.
-- Roles finos adicionales (p. ej. **cajero**, **supervisor de caja**).
-
----
-
-## 14) Notas de implementación
-
-- Mantener el **cálculo de saldo** y **transición a `pagado`** **solo** en el **service** (`payments.services.payments`).
-- Si se usan `signals`, delegar en el service (evitar duplicar reglas).
-- Mensajería UI consistente con `django.contrib.messages` (success/info/warning/error).
-- **Vistas de medios**: siempre filtrar por `self.empresa_activa` y proteger con `PAYMENTS_CONFIG`.
+- Reversa de pago (soft delete/estado `revertido` + auditoría).
+- Cierres/arqueos enriquecidos (consolidado por medio, propinas, diferencias).
+- Integración con pasarelas (usar `referencia` + `idempotency_key` externas).
+- Roles finos (cajero/supervisor de caja).
 
 ---
 
-## 15) Diagramas de referencia
+## 14) Diagramas de referencia
 
-### 15.1 Secuencia registrar pago
+### 14.1 Secuencia registrar pago (con caja)
 
 ```mermaid
 sequenceDiagram
   participant U as Usuario
   participant VW as PaymentCreateView
   participant S as payments.services
-  participant DB as PostgreSQL
+  participant G as cashbox.guards
+  participant DB as DB
 
   U->>VW: GET /ventas/<id>/pagos/nuevo/
-  VW-->>U: Form (medio, monto, es_propina, referencia, key)
+  VW-->>U: Form (medio, monto, referencia, notas)
 
-  U->>VW: POST form
-  VW->>S: registrar_pago(...)
-  alt monto > saldo y !es_propina y !auto_split
-    S-->>VW: OverpayNeedsConfirmation(saldo, monto)
-    VW-->>U: Re-render con aviso + hidden confirmar_split=1
-    U->>VW: POST form (confirmar_split=1)
-    VW->>S: registrar_pago(..., auto_split_propina=True)
-    S->>DB: crear pago saldo + pago propina
-  else pago simple
-    S->>DB: crear pago único
+  U->>VW: POST
+  VW->>G: require_turno_abierto(empresa, sucursal)
+  alt no hay turno
+    G-->>VW: SinTurnoAbierto
+    VW-->>U: redirect /caja/abrir/?next=...
+  else hay turno
+    G-->>VW: OK
+    VW->>S: registrar_pago(...)
+    S->>DB: lock venta + validar + crear Pago(turno=TurnoCaja)
+    S->>DB: recalcular_saldo + marcar_pagada si saldo=0
+    VW-->>U: mensaje + redirect a sales:detail
   end
-  S->>DB: recalcular_saldo + marcar_pagada si corresponde
-  VW-->>U: Mensaje + redirect a sales:detail
-```
-
-### 15.2 Permisos declarativos (CBVs)
-
-```mermaid
-graph TD
-  V[View] -->|hereda| EPRM[EmpresaPermRequiredMixin]
-  EPRM -->|usa| ECM[EmpresaContextMixin]
-  EPRM -->|valida| hasPerm["has_empresa_perm(user, empresa, perm)"]
-  V -->|declara| RP["required_perms=(Perm.PAYMENTS_*,)"]
-  V -->|context| Flags["puede_crear / puede_configurar"]
-```
-
----
-
-## 16) Apéndice — extracto de configuración de permisos
-
-> **Referencia resumida** (la implementación real vive en `apps/org/permissions.py`).
-
-```text
-class Perm(str, Enum):
-    # ...
-    PAYMENTS_VIEW     = "PAYMENTS_VIEW"
-    PAYMENTS_CREATE   = "PAYMENTS_CREATE"
-    PAYMENTS_EDIT     = "PAYMENTS_EDIT"
-    PAYMENTS_DELETE   = "PAYMENTS_DELETE"
-    PAYMENTS_CONFIG   = "PAYMENTS_CONFIG"
-
-ROLE_POLICY["admin"] |= {
-    Perm.PAYMENTS_VIEW, Perm.PAYMENTS_CREATE, Perm.PAYMENTS_EDIT,
-    Perm.PAYMENTS_DELETE, Perm.PAYMENTS_CONFIG,
-}
-ROLE_POLICY["operador"] |= {
-    Perm.PAYMENTS_VIEW, Perm.PAYMENTS_CREATE,
-}
-ROLE_POLICY["supervisor"] |= {
-    Perm.PAYMENTS_VIEW,
-}
 ```
 
 ---
 
 ### Resumen ejecutivo
 
-- **Pagos robustos** con idempotencia, tratamiento de **sobrepago** (modal/confirmación/split a propina) y **tenancy** garantizado.
-- **Permisos granulares por rol**: admin (total), operador (uso diario), supervisor (consulta).
-- **Seguridad en backend** (mixins + services); los templates solo reflejan flags de permiso para UX.
-- Integración fluida con `sales` e `invoicing` (emisión con venta **pagada**).
-- Código preparado para extensiones: reversa de pagos, cierres de caja e integración con pasarelas.
+- **Pagos robustos** con idempotencia, **sobrepago** gestionado (confirmación/split) y **tenancy** garantizado.
+- **Turno operativo** asignado a cada pago para **trazabilidad de caja** y reportes.
+- Seguridad declarativa (mixins + services) y UX cuidada con mensajes/flags.
+- Integración fluida con `sales` (saldo/estado) y con `cashbox` (turno/arqueos).
 
 # Módulo 9 — `apps/invoicing` (Comprobantes no fiscales + numeración por sucursal)
 
@@ -3788,133 +3581,285 @@ apps/notifications/
 5. Integración con colas (Celery/RQ) para envíos asíncronos.
 6. Panel de administración de entregabilidad.
 
-# Módulo 11 — `apps/cashbox` (Cierres de Caja)
+# Módulo 11 — `apps/cashbox` (Turnos de Caja, Arqueos y Cierres)
 
-> **Objetivo del módulo:** Gestionar el **ciclo de caja** en cada sucursal: apertura obligatoria antes de operar, un único cierre abierto por sucursal a la vez, consolidación automática de pagos y propinas, y registro de notas y trazabilidad de usuarios.
+> **Objetivo del módulo:** Gestionar el **ciclo de caja** por sucursal mediante **Turnos de Caja**: abrir (inicio de operación), registrar pagos ligados al turno, **previsualizar** totales, **cerrar** y persistir el **resumen por método** (monto y propinas). Incluye un **cierre Z** (consolidado diario por sucursal) y utilidades para **enforcement** desde `sales` y `payments` (no operar sin turno).
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Estructura de carpetas/archivos (actualizada)
 
 ```
 apps/cashbox/
 ├─ __init__.py
-├─ apps.py                        # Config de la app (name="apps.cashbox")
-├─ admin.py                       # Admin de CierreCaja y CierreCajaTotal (solo lectura/auditoría)
+├─ apps.py
+├─ admin.py
 ├─ migrations/
 │  └─ __init__.py
-├─ models.py                      # CierreCaja y CierreCajaTotal
-├─ urls.py                        # Endpoints: abrir, cerrar, detalle, listado
-├─ views.py                       # Vistas server-rendered CRUD (abrir/cerrar, detalle, listado)
+├─ models.py                      # TurnoCaja, TurnoCajaTotal
+├─ urls.py                        # abrir, cerrar, detalle, listado, cierre Z
+├─ views.py                       # TurnoListView, TurnoOpenView, TurnoCloseView, TurnoDetailView, ZReportView
 ├─ forms/
 │  ├─ __init__.py
-│  └─ closure.py                  # Validaciones de cierre (ej. notas obligatorias si hay diferencias)
+│  └─ closure.py                  # OpenCashboxForm, CloseCashboxForm (sin campos de fechas)
 ├─ services/
 │  ├─ __init__.py
-│  ├─ cashbox.py                  # abrir_cierre(), cerrar_cierre() con reglas de negocio
-│  └─ totals.py                   # Calcular totales de pagos por método y propinas
-├─ selectors.py                   # Consultas optimizadas: cierres por rango, detalle con totales
+│  ├─ cashbox.py                  # abrir_turno(), cerrar_turno() + helpers
+│  ├─ totals.py                   # sumar_pagos_por_metodo(), preview_totales_turno()
+│  └─ guards.py                   # require_turno_abierto(), get_turno_abierto(), errores dominio
+├─ selectors.py                   # consultas de apoyo (listados/aux)
 ├─ templates/
 │  └─ cashbox/
-│     ├─ list.html                # Listado de cierres por sucursal
-│     ├─ form.html                # Form de apertura/cierre (notas, confirmación)
-│     ├─ detail.html              # Detalle de un cierre con desglose de totales
-│     └─ _totals_table.html       # Partial con tabla de métodos de pago/propinas
+│     ├─ list.html                # listado de turnos por sucursal/empresa
+│     ├─ form.html                # abrir/cerrar (UX unificada con flags)
+│     ├─ detail.html              # detalle de turno + tabla de totales
+│     └─ z.html                   # cierre Z (consolidado diario)
 └─ static/
    └─ cashbox/
-      ├─ cashbox.css              # Estilos propios
-      └─ cashbox.js               # UX: confirmación, recálculo de totales en vivo
+      ├─ cashbox.css
+      └─ cashbox.js
 ```
+
+**Diferencias respecto a versiones previas**
+
+- Se estandariza la **nomenclatura**: `TurnoCaja` y `TurnoCajaTotal` (antes “CierreCaja”).
+- **NUEVO** `services/guards.py`: punto único de **enforcement** (abrir requerido) consumido por `sales` y `payments`.
+- **NUEVO** `templates/cashbox/z.html`: cierre **Z** (consolidado por día/sucursal).
+- **Forms** sin campos de fechas: **no** se permite manipular `abierto_en`/`cerrado_en` desde UI.
+- **Totals** evita colisiones de anotaciones con nombres de campos reales.
 
 ---
 
 ## 2) Modelos
 
-### `CierreCaja`
+### 2.1 `TurnoCaja`
 
-- **Tenancy**: `empresa`, `sucursal`.
-- **Usuario**: `usuario` que abre, `cerrado_por` que cierra.
-- **Fechas**: `abierto_en` automático (now), `cerrado_en` al momento del cierre.
-- **Estado**: exactamente **un cierre abierto por sucursal** (constraint parcial).
-- **Notas**: comentarios, observaciones o diferencias.
-- **Helpers**: `esta_abierta`, `rango()`.
+- **Tenancy**: `empresa`, `sucursal` (FKs).
+- **Apertura**: `abierto_en` (auto `timezone.now()`), `abierto_por` (FK user).
+- **Cierre**: `cerrado_en` (set al cerrar), `cerrado_por` (FK user).
+- **Notas**: `observaciones` (texto libre; en cierre se puede **append**).
+- **Estado derivado**: `esta_abierto` (bool por `cerrado_en is null`), `rango()` (tuple aware: desde apertura hasta cierre/now).
+- **Relaciona**: `ventas` y `pagos` (por FKs desde `sales.Venta.turno` y `payments.Pago.turno`).
 
-### `CierreCajaTotal`
+**Reglas estructurales**
 
-- Relacionado a `CierreCaja`.
-- Campos: `medio` (forma de pago), `monto`, `propinas`.
-- Usado para almacenar el resumen generado por `services.totals`.
+- **Único** turno **abierto** por sucursal (constraint parcial o lógica en service + guard).
 
----
+### 2.2 `TurnoCajaTotal`
 
-## 3) Servicios
+- `turno` (FK a `TurnoCaja`).
+- Identificador de **medio** de pago **por nombre** (`medio_nombre`) o por FK `medio` (según el modelo del proyecto).
+- Campos de importes persistidos (según tu esquema actual; el service los resuelve dinámicamente):
+  - **teóricos**: `monto_teorico`, `propinas_teoricas` (sumas calculadas desde Pagos).
+  - **conteo físico** (opcional): `monto_contado`, `propinas_contadas`.
+  - **diferencias** (opcional): `dif_monto`, `dif_propinas`.
 
-### `services/cashbox.py`
-
-- **`abrir_cierre(empresa, sucursal, usuario)`**:
-  - Verifica que no exista cierre abierto en esa sucursal.
-  - Crea `CierreCaja(abierto_en=now)`.
-- **`cerrar_cierre(cierre, usuario, notas)`**:
-  - Calcula totales de pagos con `services.totals`.
-  - Marca `cerrado_en=now`, `cerrado_por=usuario`.
-  - Crea registros `CierreCajaTotal` por cada método de pago.
-
-### `services/totals.py`
-
-- Resume pagos (`apps.payments.Pago`) desde `abierto_en` hasta `cerrado_en`.
-- Devuelve {medio → monto, propinas}.
+> El service de cierre **descubre** en runtime cómo se llaman los campos de importes en tu modelo concreto para realizar el `bulk_create` sin colisiones.
 
 ---
 
-## 4) Selectors
+## 3) Formularios (`forms/closure.py`)
 
-- `cierres_por_rango(empresa, sucursal, desde, hasta)` → lista de cierres con filtros.
-- `detalle_con_totales(cierre_id)` → incluye `CierreCajaTotal`.
+### 3.1 `OpenCashboxForm`
+
+- Campos: `notas` (opcional).
+- **Sin** `abierto_en`: la marca de tiempo la fija el service con `timezone.now()`.
+
+### 3.2 `CloseCashboxForm`
+
+- Campos:
+  - `notas_append` (opcional): se agrega al final de `observaciones`.
+  - `confirmar` (**obligatorio**): casilla para evitar cierres accidentales.
+- **Sin** `cerrado_en`: la marca la fija el service al momento del cierre.
+
+> Ambos formularios aplican un **mixin bootstrap** que inyecta clases a los widgets; el template es genérico y recorre campos.
+
+---
+
+## 4) Servicios
+
+### 4.1 `services/guards.py` (enforcement cross-módulo)
+
+- `require_turno_abierto(empresa, sucursal) -> TurnoCaja`: devuelve el turno abierto o lanza `SinTurnoAbierto` / `TurnoInexistenteError`.
+- `get_turno_abierto(empresa, sucursal) -> Optional[TurnoCaja]`: helper de lectura (sin lanzar).
+
+> **Consumido por** `sales.services.crear_venta` y `payments.services.registrar_pago` para **rechazar** operaciones cuando no hay turno abierto (las vistas redirigen a **abrir turno** con `next=`).
+
+### 4.2 `services/cashbox.py` (negocio de turnos)
+
+- **Abrir**  
+  `abrir_turno(empresa, sucursal, user, responsable_nombre="", observaciones="") -> TurnoCaja`
+
+  - Verifica que **no** haya turno abierto en esa sucursal.
+  - Persiste apertura (`abierto_en=now`, `abierto_por=user`).
+
+- **Cerrar**  
+  `cerrar_turno(turno, user, monto_contado_total=None, cerrado_en=None, notas_append=None, recalcular_y_guardar_totales=True) -> CierreTurnoResult`
+  - Valida que el turno esté **abierto** y que `now >= abierto_en`.
+  - Calcula **totales teóricos** por método con `services.totals.sumar_pagos_por_metodo()` (monto sin propina + propinas).
+  - Limpia totales previos y hace `bulk_create` en `TurnoCajaTotal`, **resolviendo nombres de campos** del modelo (flexible).
+  - Sella cierre (`cerrado_en=now`, `cerrado_por=user`) y **concatena** `notas_append` a `observaciones`.
+  - Devuelve `CierreTurnoResult(turno, totales)` para que la vista pueda redirigir con el ID correcto.
+
+> El service **no** realiza anotaciones que colisionen con nombres de campos reales del modelo; toda agregación vive en `totals.py`.
+
+### 4.3 `services/totals.py` (sumatorias y preview)
+
+- `sumar_pagos_por_metodo(turno, hasta=None) -> list[TotalesMetodo]`: agrega `Pago` por método (separando **propinas**), en el rango `turno.abierto_en`…`hasta or turno.cerrado_en or now`.
+- `preview_totales_turno(turno) -> list[TotalesMetodo]`: misma lógica, pensado para **GET** del cierre (no persiste).
+
+> Lógica a prueba de colisiones: no se usa `.annotate(monto=Sum("monto"))` si ya existe columna `monto`; en su lugar se calculan alias seguros y se proyectan a DTOs (`TotalesMetodo`).
 
 ---
 
 ## 5) Vistas y URLs
 
-### Rutas (`apps/cashbox/urls.py`)
+### 5.1 URLs (`apps/cashbox/urls.py`)
 
-- `GET  /caja/` → listado de cierres por sucursal.
-- `GET  /caja/abrir/` → form de apertura.
-- `POST /caja/abrir/` → ejecutar apertura.
-- `GET  /caja/<uuid:id>/` → detalle de cierre.
-- `GET  /caja/<uuid:id>/cerrar/` → form de cierre con totales precargados.
-- `POST /caja/<uuid:id>/cerrar/` → confirmar cierre.
+```
+GET  /caja/                     name="cashbox:list"     # listado de turnos
+GET  /caja/abrir/               name="cashbox:abrir"    # form abrir
+POST /caja/abrir/               name="cashbox:abrir"
+GET  /caja/<uuid:id>/           name="cashbox:detalle"  # detalle turno
+GET  /caja/<uuid:id>/cerrar/    name="cashbox:cerrar"   # form cerrar (con preview)
+POST /caja/<uuid:id>/cerrar/    name="cashbox:cerrar"
 
-### Integración
+# Cierre Z (consolidado diario por sucursal)
+GET  /caja/z/                   name="cashbox:z"        # filtros desde/hasta(+sucursal)
+```
 
-- Al **iniciar sesión**, si no hay caja abierta → forzar apertura.
-- Al **cerrar sesión**, si hay caja abierta → forzar cierre.
+### 5.2 Vistas (`apps/cashbox/views.py`)
 
----
+- **TurnoListView**: lista turnos de la empresa activa (filtros por sucursal, rango y abiertos/cerrados).
+- **TurnoOpenView**: muestra el form de apertura; valida que **no** exista abierto; crea turno y redirige a **detalle**.
+- **TurnoCloseView**: GET muestra **preview** (via `preview_totales_turno`); POST llama `cerrar_turno(...)` y redirige a **detalle**.
+- **TurnoDetailView**: muestra metadatos y **tabla de totales** (preview compute-only).
+- **ZReportView** (`templates/cashbox/z.html`): consolida por **día** y **sucursal** (considera todos los turnos del día).
 
-## 6) Seguridad
+**Notas de UX**
 
-- Autenticación obligatoria.
-- Validación multi-tenant: solo cierres de `empresa_activa`.
-- Solo roles **cajero** y **admin** pueden abrir/cerrar.
-- Constraints garantizan que solo haya **1 caja abierta por sucursal**.
-
----
-
-## 7) Dependencias e integraciones
-
-- **payments**: origen de pagos para totales.
-- **sales**: contexto de ventas del rango.
-- **org**: empresa y sucursal para tenancy.
-- Integración en `sales`: bloquear ventas si no hay caja abierta en la sucursal del usuario.
+- El **template único** `form.html` sirve para abrir y cerrar (usa `accion` y `preview_totales`).
+- Los campos de fecha **no** se muestran (controlados por el service).
+- Se usan mensajes `django.contrib.messages` para éxito/errores.
 
 ---
 
-## 8) Roadmap
+## 6) Selectors
 
-1. Automatizar apertura/cierre forzando flujo en login/logout.
-2. Dashboard con comparación “totales de sistema” vs. “efectivo contado”.
-3. Exportación de cierres a CSV/PDF para auditoría.
-4. Soporte a arqueo intermedio (cortes parciales de caja).
+- Consultas de soporte para listados/filtrado.
+- Mantienen **tenancy** (empresa activa) y evitan N+1 (`select_related`/`prefetch_related` cuando aplica).
+
+---
+
+## 7) Integraciones y Enforcement
+
+- **`sales`**
+
+  - Al **crear venta**: `sales.services.crear_venta(...)` llama `require_turno_abierto(empresa, sucursal)` y **asigna** `venta.turno`.
+  - Si no hay turno: la vista redirige a **abrir turno** con `?next=` y mensaje.
+
+- **`payments`**
+
+  - Al **registrar pago**: `payments.services.registrar_pago(...)` llama `require_turno_abierto(...)` y **asigna** `pago.turno`.
+  - Si no hay turno: la vista redirige a **abrir turno** con `?next=` y mensaje.
+  - Los totales de cierre separan **monto (sin propina)** y **propinas**.
+
+- **`org`**
+  - Política de caja por empresa (`Empresa.cashbox_policy`), expuesta por `apps.org.utils.get_cashbox_policy()`.
+  - Permisos centralizados en `apps.org.permissions` (`Perm.CASHBOX_*`).
+
+---
+
+## 8) Permisos (declarativos)
+
+- `Perm.CASHBOX_VIEW` — ver listados/detalles.
+- `Perm.CASHBOX_OPEN` — abrir turno.
+- `Perm.CASHBOX_CLOSE` — cerrar turno.
+- `Perm.CASHBOX_COUNT` — (si se usa) cargar conteo físico.
+- `Perm.CASHBOX_REPORT` — ver/descargar reportes (incluye Z).
+- `Perm.CASHBOX_CONFIG` — configuración (si aplica).
+
+> Las CBVs usan `EmpresaPermRequiredMixin` y declaran `required_perms`. Los templates **no** implementan seguridad; solo reflejan **flags** (`puede_*`).
+
+---
+
+## 9) Templates (puntos finos)
+
+- **`cashbox/form.html`**:
+
+  - No renderiza fechas; recorre dinámicamente los campos del form.
+  - Si `accion == "cerrar"`, muestra **preview**: columnas **Método**, **Monto (sin propina)**, **Propinas**, **Total** (monto+propinas).
+
+- **`cashbox/detail.html`**:
+
+  - Encabezado del turno (abierto/cerrado, usuarios, notas).
+  - Tabla de totales en lectura (mismo layout que el preview).
+  - CTA “Cerrar turno” si `esta_abierto` y el usuario tiene permiso.
+
+- **`cashbox/list.html`**:
+
+  - Filtros por sucursal, rango y estado.
+  - Columna de estado (abierto/cerrado), acciones por fila (detalle/cerrar si aplica).
+
+- **`cashbox/z.html`**:
+  - Filtros: sucursal + fecha (día o rango corto).
+  - Consolida pagos del día: **monto** y **propinas** por método (sumando varios turnos).
+
+---
+
+## 10) Errores tratados y decisiones técnicas
+
+- Se evitaron **colisiones** de nombres en `.annotate()` (p. ej., `monto` ya existente en el modelo) usando DTOs y alias seguros.
+- `cerrar_turno()` resuelve dinámicamente los **nombres de campos** de `TurnoCajaTotal` para setear “monto teórico / propinas teóricas” (o variantes existentes), manteniendo compatibilidad con tu esquema.
+- El **sellado temporal** (`abierto_en`/`cerrado_en`) lo realiza **exclusivamente** el service, no los forms.
+- `select_for_update()` sobre `TurnoCaja` en cierre, y sobre `Venta` en registro de pagos, para consistencia.
+
+---
+
+## 11) Seguridad y Tenancy
+
+- Todas las vistas heredan de `EmpresaPermRequiredMixin` (login + empresa + membership).
+- Querysets filtrados por `empresa_activa`.
+- `guards.require_turno_abierto` evita fugas de reglas hacia otras capas.
+- Mensajes de error claros y redirecciones con `?next=` para retomar el flujo tras abrir turno.
+
+---
+
+## 12) Cierre Z (resumen diario)
+
+- Vista `ZReportView` (server-rendered) en `templates/cashbox/z.html`.
+- Entrada: **sucursal** (opcional, default sucursal activa) y **fecha** (o rango corto).
+- Salida: tabla **por método** con **monto sin propina**, **propinas**, **total** y totales generales; link a turnos del día.
+
+---
+
+## 13) QA Manual (checklist)
+
+1. Intentar crear **venta** sin turno → redirección a “Abrir Turno” con `next=`.
+2. Abrir turno → crear venta → registrar **pagos** con diferentes **medios** y **propinas**.
+3. Ver **preview** en `GET /caja/<id>/cerrar/` con sumas correctas por método.
+4. Cerrar turno → verificar `TurnoCajaTotal` persistido (nombres de campos correctos) y `cerrado_en/cerrado_por`.
+5. Reabrir otro turno y repetir; luego ir a **Z** (día) y comprobar consolidado.
+6. Ver que en `sales.detail`/`payments` los registros quedaron asociados al **turno** correcto.
+7. Probar permisos: operador puede abrir/cerrar; supervisor solo ver; admin todo.
+
+---
+
+## 14) Roadmap
+
+- Arqueo físico por método (`monto_contado`/`propinas_contadas`) + cálculo de **diferencias** y tolerancias.
+- Exportaciones (CSV/PDF) y firmas digitales del cierre.
+- Cierres parciales (cortes) dentro del día.
+- Widgets embebibles en dashboard (estado de caja de la sucursal).
+
+---
+
+### Resumen ejecutivo
+
+- `apps/cashbox` define **Turnos** como unidad operativa de caja: abrir → registrar pagos → previsualizar → **cerrar** con totales persistidos.
+- Integra con `sales`/`payments` vía **guards** para asegurar que no se opere sin turno.
+- El **cierre Z** consolida la actividad diaria (multi-turno) por sucursal.
+- El diseño evita colisiones de ORM, mantiene tenencia estricta y centraliza reglas en **services**.
 
 # Módulo 12 — `apps/saas` (Planes y Suscripciones)
 

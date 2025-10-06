@@ -6,9 +6,10 @@ from .models import Empresa, EmpresaConfig, Sucursal
 
 @admin.register(Empresa)
 class EmpresaAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "subdominio", "activo", "creado")
+    list_display = ("nombre", "subdominio", "activo",
+                    "cashbox_policy", "creado")
     search_fields = ("nombre", "subdominio")
-    list_filter = ("activo", "creado")
+    list_filter = ("activo", "creado", "cashbox_policy")
     ordering = ("-creado",)
 
 

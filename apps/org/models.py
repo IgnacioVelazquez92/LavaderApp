@@ -5,6 +5,12 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.text import slugify
 
 
+class CashboxPolicy(models.TextChoices):
+    STRICT = "STRICT", "Strict (ventas y pagos requieren caja)"
+    PAYMENTS_ONLY = "PAYMENTS_ONLY", "Solo pagos requieren caja"
+    BY_METHOD = "BY_METHOD", "Por medio de pago (granular)"
+
+
 class Empresa(models.Model):
     """
     Tenant raíz del sistema (ej. 'Lavadero El Sol').
@@ -28,6 +34,16 @@ class Empresa(models.Model):
 
     creado = models.DateTimeField(auto_now_add=True)
     actualizado = models.DateTimeField(auto_now=True)
+
+    cashbox_policy = models.CharField(
+        max_length=20,
+        choices=CashboxPolicy.choices,
+        default=CashboxPolicy.PAYMENTS_ONLY,
+        help_text=(
+            "Política de caja: STRICT (ventas y pagos), "
+            "PAYMENTS_ONLY (solo pagos), BY_METHOD (según medio)."
+        ),
+    )
 
     class Meta:
         verbose_name = _("Empresa")

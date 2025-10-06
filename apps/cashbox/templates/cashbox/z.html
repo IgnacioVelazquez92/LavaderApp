@@ -1,0 +1,79 @@
+{# templates/cashbox/z.html #}
+{% extends "base_auth.html" %}
+
+{% block title %}Cierre Z (Resumen diario){% endblock %}
+
+{% block content %}
+<div class="container-xxl py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0">Cierre Z (Resumen diario)</h1>
+    <div class="d-flex gap-2">
+      <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Volver a turnos</a>
+    </div>
+  </div>
+
+  <form method="get" class="card mb-3">
+    <div class="card-body row g-3">
+      <div class="col-12 col-md-3">
+        <label class="form-label">Fecha</label>
+        <input type="date" name="fecha" class="form-control" value="{{ fecha_str }}">
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label">Sucursal</label>
+        <select name="sucursal" class="form-select">
+          <option value="">Todas</option>
+          {% for s in sucursales %}
+            <option value="{{ s.id }}" {% if sucursal_sel and s.id == sucursal_sel.id %}selected{% endif %}>
+              {{ s.nombre }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-3 align-self-end">
+        <button class="btn btn-primary">Ver</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="card-header">
+      <strong>Totales del {{ fecha|date:"Y-m-d" }}</strong>
+      {% if sucursal_sel %}<span class="text-muted">– {{ sucursal_sel.nombre }}</span>{% endif %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Método de pago</th>
+            <th class="text-end">Monto (sin propina)</th>
+            <th class="text-end">Propinas</th>
+            <th class="text-end">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if totales %}
+            {% for t in totales %}
+              <tr>
+                <td>{{ t.medio }}</td>
+                <td class="text-end">{{ t.monto|floatformat:2 }}</td>
+                <td class="text-end">{{ t.propinas|floatformat:2 }}</td>
+                <td class="text-end">{{ t.total|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+            <tr class="table-active">
+              <th>Total general</th>
+              <th class="text-end">{{ total_monto|floatformat:2 }}</th>
+              <th class="text-end">{{ total_propinas|floatformat:2 }}</th>
+              <th class="text-end">{{ total_general|floatformat:2 }}</th>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="4" class="text-center text-muted">No hay pagos para ese rango.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

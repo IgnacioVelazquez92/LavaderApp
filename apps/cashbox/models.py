@@ -190,3 +190,93 @@ class CierreCajaTotal(models.Model):
     def __str__(self) -> str:
         medio = getattr(self.medio, "nombre", self.medio_id)
         return f"Totales[{self.cierre_id} / {medio}]"
+
+
+class TurnoCaja(models.Model):
+    """
+    Representa un turno operativo por Sucursal.
+    Regla: solo puede haber UN turno ABIERTO por Sucursal (cerrado_en IS NULL).
+    """
+    empresa = models.ForeignKey(
+        "org.Empresa", on_delete=models.CASCADE, related_name="turnos")
+    sucursal = models.ForeignKey(
+        "org.Sucursal", on_delete=models.CASCADE, related_name="turnos")
+
+    abierto_en = models.DateTimeField(default=timezone.now, db_index=True)
+    abierto_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="turnos_abiertos")
+    responsable_nombre = models.CharField(
+        max_length=120, help_text="Nombre del responsable del turno (libre)")
+
+    cerrado_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    cerrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="turnos_cerrados"
+    )
+
+    observaciones = models.TextField(blank=True, default="")
+
+    # (MVP) Conteo total al cierre; si luego querés por medio, usamos TurnoCajaTotal
+    monto_contado_total = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["empresa", "sucursal", "abierto_en"]),
+        ]
+        constraints = [
+            # Único turno ABIERTO por sucursal (cerrado_en IS NULL):
+            models.UniqueConstraint(
+                fields=["sucursal"],
+                condition=models.Q(cerrado_en__isnull=True),
+                name="uniq_turno_abierto_por_sucursal",
+            ),
+        ]
+
+    def __str__(self):
+        estado = "ABIERTO" if self.cerrado_en is None else "CERRADO"
+        return f"Turno {estado} — {self.sucursal} @ {self.abierto_en:%Y-%m-%d %H:%M}"
+
+    @property
+    def esta_abierto(self) -> bool:
+        return self.cerrado_en is None
+
+    def rango(self):
+        """(desde, hasta) del turno para consultas. 'hasta' es ahora si no está cerrado."""
+        desde = self.abierto_en
+        hasta = self.cerrado_en or timezone.now()
+        return (desde, hasta)
+
+
+class TurnoCajaTotal(models.Model):
+    """
+    (Opcional pero útil) Resumen por medio de pago para conciliación.
+    Para comenzar, se puede no usar y solamente llevar 'monto_contado_total' en TurnoCaja.
+    """
+    turno = models.ForeignKey(
+        TurnoCaja, on_delete=models.CASCADE, related_name="totales")
+    # Guardamos snapshot por nombre de medio para evitar problemas si se borra un MedioPago
+    medio_nombre = models.CharField(max_length=50)
+
+    # Teóricos calculados desde apps.payments.Pago
+    monto_teorico = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+    propinas_teoricas = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+
+    # Contados al cierre por el operario
+    monto_contado = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+    propinas_contadas = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+
+    # Denormalizados para consultas rápidas
+    dif_monto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    dif_propinas = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        unique_together = ("turno", "medio_nombre")
+        ordering = ["medio_nombre"]
+
+    def __str__(self):
+        return f"Totales {self.medio_nombre} — Turno {self.turno_id}"

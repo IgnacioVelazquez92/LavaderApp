@@ -10,6 +10,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.payments.models import Pago, MedioPago
 from apps.sales.services import sales as sales_services
+from apps.cashbox.services.guards import require_turno_abierto, SinTurnoAbierto
 
 
 class OverpayNeedsConfirmation(Exception):
@@ -20,7 +21,8 @@ class OverpayNeedsConfirmation(Exception):
         self.monto = monto or Decimal("0.00")
         self.diferencia = self.monto - self.saldo
         super().__init__(
-            f"Sobrepago: monto={self.monto} > saldo={self.saldo}. Diferencia={self.diferencia}.")
+            f"Sobrepago: monto={self.monto} > saldo={self.saldo}. Diferencia={self.diferencia}."
+        )
 
 
 @transaction.atomic
@@ -40,6 +42,7 @@ def registrar_pago(
     Registra pago(s) para una venta.
 
     Reglas:
+      - Requiere TurnoCaja ABIERTO en la sucursal de la venta (asigna turno al/los Pago).
       - monto > 0
       - medio.empresa == venta.empresa (tenant)
       - Si es_propina=True → registra (no descuenta saldo).
@@ -48,10 +51,14 @@ def registrar_pago(
           - auto_split_propina=False → levanta OverpayNeedsConfirmation (para que la vista pregunte).
           - auto_split_propina=True  → crea 2 Pagos: saldo (no propina) + diferencia (propina).
       - Idempotencia opcional por (venta, idempotency_key). En split se generan dos claves derivadas.
-      - Tras registrar, se recalcula saldo y si queda en 0 → venta pasa a 'pagado'.
+      - Tras registrar, se recalcula saldo y si queda en 0 → venta pasa a 'pagada'.
     """
     # Lock fuerte sobre la venta para consistencia de saldo y evitar condiciones de carrera.
     type(venta).objects.select_for_update().filter(pk=venta.pk).exists()
+
+    # === Turno requerido: ABIERTO para la sucursal de la venta ===
+    # La excepción SinTurnoAbierto será manejada por la vista para mostrar el modal "Abrir turno".
+    turno = require_turno_abierto(venta.empresa, venta.sucursal)
 
     # Normalizaciones
     es_propina = bool(es_propina)
@@ -72,6 +79,7 @@ def registrar_pago(
         existing = Pago.objects.filter(
             venta=venta, idempotency_key=idempotency_key).first()
         if existing:
+            # En caso de reintento, aseguramos saldo consistente y devolvemos el existente.
             _post_recalculo_y_pagado(venta)
             return [existing]
 
@@ -84,6 +92,7 @@ def registrar_pago(
         pago = Pago.objects.create(
             venta=venta,
             medio=medio,
+            turno=turno,
             monto=monto,
             es_propina=True,
             referencia=referencia,
@@ -99,6 +108,7 @@ def registrar_pago(
         pago = Pago.objects.create(
             venta=venta,
             medio=medio,
+            turno=turno,
             monto=monto,
             es_propina=False,
             referencia=referencia,
@@ -130,6 +140,7 @@ def registrar_pago(
         pago_saldo = Pago.objects.create(
             venta=venta,
             medio=medio,
+            turno=turno,
             monto=saldo,
             es_propina=False,
             referencia=referencia,
@@ -148,6 +159,7 @@ def registrar_pago(
         pago_prop = Pago.objects.create(
             venta=venta,
             medio=medio,
+            turno=turno,
             monto=diferencia,
             es_propina=True,
             referencia=referencia,
@@ -163,11 +175,11 @@ def registrar_pago(
 
 def _post_recalculo_y_pagado(venta) -> None:
     """
-    Recalcula saldo y, si queda en 0, marca la venta como 'pagado' (según FSM permite).
+    Recalcula saldo y, si queda en 0, marca la venta como 'pagada' (según FSM/política).
     """
     recalcular_saldo(venta)
-    if venta.saldo_pendiente == 0 and venta.estado != "pagado":
-        # Esto soporta el circuito: se puede pasar a 'pagado' desde borrador/en_proceso.
+    if (venta.saldo_pendiente or Decimal("0.00")) == 0 and getattr(venta, "payment_status", None) != "pagada":
+        # Delegamos la transición al service de sales (ya maneja reglas y efectos colaterales).
         sales_services.marcar_pagada(venta=venta)
 
 
@@ -179,9 +191,8 @@ def recalcular_saldo(venta) -> None:
     """
     D = Decimal
     total_no_propina = (
-        Pago.objects
-        .filter(venta_id=venta.id, es_propina=False)
-        .aggregate(total=models.Sum("monto"))["total"]
+        Pago.objects.filter(venta_id=venta.id, es_propina=False).aggregate(
+            total=models.Sum("monto"))["total"]
         or D("0.00")
     )
     nuevo_saldo = (venta.total or D("0.00")) - total_no_propina

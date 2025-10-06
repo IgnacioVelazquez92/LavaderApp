@@ -1,124 +1,106 @@
-{# templates/cashbox/detail.html #}
 {% extends "base_auth.html" %}
 
-{% block title %}Detalle de Cierre{% endblock %}
+{% block title %}Detalle de Turno{% endblock %}
 
 {% block content %}
 <div class="container-xxl py-3">
   <div class="d-flex align-items-center justify-content-between mb-3">
-    <h1 class="h3 mb-0">Cierre de Caja</h1>
+    <h1 class="h3 mb-0">Turno de Caja</h1>
     <div class="d-flex gap-2">
       <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Volver al listado</a>
-      {% if not cierre.cerrado_en %}
-        <a href="{% url 'cashbox:close' id=cierre.id %}" class="btn btn-primary">Cerrar este turno</a>
+      {% if turno.esta_abierto %}
+        <a href="{% url 'cashbox:cerrar' id=turno.id %}" class="btn btn-primary">Cerrar este turno</a>
       {% endif %}
     </div>
   </div>
 
-  {# Meta del cierre #}
+  <!-- Meta del turno -->
   <div class="card mb-3">
     <div class="card-body">
       <div class="row g-3">
         <div class="col-12 col-md-3">
           <div class="text-muted small">Estado</div>
-          {% if cierre.cerrado_en %}
-            <span class="badge bg-success">CERRADO</span>
-          {% else %}
+          {% if turno.esta_abierto %}
             <span class="badge bg-warning text-dark">ABIERTO</span>
+          {% else %}
+            <span class="badge bg-success">CERRADO</span>
           {% endif %}
         </div>
         <div class="col-12 col-md-3">
           <div class="text-muted small">Sucursal</div>
-          <div>{{ cierre.sucursal.nombre }}</div>
+          <div>{{ turno.sucursal.nombre }}</div>
         </div>
         <div class="col-12 col-md-3">
           <div class="text-muted small">Apertura</div>
-          <div>{{ cierre.abierto_en|date:"Y-m-d H:i" }}</div>
+          <div>{{ turno.abierto_en|date:"Y-m-d H:i" }}</div>
         </div>
         <div class="col-12 col-md-3">
           <div class="text-muted small">Cierre</div>
           <div>
-            {% if cierre.cerrado_en %}
-              {{ cierre.cerrado_en|date:"Y-m-d H:i" }}
+            {% if turno.cerrado_en %}
+              {{ turno.cerrado_en|date:"Y-m-d H:i" }}
             {% else %}
               —
             {% endif %}
           </div>
         </div>
+
         <div class="col-12 col-md-3">
           <div class="text-muted small">Abierto por</div>
           <div>
-            {% if cierre.usuario.get_full_name %}
-              {{ cierre.usuario.get_full_name }}
+            {% if turno.abierto_por.get_full_name %}
+              {{ turno.abierto_por.get_full_name }}
             {% else %}
-              {{ cierre.usuario.email }}
+              {{ turno.abierto_por.email }}
             {% endif %}
           </div>
         </div>
         <div class="col-12 col-md-3">
           <div class="text-muted small">Cerrado por</div>
           <div>
-            {% if cierre.cerrado_por %}
-              {% if cierre.cerrado_por.get_full_name %}
-                {{ cierre.cerrado_por.get_full_name }}
+            {% if turno.cerrado_por %}
+              {% if turno.cerrado_por.get_full_name %}
+                {{ turno.cerrado_por.get_full_name }}
               {% else %}
-                {{ cierre.cerrado_por.email }}
+                {{ turno.cerrado_por.email }}
               {% endif %}
             {% else %}
               —
             {% endif %}
           </div>
         </div>
+
+        <div class="col-12 col-md-3">
+          <div class="text-muted small">Responsable</div>
+          <div>{{ turno.responsable_nombre|default:"—" }}</div>
+        </div>
+        <div class="col-12 col-md-3">
+          <div class="text-muted small">Contado al cierre</div>
+          <div>
+            {% if turno.monto_contado_total %}
+              {{ turno.monto_contado_total|floatformat:2 }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+
         <div class="col-12">
-          <div class="text-muted small">Notas</div>
-          <div class="text-break">{{ cierre.notas|default:"—" }}</div>
+          <div class="text-muted small">Observaciones</div>
+          <div class="text-break">{{ turno.observaciones|default:"—" }}</div>
         </div>
       </div>
     </div>
   </div>
 
-  {# Totales persistidos (si existen) #}
-  <div class="card mb-3">
-    <div class="card-header">
-      <strong>Totales del cierre (persistidos)</strong>
-      <span class="text-muted small d-block">Generados al confirmar el cierre.</span>
-    </div>
-    <div class="table-responsive">
-      <table class="table table-sm table-striped mb-0">
-        <thead>
-          <tr>
-            <th>Método de pago</th>
-            <th class="text-end">Monto (sin propina)</th>
-            <th class="text-end">Propinas</th>
-            <th class="text-end">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if totales %}
-            {% for t in totales %}
-              <tr>
-                <td>{{ t.medio.nombre }}</td>
-                <td class="text-end">{{ t.monto|floatformat:2 }}</td>
-                <td class="text-end">{{ t.propinas|floatformat:2 }}</td>
-                <td class="text-end">{{ t.total_incl_propina|floatformat:2 }}</td>
-              </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="4" class="text-center text-muted">No hay totales persistidos para este cierre.</td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# Preview en vivo (solo cuando el cierre está abierto) #}
-  {% if not cierre.cerrado_en and preview_totales %}
+  <!-- Preview en vivo (siempre útil; cuando está cerrado sirve de resumen) -->
+  {% if preview_totales %}
     <div class="card">
       <div class="card-header">
-        <strong>Preview de totales hasta ahora</strong>
-        <span class="text-muted small d-block">Desde la apertura hasta el momento actual.</span>
+        <strong>Totales del turno (preview)</strong>
+        <span class="text-muted small d-block">
+          Desde la apertura{% if turno.cerrado_en %} hasta el cierre{% else %} hasta ahora{% endif %}.
+        </span>
       </div>
       <div class="table-responsive">
         <table class="table table-sm table-striped mb-0">
@@ -133,13 +115,10 @@
           <tbody>
             {% for t in preview_totales %}
               <tr>
-                <td>{{ t.medio.nombre }}</td>
+                <td>{{ t.medio }}</td>
                 <td class="text-end">{{ t.monto|floatformat:2 }}</td>
                 <td class="text-end">{{ t.propinas|floatformat:2 }}</td>
-                <td class="text-end">
-                  {# suma simple en template #}
-                  {{ t.monto|add:t.propinas|floatformat:2 }}
-                </td>
+                <td class="text-end">{{ t.monto|add:t.propinas|floatformat:2 }}</td>
               </tr>
             {% empty %}
               <tr>
@@ -149,9 +128,11 @@
           </tbody>
         </table>
       </div>
+      {% if turno.esta_abierto %}
       <div class="card-body">
-        <a href="{% url 'cashbox:close' id=cierre.id %}" class="btn btn-primary">Ir a cerrar turno</a>
+        <a href="{% url 'cashbox:cerrar' id=turno.id %}" class="btn btn-primary">Ir a cerrar turno</a>
       </div>
+      {% endif %}
     </div>
   {% endif %}
 </div>

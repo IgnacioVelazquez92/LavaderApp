@@ -1,11 +1,7 @@
 # apps/cashbox/forms/closure.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
-
 from django import forms
-from django.utils import timezone
 
 
 class _BootstrapFormMixin:
@@ -36,75 +32,45 @@ class _BootstrapFormMixin:
 
 class OpenCashboxForm(_BootstrapFormMixin, forms.Form):
     """
-    Form de **apertura** de cierre de caja.
-
-    Notas:
-    - `abierto_en` permite backoffice (p.ej., reabrir según turno); por defecto es ahora.
-    - Las entidades de tenant (empresa/sucursal/usuario) NO van en el form: vienen de la request
-      y se aplican en el service `abrir_cierre(...)`.
+    Form de **apertura** de turno/caja.
+    **No** permite ingresar fecha/hora: se toma automáticamente en el service (timezone.now()).
     """
-
-    abierto_en = forms.DateTimeField(
-        required=False,
-        help_text="Fecha/hora de apertura. Si se deja vacío se usa el momento actual.",
-        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
-    )
     notas = forms.CharField(
         required=False,
+        label="Notas",
         widget=forms.Textarea(
-            attrs={"rows": 3, "placeholder": "Notas u observaciones del turno..."}),
+            attrs={"rows": 3, "placeholder": "Notas u observaciones del turno..."}
+        ),
         help_text="Opcional. Útil para aclarar novedades del turno.",
     )
-
-    def clean_abierto_en(self):
-        value = self.cleaned_data.get("abierto_en")
-        # Si viene como naive (por input), Django lo convertirá con zona del proyecto si USE_TZ=True.
-        # Si está vacío, devolvemos None para que el service use timezone.now().
-        return value or None
 
 
 class CloseCashboxForm(_BootstrapFormMixin, forms.Form):
     """
-    Form de **cierre** de caja.
-
-    Campos:
-    - `cerrado_en`: permite ajustar la marca de tiempo del cierre (default ahora).
-    - `confirmar`: casilla obligatoria para evitar cierres por error.
-    - `notas_append`: agrega texto a las notas del cierre (no reemplaza).
-
-    Reglas:
-    - `confirmar` es obligatorio (UX segura).
-    - Validación temporal mínima (el service vuelve a validar y hace check final).
+    Form de **cierre** de turno/caja.
+    **No** permite ingresar fecha/hora: se toma automáticamente en el service (timezone.now()).
     """
-
-    cerrado_en = forms.DateTimeField(
-        required=False,
-        help_text="Fecha/hora de cierre. Si se deja vacío se usa el momento actual.",
-        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
-    )
     notas_append = forms.CharField(
         required=False,
+        label="Notas",
         widget=forms.Textarea(
             attrs={
                 "rows": 3,
                 "placeholder": "Notas de cierre (diferencias, arqueo, incidencias, etc.)",
             }
         ),
-        help_text="Se agregará al final de las notas existentes del cierre.",
+        help_text="Se agregará al final de las notas existentes del turno.",
     )
     confirmar = forms.BooleanField(
         required=True,
         initial=False,
-        help_text="Confirmo que revisé los totales y deseo cerrar definitivamente este turno.",
+        label="Confirmo el cierre del turno",
+        help_text="Marcá esta casilla para confirmar el cierre.",
     )
-
-    def clean_cerrado_en(self):
-        value = self.cleaned_data.get("cerrado_en")
-        return value or None
 
     def clean_confirmar(self):
         ok = self.cleaned_data.get("confirmar")
         if not ok:
             raise forms.ValidationError(
-                "Debes confirmar para cerrar el turno.")
+                "Debés confirmar para cerrar el turno.")
         return ok

@@ -13,6 +13,7 @@ from django.db import transaction
 from apps.sales.calculations import calcular_totales
 from apps.sales.fsm import VentaEstado, puede_transicionar
 from apps.sales.models import Venta
+from apps.cashbox.services.guards import require_turno_abierto, SinTurnoAbierto
 
 
 # ---------------------------------------------------------------------
@@ -94,8 +95,15 @@ def set_payment_status(*, venta: Venta, payment_status: str, actor=None) -> Vent
 def crear_venta(*, empresa, sucursal, cliente, vehiculo, creado_por, notas: str = "") -> Venta:
     """
     Crea una nueva Venta en estado 'borrador'.
-    payment_status inicia en 'no_pagada'.
+    Reglas:
+      - Requiere TurnoCaja ABIERTO en la sucursal de la venta.
+      - Asigna el turno a la venta creada (venta.turno).
+      - payment_status inicia en 'no_pagada'.
     """
+    # Exige turno abierto y lo asocia a la venta (auditoría por turno)
+    # puede lanzar SinTurnoAbierto
+    turno = require_turno_abierto(empresa, sucursal)
+
     venta = Venta.objects.create(
         empresa=empresa,
         sucursal=sucursal,
@@ -104,6 +112,7 @@ def crear_venta(*, empresa, sucursal, cliente, vehiculo, creado_por, notas: str 
         estado=VentaEstado.BORRADOR,
         notas=notas,
         creado_por=creado_por,
+        turno=turno,  # <<< vínculo de auditoría por turno
         # payment_status usa el default del modelo: "no_pagada"
     )
     return venta

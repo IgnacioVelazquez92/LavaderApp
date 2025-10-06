@@ -250,6 +250,13 @@ class Perm(str, Enum):
     NOTIF_SMTP_DELETE = "notif.smtp.delete"
     NOTIF_SMTP_TEST = "notif.smtp.test"
 
+    CASHBOX_VIEW = "CASHBOX_VIEW"     # ver listados/detalles de cierres
+    CASHBOX_OPEN = "CASHBOX_OPEN"     # abrir caja
+    CASHBOX_CLOSE = "CASHBOX_CLOSE"    # cerrar caja
+    CASHBOX_COUNT = "CASHBOX_COUNT"    # cargar conteo físico (arqueo)
+    CASHBOX_REPORT = "CASHBOX_REPORT"   # ver/descargar reportes
+    CASHBOX_CONFIG = "CASHBOX_CONFIG"   # configuración de caja (si aplica)
+
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
 ROLE_POLICY = {
@@ -342,6 +349,8 @@ ROLE_POLICY = {
         Perm.NOTIF_SMTP_EDIT,
         Perm.NOTIF_SMTP_DELETE,
         Perm.NOTIF_SMTP_TEST,
+        Perm.CASHBOX_VIEW, Perm.CASHBOX_OPEN, Perm.CASHBOX_CLOSE,
+        Perm.CASHBOX_COUNT, Perm.CASHBOX_REPORT, Perm.CASHBOX_CONFIG,
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -392,6 +401,8 @@ ROLE_POLICY = {
 
 
         Perm.NOTIF_SMTP_VIEW,
+
+        Perm.CASHBOX_VIEW, Perm.CASHBOX_OPEN, Perm.CASHBOX_CLOSE, Perm.CASHBOX_COUNT,
 
 
     },

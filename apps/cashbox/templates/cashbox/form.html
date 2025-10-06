@@ -2,19 +2,19 @@
 {% extends "base_auth.html" %}
 
 {% block title %}
-  {% if accion == "cerrar" %}Cerrar Caja{% else %}Abrir Caja{% endif %}
+  {% if accion == "cerrar" %}Cerrar Turno{% else %}Abrir Turno{% endif %}
 {% endblock %}
 
 {% block content %}
 <div class="container-xxl py-3">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h1 class="h3 mb-0">
-      {% if accion == "cerrar" %}Cerrar Caja{% else %}Abrir Caja{% endif %}
+      {% if accion == "cerrar" %}Cerrar Turno{% else %}Abrir Turno{% endif %}
     </h1>
 
     <div class="d-flex gap-2">
-      {% if accion == "cerrar" and cierre %}
-        <a href="{% url 'cashbox:detail' id=cierre.id %}" class="btn btn-outline-secondary">Volver al detalle</a>
+      {% if accion == "cerrar" and turno %}
+        <a href="{% url 'cashbox:detalle' id=turno.id %}" class="btn btn-outline-secondary">Volver al detalle</a>
       {% else %}
         <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Volver al listado</a>
       {% endif %}
@@ -41,12 +41,18 @@
           <tbody>
             {% for t in preview_totales %}
               <tr>
-                <td>{{ t.medio.nombre }}</td>
-                <td class="text-end">{{ t.monto }}</td>
-                <td class="text-end">{{ t.propinas }}</td>
+                {# t.medio puede ser objeto con .nombre o un string #}
+                <td>
+                  {% if t.medio and t.medio.nombre %}
+                    {{ t.medio.nombre }}
+                  {% else %}
+                    {{ t.medio|default:"—" }}
+                  {% endif %}
+                </td>
+                <td class="text-end">{{ t.monto|floatformat:2 }}</td>
+                <td class="text-end">{{ t.propinas|floatformat:2 }}</td>
                 <td class="text-end">
-                  {# como es un DTO, sumamos en template sin filtros aritméticos: mostramos ambos con separador #}
-                  {{ t.monto }} + {{ t.propinas }}
+                  {{ t.monto|add:t.propinas|floatformat:2 }}
                 </td>
               </tr>
             {% empty %}
@@ -91,12 +97,12 @@
       </div>
     </div>
     <div class="card-footer d-flex justify-content-between">
-      {% if accion == "cerrar" and cierre %}
-        <a href="{% url 'cashbox:detail' id=cierre.id %}" class="btn btn-outline-secondary">Cancelar</a>
+      {% if accion == "cerrar" and turno %}
+        <a href="{% url 'cashbox:detalle' id=turno.id %}" class="btn btn-outline-secondary">Cancelar</a>
         <button type="submit" class="btn btn-primary">Confirmar cierre</button>
       {% else %}
         <a href="{% url 'cashbox:list' %}" class="btn btn-outline-secondary">Cancelar</a>
-        <button type="submit" class="btn btn-primary">Abrir caja</button>
+        <button type="submit" class="btn btn-primary">Abrir turno</button>
       {% endif %}
     </div>
   </form>

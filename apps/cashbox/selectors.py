@@ -2,19 +2,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Optional
 
-from django.db.models import Q, Prefetch
-from django.utils import timezone
-
-from apps.cashbox.models import CierreCaja, CierreCajaTotal
+from django.db.models import Prefetch
+from apps.cashbox.models import TurnoCaja, TurnoCajaTotal
 
 
 # -----------------------
-# Selectores de lectura
+# Selectores de lectura (Turnos)
 # -----------------------
 
-def cierres_por_fecha(
+def turnos_por_fecha(
     *,
     empresa,
     sucursal=None,
@@ -23,19 +21,19 @@ def cierres_por_fecha(
     abiertos: Optional[bool] = None,
 ):
     """
-    Lista cierres de caja para una empresa (y sucursal opcional) filtrando por rango de fechas.
+    Lista turnos de caja para una empresa (y sucursal opcional) filtrando por rango de fechas.
 
-    - `desde`/`hasta` aplican sobre `abierto_en` (fecha de apertura del cierre).
+    - `desde`/`hasta` aplican sobre `abierto_en` (fecha de apertura del turno).
     - `abiertos`:
-        True  -> solo cierres con `cerrado_en IS NULL`
-        False -> solo cierres con `cerrado_en IS NOT NULL`
+        True  -> solo turnos con `cerrado_en IS NULL`
+        False -> solo turnos con `cerrado_en IS NOT NULL`
         None  -> todos
 
     Retorna un QuerySet ordenado por `-abierto_en`.
     """
     qs = (
-        CierreCaja.objects.select_related(
-            "empresa", "sucursal", "usuario", "cerrado_por")
+        TurnoCaja.objects.select_related(
+            "empresa", "sucursal", "abierto_por", "cerrado_por")
         .filter(empresa=empresa)
         .order_by("-abierto_en", "-creado_en")
     )
@@ -56,37 +54,37 @@ def cierres_por_fecha(
     return qs
 
 
-def get_cierre_abierto(*, empresa, sucursal) -> Optional[CierreCaja]:
+def get_turno_abierto(*, empresa, sucursal) -> Optional[TurnoCaja]:
     """
-    Devuelve el **único** cierre abierto para la sucursal (o None si no hay).
+    Devuelve el turno abierto (si existe) para la sucursal.
     """
     return (
-        CierreCaja.objects.select_related("empresa", "sucursal", "usuario")
+        TurnoCaja.objects.select_related("empresa", "sucursal", "abierto_por")
         .filter(empresa=empresa, sucursal=sucursal, cerrado_en__isnull=True)
+        .order_by("-abierto_en")
         .first()
     )
 
 
-def detalle_con_totales(*, empresa, cierre_id) -> CierreCaja:
+def detalle_con_totales(*, empresa, turno_id) -> TurnoCaja:
     """
-    Carga un cierre por `id` validando tenant y prefetch de totales.
+    Carga un turno por `id` validando tenant y prefetch de totales.
     """
     return (
-        CierreCaja.objects.select_related(
-            "empresa", "sucursal", "usuario", "cerrado_por")
+        TurnoCaja.objects.select_related(
+            "empresa", "sucursal", "abierto_por", "cerrado_por")
         .prefetch_related(
             Prefetch(
                 "totales",
-                queryset=CierreCajaTotal.objects.select_related(
-                    "medio").order_by("medio__nombre"),
+                queryset=TurnoCajaTotal.objects.order_by("medio"),
             )
         )
-        .get(empresa=empresa, id=cierre_id)
+        .get(empresa=empresa, id=turno_id)
     )
 
 
-def totales_de_cierre(*, cierre: CierreCaja):
+def totales_de_turno(*, turno: TurnoCaja):
     """
-    Devuelve los totales del cierre (con `medio` ya seleccionado), ordenados por nombre del medio.
+    Devuelve los totales del turno ordenados por nombre del medio.
     """
-    return cierre.totales.select_related("medio").order_by("medio__nombre")
+    return turno.totales.order_by("medio")

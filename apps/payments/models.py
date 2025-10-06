@@ -50,11 +50,12 @@ class Pago(models.Model):
     Representa un pago realizado sobre una Venta.
 
     Reglas clave:
-    - El monto debe ser > 0 (validado en servicio y por CheckConstraint).
+    - El monto debe ser > 0 (validado en service y por CheckConstraint).
     - Los pagos de propina (es_propina=True) NO reducen el saldo de la venta.
     - Idempotencia opcional por (venta, idempotency_key) para integraciones.
     - Integridad de tenant: el Medio de pago debe pertenecer a la MISMA empresa que la Venta
       (se valida en el service y/o clean(); no se puede expresar con constraint SQL cross-table).
+    - Turno operativo: cada pago se asocia al turno abierto al momento de registrarse.
     """
 
     id = models.UUIDField(
@@ -76,6 +77,16 @@ class Pago(models.Model):
         on_delete=models.PROTECT,
         related_name="pagos",
         help_text=_("Medio de pago utilizado."),
+    )
+
+    # NEW: vínculo al turno operativo (se completará en el service)
+    turno = models.ForeignKey(
+        "cashbox.TurnoCaja",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pagos",
+        help_text=_("Turno operativo en el momento del pago."),
     )
 
     monto = models.DecimalField(
@@ -126,6 +137,8 @@ class Pago(models.Model):
         indexes = [
             models.Index(fields=["creado_en"]),
             models.Index(fields=["venta", "es_propina"]),
+            # consultas y conciliación por turno
+            models.Index(fields=["turno"]),
         ]
         constraints = [
             # Idempotencia por venta (solo aplica cuando hay clave)

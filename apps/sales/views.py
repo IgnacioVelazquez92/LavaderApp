@@ -35,6 +35,9 @@ from apps.org.permissions import (
     has_empresa_perm,
 )
 
+# === Cashbox (turnos) ===
+from apps.cashbox.services.guards import SinTurnoAbierto
+
 # --------------------------------------------------
 # Listado de Ventas
 # --------------------------------------------------
@@ -179,14 +182,26 @@ class VentaCreateView(EmpresaPermRequiredMixin, CreateView):
             context["services_form"] = services_form
             return self.render_to_response(context)
 
-        venta = sales_services.crear_venta(
-            empresa=empresa,
-            sucursal=sucursal,
-            cliente=cliente,
-            vehiculo=vehiculo,
-            creado_por=request.user,
-            notas=form.cleaned_data.get("notas", ""),
-        )
+        # Crear venta con enforcement de turno
+        try:
+            venta = sales_services.crear_venta(
+                empresa=empresa,
+                sucursal=sucursal,
+                cliente=cliente,
+                vehiculo=vehiculo,
+                creado_por=request.user,
+                notas=form.cleaned_data.get("notas", ""),
+            )
+        except SinTurnoAbierto:
+            # Redirige a apertura de turno y al volver continúa el flujo (next=)
+            messages.warning(
+                request,
+                "Antes de crear una venta debés abrir un turno de caja para esta sucursal.",
+            )
+            next_url = request.get_full_path()
+            # Ajustá este nombre si tu URL real difiere (ej.: 'cashbox:turno_abrir')
+            abrir_url = f"{reverse('cashbox:abrir')}?next={next_url}"
+            return redirect(abrir_url)
 
         servicios_ids = [int(sid)
                          for sid in services_form.cleaned_data["servicios"]]
@@ -252,16 +267,13 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
 
         # ---------- Ítems ----------
         items_mgr = getattr(venta, "items", None) or getattr(
-            venta, "ventaitem_set", None
-        )
-        ctx["venta_items"] = (
-            list(items_mgr.select_related("servicio").all()) if items_mgr else []
-        )
+            venta, "ventaitem_set", None)
+        ctx["venta_items"] = list(items_mgr.select_related(
+            "servicio").all()) if items_mgr else []
 
         # ---------- Pagos ----------
         pagos_mgr = getattr(venta, "pagos", None) or getattr(
-            venta, "pago_set", None
-        )
+            venta, "pago_set", None)
         if pagos_mgr:
             try:
                 ctx["pagos"] = list(pagos_mgr.select_related("medio").all())
@@ -271,10 +283,8 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
             ctx["pagos"] = []
 
         # ---------- Ajustes (descuentos/promos) ----------
-        ajustes = list(
-            venta.adjustments.select_related(
-                "item", "promotion").order_by("creado", "id")
-        )
+        ajustes = list(venta.adjustments.select_related(
+            "item", "promotion").order_by("creado", "id"))
         ctx["ajustes"] = ajustes
 
         # ---------- Forms para descuentos/promos ----------
@@ -284,11 +294,9 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
 
         # ---------- Promos vigentes ----------
         ctx["promos_order"] = discount_services.listar_promociones_vigentes_para_venta(
-            venta=venta
-        )
+            venta=venta)
         ctx["promos_item"] = discount_services.listar_promociones_vigentes_para_item(
-            venta=venta
-        )
+            venta=venta)
 
         # ---------- Flags de comprobantes / FSM / Pago ----------
         comprobante = getattr(venta, "comprobante", None)
@@ -296,11 +304,9 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
         tiene_comprobante = bool(comprobante)
         saldo_cubierto = getattr(venta, "saldo_pendiente", None) == 0
         puede_iniciar_trabajo = puede_transicionar(
-            venta.estado, VentaEstado.EN_PROCESO
-        )
+            venta.estado, VentaEstado.EN_PROCESO)
         puede_finalizar_trabajo = puede_transicionar(
-            venta.estado, VentaEstado.TERMINADO
-        )
+            venta.estado, VentaEstado.TERMINADO)
 
         ctx.update(
             {
@@ -318,9 +324,8 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
         # ---------- Notificaciones (WhatsApp) ----------
         empresa = self.empresa_activa
         has_wa_tpl = (
-            notif_selectors.plantillas_activas_whatsapp(empresa.id).exists()
-            if empresa
-            else False
+            notif_selectors.plantillas_activas_whatsapp(
+                empresa.id).exists() if empresa else False
         )
         can_notify = (venta.estado == VentaEstado.TERMINADO) and has_wa_tpl
 
@@ -352,18 +357,20 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
         ctx["puede_agregar_items"] = has_empresa_perm(
             u, emp, Perm.SALES_ITEM_ADD)
         ctx["puede_actualizar_cantidad"] = has_empresa_perm(
-            u, emp, Perm.SALES_ITEM_UPDATE_QTY
-        )
+            u, emp, Perm.SALES_ITEM_UPDATE_QTY)
         ctx["puede_quitar_items"] = has_empresa_perm(
             u, emp, Perm.SALES_ITEM_REMOVE)
 
         # ---------- Permisos de descuentos ----------
         ctx["puede_agregar_descuento"] = has_empresa_perm(
-            u, emp, getattr(Perm, "SALES_DISCOUNT_ADD", Perm.SALES_EDIT))
+            u, emp, getattr(Perm, "SALES_DISCOUNT_ADD", Perm.SALES_EDIT)
+        )
         ctx["puede_quitar_descuento"] = has_empresa_perm(
-            u, emp, getattr(Perm, "SALES_DISCOUNT_REMOVE", Perm.SALES_EDIT))
+            u, emp, getattr(Perm, "SALES_DISCOUNT_REMOVE", Perm.SALES_EDIT)
+        )
         ctx["puede_aplicar_promo"] = has_empresa_perm(
-            u, emp, getattr(Perm, "SALES_PROMO_APPLY", Perm.SALES_VIEW))
+            u, emp, getattr(Perm, "SALES_PROMO_APPLY", Perm.SALES_VIEW)
+        )
         # ---------- Estado de edición de descuentos ----------
         ctx["descuentos_habilitados"] = venta.estado in (
             "borrador", "en_proceso")
@@ -403,7 +410,9 @@ class AgregarItemView(EmpresaPermRequiredMixin, View):
 
         if errores:
             messages.warning(
-                request, "Algunos servicios no se pudieron agregar: " + " | ".join(errores))
+                request, "Algunos servicios no se pudieron agregar: " +
+                " | ".join(errores)
+            )
         else:
             messages.success(request, "Servicios agregados correctamente.")
 
