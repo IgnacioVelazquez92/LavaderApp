@@ -4360,195 +4360,372 @@ _(ver bloque de LOGGING en el settings del proyecto)_
 
 ---
 
-# Módulo 15 — `apps/reporting` (Reportes Operativos)
+# Módulo 15 — `apps/reports` — Reportes Operativos (v1.1)
 
-> **Objetivo del módulo:** Centralizar reportes de **ventas, pagos, propinas y cierres de caja**, con filtros por rango de fechas, sucursal y cliente. Proveer vistas server-rendered y exportes CSV/Excel.  
-> En MVP: reportes de lectura, sin edición ni cálculos complejos; todo basado en `selectors`.
+Módulo de **reportería y analítica** sobre datos consolidados de _LavaderosApp_. Lee en **solo lectura** las entidades de `sales`, `payments` y `cashbox` para construir **resúmenes operativos diarios**, **consolidados mensuales** y **datasets** para exportación. Respeta **tenancy** (`request.empresa_activa`) y **permisos** via `EmpresaPermRequiredMixin` / `Perm.REPORTS_*`.
+
+> **Cambios clave de esta versión**
+>
+> - **UX de filtros renovada**: chips de filtros visibles + **modal** “Editar filtros” (sin recargar la grilla).
+> - **Chart.js estable**: datos embebidos con `json_script` (evita re-render/loops).
+> - **Correcciones en agregaciones**: conteo de ventas por día/turno arreglado (`Count("id")`), sin duplicaciones.
+> - **Service `ventas_por_turno` extendido**: ahora devuelve **composición por método** y **propinas**.
+> - **Contrato estable** entre selectors → services → templates → exportadores.
 
 ---
 
-## 1) Estructura de carpetas/archivos
+## 1) Propósito y alcance
+
+- **Objetivo:** visibilidad operativa/financiera sin duplicar lógica de negocio.
+- **Ámbitos:** ventas por día/turno/sucursal, pagos por método, propinas, consolidado mensual.
+- **Resultados:** vistas SSR (Bootstrap), export a **XLSX/CSV/PDF**, dataset BI (futuro).
+- **Seguridad:** `Perm.REPORTS_VIEW` para vistas; `Perm.REPORTS_EXPORT` para descargas.
+
+---
+
+## 2) Mapa del módulo
 
 ```
-apps/reporting/
-├─ __init__.py
-├─ apps.py                        # Config de la app (name="apps.reporting")
-├─ urls.py                        # Rutas de reportes
-├─ views.py                       # Vistas server-rendered (listados y exportes)
-├─ selectors.py                   # Consultas optimizadas a sales/payments/cashbox
+apps/reports/
+├─ models.py                # SavedReport, ReportExport, enums
+├─ views.py                 # Vistas SSR + ExportReportView
+├─ urls.py                  # namespace='reports'
+├─ forms/
+│  └─ filters.py            # ReportFilterForm (fechas, sucursal, métodos, estados, turno, granularidad)
+├─ selectors/
+│  ├─ base.py               # Tenancy/rangos/aggregates seguros
+│  ├─ sales_selectors.py    # Ventas: día/turno/mensual
+│  ├─ payments_selectors.py # Pagos: por método, propinas por usuario
+│  └─ cashbox_selectors.py  # Caja: cierres/totales por turno
 ├─ services/
-│  ├─ __init__.py
-│  └─ exports.py                  # Generación de CSV/Excel con filtros aplicados
-├─ templates/
-│  └─ reporting/
-│     ├─ sales_by_client.html     # Ventas agrupadas por cliente
-│     ├─ payments_by_method.html  # Pagos agrupados por método y sucursal
-│     ├─ tips.html                # Reporte de propinas
-│     ├─ cash_closures.html       # Reporte de cierres de caja
-│     └─ _filters.html            # Partial con formulario de filtros comunes
-├─ static/
-│  └─ reporting/
-│     ├─ reporting.css            # Estilos propios (tablas, totales)
-│     └─ reporting.js             # UX: datepickers, exportar con confirmación
-└─ exports/
-   └─ storage_backend.md          # Notas sobre dónde se guardan los exportes (MEDIA_ROOT/S3)
+│  └─ reports.py            # Orquesta selectors y normaliza DTOs
+├─ exports/
+│  ├─ excel.py              # XLSX
+│  ├─ csv.py                # CSV
+│  └─ pdf.py                # PDF
+└─ templates/reports/
+   ├─ sales_daily.html
+   ├─ payments_by_method.html
+   ├─ monthly_consolidated.html
+   └─ cashbox_summary.html
 ```
 
-### Rol de cada componente
-
-- **`selectors.py`**: consultas con `annotate`/`aggregate` sobre `sales.Venta`, `payments.Pago`, `cashbox.CierreCaja`.
-- **`views.py`**: vistas que renderizan reportes con filtros (`fecha_desde`, `fecha_hasta`, `sucursal`, `cliente`).
-- **`services/exports.py`**: utilidades para exportar datasets a CSV/Excel con nombres de columnas legibles.
-- **`templates/reporting/*`**: UI de reportes con tablas, totales y botones “Exportar”.
-- **`_filters.html`**: formulario reutilizable de filtros (fecha desde/hasta, sucursal, cliente).
-- **`static/reporting/*`**: mejoras UX mínimas (datepickers, mensajes de feedback).
+**Principios de diseño**: solo lectura, separación **selectors → services → views**, filtros componibles, exportadores desacoplados, SSR puro (Bootstrap + Chart.js por CDN).
 
 ---
 
-## 2) Endpoints propuestos
+## 3) Modelos internos (resumen)
 
-- `GET  /reportes/ventas-por-cliente/`  
-  → listado de ventas agrupadas por cliente, con totales.
-
-- `GET  /reportes/pagos-por-metodo/`  
-  → pagos agrupados por método de pago × sucursal.
-
-- `GET  /reportes/propinas/`  
-  → totales de propinas por fecha/sucursal.
-
-- `GET  /reportes/cierres-de-caja/`  
-  → listado de cierres con resumen de totales.
-
-- `GET  /reportes/export/<slug>/`  
-  → exporte CSV/Excel del reporte solicitado (ej. `ventas-por-cliente`, `pagos-por-metodo`).
+- **SavedReport**: preset reutilizable (`empresa`, `sucursal?`, `report_type`, `params{}`, visibilidad, autor). No guarda resultados, solo intención (filtros).
+- **ReportExport**: log de exportación (`empresa`, `report_type`, `fmt`, `row_count`, `duration_ms`, `status`, `error_message`, `file?`). Auditable y re-descargable.
 
 ---
 
-## 3) Contratos de entrada/salida (conceptual)
+## 4) Selectors — contratos y correcciones
 
-### Ventas por Cliente
+> Todos los selectors aplican **tenancy** (`empresa`) y **rango** de fechas usando `apply_date_range` (consciente de `DateField` vs `DateTimeField`). Agregan con `Sum/Count/Avg/Coalesce` para evitar `NULL`.
 
-- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`, `cliente?`.
-- **Proceso**: sumar `ventas.total` agrupando por cliente.
-- **Output**: tabla `{cliente, cantidad_ventas, total}`.
+### 4.1 `sales_selectors.py`
 
-### Pagos por Método
+- `ventas_por_dia(empresa, sucursal=None, dr, estados=None)`  
+  Devuelve: `fecha`, `ventas` (**Count("id")**), `total_monto` (`Sum("total")`), `total_items` (`Sum("items__cantidad")`), `ticket_promedio` (`Avg("total")`).  
+  **Fix v1.1:** se reemplazó `Sum(Value(1))` por `Count("id")` para evitar duplicación por join en `items`.
 
-- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
-- **Proceso**: sumar `pagos.monto` agrupando por método × sucursal.
-- **Output**: tabla `{sucursal, metodo, total}`.
+- `ventas_por_turno(empresa, sucursal=None, dr)`  
+  Devuelve: `turno_id`, `sucursal__nombre` → `sucursal`, `abierto_en`, `cerrado_en`, `ventas` (Count), `total_ventas` (Sum).
 
-### Propinas
+- `ventas_mensual_por_sucursal(empresa, dr)`  
+  Devuelve: `anio`, `mes`, `sucursal__nombre`, `ventas`, `total_ventas`, `ticket_promedio`.
 
-- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
-- **Proceso**: sumar `pagos.propina` o campo equivalente.
-- **Output**: tabla `{sucursal, fecha, propinas_total}`.
+### 4.2 `payments_selectors.py`
 
-### Cierres de Caja
+- `pagos_por_metodo(empresa, sucursal=None, dr, metodo_ids=None)`  
+  Devuelve: `medio__nombre` → `metodo`, `total` (monto sin propinas), `propinas` (solo propinas).
 
-- **Input (GET)**: `fecha_desde`, `fecha_hasta`, `sucursal?`.
-- **Proceso**: mostrar cierres de caja (abierto/cerrado, usuario, totales por método).
-- **Output**: tabla `{cierre_id, sucursal, usuario, abierto_en, cerrado_en, totales}`.
+- `ingresos_mensuales_por_metodo(empresa, dr)`  
+  Devuelve: `anio`, `mes`, `metodo`, `total`, `propinas`.
 
----
+- `propinas_por_usuario(empresa, dr)`  
+  Devuelve: `creado_por__username`, `propinas`.
 
-## 4) Dependencias e integraciones
+### 4.3 `cashbox_selectors.py`
 
-- **Depende de `sales`**: usa ventas para agrupar por cliente.
-- **Depende de `payments`**: suma montos y propinas por método.
-- **Depende de `cashbox`**: lista cierres y totales.
-- **Depende de `org`**: filtro por sucursal/empresa.
-- **Integración futura con `saas`**: limitar cantidad de exportes o accesos según plan.
+- `totales_por_turno(empresa, sucursal=None, dr)`  
+  Devuelve ventas teóricas por `TurnoCaja`: `turno_id`, `sucursal__nombre` → `sucursal`, `abierto_en`, `cerrado_en`, `total_ventas` (=Sum Venta.total), `ventas` (Count).
 
----
-
-## 5) Seguridad
-
-- Solo usuarios autenticados.
-- Validar **empresa activa** (tenancy).
-- Filtrar sucursales: usuario debe tener `SucursalMembership` en esa sucursal.
-- Exportes solo accesibles a roles `admin` / `auditor`.
+- `cierres_por_dia(empresa, sucursal=None, dr)`  
+  Base para cierres Z: `fecha`, `sucursal__nombre`, `total_teorico` (Sum Venta.total).
 
 ---
 
-## 6) Estado inicial del módulo
+## 5) Services — DTOs y contratos de salida
 
-- `selectors` con consultas básicas para ventas, pagos, propinas y cierres.
-- Vistas server-rendered con Bootstrap.
-- Exportes CSV simples (Excel opcional).
-- Plantillas con filtros de fechas y sucursal.
-- Sidebar con menú “Reportes” → enlaces a cada reporte.
+> Los services orquestan selectors y **no** recalculan lógica; solo consolidan y normalizan claves.
+
+### 5.1 `resumen_diario(empresa, params)`
+
+- **Entradas**: `params = {"fecha_desde","fecha_hasta","sucursal_id","metodos":[],"estados":[],"turno_id","granularidad"}` (strings/ids).
+- **Salida**:
+  ```json
+  {
+    "meta": {"report_type":"sales_daily","duration_ms":123,"params":{...}},
+    "totales": {"total_ventas": 0.0, "total_pagos": 0.0, "diferencia": 0.0},
+    "ventas_por_dia": [ {"fecha":"YYYY-MM-DD","ventas":1,"total_monto":0.0,"total_items":0,"ticket_promedio":0.0}, ... ],
+    "pagos_por_metodo": [ {"metodo":"Efectivo","total":0.0,"propinas":0.0}, ... ]
+  }
+  ```
+
+### 5.2 `pagos_por_metodo(empresa, params)`
+
+- **Salida**:
+  ```json
+  {
+    "meta": {...},
+    "totales": {"total":0.0, "propinas":0.0},
+    "detalle": [ {"metodo":"Efectivo","total":0.0,"propinas":0.0}, ... ]
+  }
+  ```
+
+### 5.3 `ventas_por_turno(empresa, params)` **(extendido v1.1)**
+
+- **Salida**:
+  ```json
+  {
+    "meta": {"report_type":"sales_by_shift", ...},
+    "totales": {
+      "total_ventas": 0.0,
+      "ventas": 0,
+      "total_teorico": 0.0,   // alias para UI de Caja
+      "propinas": 0.0
+    },
+    "por_turno": [
+      {"turno_id": 1, "sucursal":"Central", "abierto_en":"...", "cerrado_en":null, "ventas":2, "total_ventas": 13500.00},
+      ...
+    ],
+    "metodos": [ {"metodo":"Efectivo","total":0.0,"propinas":0.0}, ... ]
+  }
+  ```
+
+### 5.4 `mensual_por_sucursal(empresa, params)`
+
+- **Salida**:
+  ```json
+  {
+    "meta": {"report_type":"sales_monthly", ...},
+    "totales": {"total_ventas": 0.0, "ventas": 0},
+    "detalle": [
+      {"anio":2025, "mes":10, "sucursal__nombre":"Central", "ventas":1, "total_ventas":13500.00, "ticket_promedio":13500.00},
+      ...
+    ]
+  }
+  ```
+
+### 5.5 `build_dataset(report_type, empresa, params)`
+
+- Devuelve `(columns, rows)` listo para exportadores. Soporta:
+  - `SALES_DAILY`, `PAYMENTS_BY_METHOD`, `SALES_BY_SHIFT`, `SALES_MONTHLY`.
+
+### 5.6 `create_export_log(...)`
+
+- Crea `ReportExport` para auditoría (OK/FAILED).
 
 ---
 
-## 7) Roadmap inmediato
+## 6) Vistas — permisos, filtros y payloads
 
-1. Implementar `selectors` optimizados.
-2. Vistas y templates de los 4 reportes base.
-3. Exportes CSV funcionales.
-4. Integración con permisos de `SucursalMembership`.
-5. Mejorar UX con filtros y datepickers.
+- **Todas** heredan de `BaseReportView` (permiso `Perm.REPORTS_VIEW`).
+- Filtros con `ReportFilterForm`. Si es inválido → UI con _messages.warning_.
+- **Rutas**:
+  - `/reports/sales/daily/` → `SalesDailyView`
+  - `/reports/payments/method/` → `PaymentsByMethodView`
+  - `/reports/sales/shift/` → `SalesByShiftView`
+  - `/reports/monthly/` → `MonthlyConsolidatedView` (default `granularidad: "mes"`)
+  - `/reports/export/` → `ExportReportView` (permiso `Perm.REPORTS_EXPORT`)
+
+**Contexto esperado por template (por vista)**
+
+- **`sales_daily.html`**: `form`, `totales`, `ventas_por_dia`, `pagos_por_metodo`, `filters` (chips).
+- **`payments_by_method.html`**: `form`, `totales`, `detalle`, `filters`.
+- **`monthly_consolidated.html`**: `form`, `series_mensual`, `por_sucursal_resumen`, `totales`, `filters`.
+- **`cashbox_summary.html`**: `form`, `por_turno`, `metodos`, `totales`, `filters`.
+
+> `filters` se arma en la vista con valores “presentables” (labels/fechas) para las **chips**.
 
 ---
 
-## 8) Diagrama de relaciones (simplificado)
+## 7) UI — pautas y componentes
 
-```mermaid
-erDiagram
-    Empresa ||--o{ Sucursal : contiene
-    Empresa ||--o{ Cliente : tiene
-    Cliente ||--o{ Venta : realiza
-    Sucursal ||--o{ Venta : registra
-    Venta ||--o{ Pago : incluye
-    Sucursal ||--o{ CierreCaja : tiene
-    CierreCaja ||--o{ CierreCajaTotal : resume
+- **Filtros (UX)**: chips de lectura + botón “Editar filtros” (abre **modal** con el `ReportFilterForm`).
+  - “Limpiar” = link a `?` (reinicia al rango por defecto del form).
+  - Inputs con clases Bootstrap (via `BootstrapFormMixin`).
+- **Chart.js**:
+  - Sin estilos globales ni colores hardcode innecesarios.
+  - **Datos** embebidos con `{{ data|json_script:"elementId" }}` y `JSON.parse(...)` (evita loops/reflows).
+  - `maintainAspectRatio:false`, alturas CSS fijas (máx. ~260px).
+  - `animation:false` para SSR más liviano.
+- **Tablas**: Bootstrap `.table-sm`, `thead` fijo, `tfoot` con totales.
+- **Export**: botones CSV/XLSX/PDF reusan `request.GET.urlencode` (filtros vigentes).
 
-    Empresa {
-        int id
-        varchar nombre
-    }
+---
 
-    Sucursal {
-        int id
-        varchar nombre
-        int empresa_id
-    }
+## 8) Correcciones/bugs resueltos
 
-    Cliente {
-        int id
-        varchar nombre
-        int empresa_id
-    }
+- **Conteos duplicados** en ventas diarias y por turno por `JOIN` con `items`: se reemplazó conteo sintético por `Count("id")` (y `Sum("items__cantidad")` solo para “items”).
+- **Diferencia ventas–pagos**: ahora `resumen_diario` calcula totales independientes desde selectors y presenta `diferencia = total_ventas - total_pagos`.
+- **Render infinito de charts**: se usa `json_script` y canvases con altura estable.
+- **Form chips que rompían**: se evita usar `cleaned_data` directo en template; se expone `filters` serializado desde la vista.
+- **Inconsistencias de nombres**: claves de salida unificadas (`ventas_por_dia`, `series_mensual`, `por_turno`, `metodos`).
 
-    Venta {
-        int id
-        int cliente_id
-        int sucursal_id
-        decimal total
-        date fecha
-    }
+---
 
-    Pago {
-        int id
-        int venta_id
-        varchar metodo
-        decimal monto
-        decimal propina
-        date fecha
-    }
+## 9) Exportadores
 
-    CierreCaja {
-        int id
-        int sucursal_id
-        datetime abierto_en
-        datetime cerrado_en
-    }
+- **CSV**: `utf-8-sig`, cabecera con columnas, filas de `rows`.
+- **XLSX**: hoja única, _freeze panes_, formatos numéricos, anchos auto, autofiltro.
+- **PDF**: render simple a partir de columnas/filas o tabla HTML.
+- Siempre se registra `ReportExport` (OK/Failed).
 
-    CierreCajaTotal {
-        int id
-        int cierre_id
-        varchar medio
-        decimal monto
-        decimal propinas
-    }
+---
+
+## 10) Tenancy y permisos
+
+- **Tenancy**: todos los selectors filtran por `empresa`. Si hay sucursal, se aplica con `apply_sucursal`.
+- **Permisos**:
+  - Ver reportes: `Perm.REPORTS_VIEW`.
+  - Exportar: `Perm.REPORTS_EXPORT`.
+  - (Opc.) Gestionar presets públicos: `Perm.REPORTS_MANAGE`.
+
+---
+
+## 11) Performance
+
+- `select_related("sucursal","turno","medio")` en selectors para claves mostradas.
+- `values()` solo con columnas necesarias.
+- Rango por defecto desde `ReportFilterForm` si faltan fechas (defensa front).
+- Índices en origen (recomendado):  
+  `Venta(empresa, sucursal, creado, estado, turno)`,  
+  `Pago(venta__empresa, creado_en, medio, turno)`,  
+  `TurnoCaja(empresa, sucursal, abierto_en, cerrado_en)`.
+
+---
+
+## 12) Testing (recomendado)
+
+- **Unit (selectors)**: filtros por `empresa/sucursal`, rangos, agregaciones (`Sum/Count/Avg`).
+- **Service**: estructuras de salida, `diferencia`, consolidación multi-selector.
+- **View**: permisos, render con `filters`, export con `ReportExport` creado.
+- **Regresión**: caso de una venta con 2 ítems (verificá que `ventas=1`, `total_items=2`).
+
+---
+
+## 13) Plantillas — notas de implementación (ya incluidas)
+
+### 13.1 `sales_daily.html`
+
+- Chips + modal (igual patrón del resto).
+- KPIs: `total_ventas`, `total_pagos`, `diferencia`, `días con ventas`.
+- Chart lineal de ventas por día + barras de pagos por método.
+- Tabla por día y detalle por método.
+
+### 13.2 `payments_by_method.html`
+
+- KPIs: `total cobrado`, `propinas`.
+- Gráfico de barras (monto vs propinas) + doughnut de participación (%).
+- Tabla por método.
+
+### 13.3 `monthly_consolidated.html` (corregido)
+
+- Serie mensual (labels `YYYY-MM`) y doughnut por sucursal.
+- Tabla “Ventas por mes” + “Resumen por sucursal” con `% del total`.
+
+### 13.4 `cashbox_summary.html` (nuevo contrato)
+
+- **Service extendido** para añadir `metodos` y `propinas`.
+- KPIs: `total_teorico` (alias de ventas), `propinas`, `turnos listados`, `métodos activos`.
+- Chart por turno (línea) + por método (barras).
+- Tabla de turnos y tabla por método.
+
+---
+
+## 14) Snippets de referencia
+
+### 14.1 Fix de conteo (ventas por día/turno)
+
+```python
+# Reemplazar contadores sintéticos por Count("id") y sumar items aparte
+.annotate(
+    ventas=Count("id"),
+    total_monto=Coalesce(Sum("total"), Value(0)),
+    total_items=Coalesce(Sum("items__cantidad"), Value(0)),
+    ticket_promedio=Coalesce(Avg("total"), Value(0)),
+)
 ```
+
+### 14.2 Service extendido — `ventas_por_turno`
+
+```python
+rows_qs = sales_sel.ventas_por_turno(...)
+rows = list(rows_qs)
+
+pagos_qs = pay_sel.pagos_por_metodo(...)
+pagos = list(pagos_qs)
+
+total_ventas = float(sum(r.get("total_ventas", 0) or 0 for r in rows))
+cant_ventas  = int(sum(r.get("ventas", 0) or 0 for r in rows))
+propinas     = float(sum(r.get("propinas", 0) or 0 for r in pagos))
+
+return {
+  "totales": {
+    "total_ventas": total_ventas,
+    "ventas": cant_ventas,
+    "total_teorico": total_ventas,
+    "propinas": propinas,
+  },
+  "por_turno": rows,
+  "metodos": pagos,
+}
+```
+
+### 14.3 Chart.js estable (SSR)
+
+```django
+{{ ventas_por_dia|json_script:"ventasData" }}
+<script>
+  const data = JSON.parse(document.getElementById('ventasData').textContent);
+  // new Chart(...)
+</script>
+```
+
+---
+
+## 15) Operación diaria
+
+1. Abrir el reporte deseado.
+2. Revisar chips de filtros (fecha/sucursal/turno); si necesitás cambiar, usar **Editar filtros** (modal).
+3. Analizar KPIs y gráficos. Usar tablas para detalles.
+4. Exportar CSV/XLSX/PDF según necesidad (queda auditado en `ReportExport`).
+
+---
+
+## 16) Roadmap
+
+- **v1.2**: dataset BI (CSV/Parquet), endpoint autenticado para extracción.
+- **v1.3**: “Reportes guardados” públicos/privados desde UI, duplicar preset.
+- **v2.0**: alertas automáticas (diferencias ventas–pagos, ticket bajo, outliers) vía `notifications`.
+
+---
+
+## 17) Compatibilidad y migración
+
+- No requiere cambios de esquema en `sales`, `payments`, `cashbox`.
+- Alineá **nombres de contexto** en templates según contratos arriba (ej.: `por_turno`, `metodos`, `series_mensual`).
+- Si existían plantillas antiguas, reemplazarlas por las nuevas (chips + modal + `json_script`).
+
+---
+
+## 18) Glosario
+
+- **Turno**: período operativo entre `abierto_en` y `cerrado_en` (puede estar abierto).
+- **Total teórico**: suma de `Venta.total` (base de conciliación); **no** incluye propinas.
+- **Diferencia**: `total_ventas - total_pagos` (control grueso, puede haber timing/ajustes).
+- **Ticket promedio**: `total_ventas / ventas` (por agrupación/periodo).

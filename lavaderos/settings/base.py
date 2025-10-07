@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.cashbox",
     "apps.saas",
+    "apps.reports",
 ]
 
 SITE_ID = 1  # requerido por allauth

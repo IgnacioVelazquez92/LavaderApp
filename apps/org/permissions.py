@@ -161,8 +161,6 @@ class Perm(str, Enum):
     CATALOG_SERVICES_MANAGE = "catalog.services.manage"
     CATALOG_PRICES_MANAGE = "catalog.prices.manage"
 
-    REPORTS_VIEW = "reports.view"
-
     # CUSTOMERS
     CUSTOMERS_VIEW = "CUSTOMERS_VIEW"
     CUSTOMERS_CREATE = "CUSTOMERS_CREATE"
@@ -256,6 +254,8 @@ class Perm(str, Enum):
     CASHBOX_COUNT = "CASHBOX_COUNT"    # cargar conteo físico (arqueo)
     CASHBOX_REPORT = "CASHBOX_REPORT"   # ver/descargar reportes
     CASHBOX_CONFIG = "CASHBOX_CONFIG"   # configuración de caja (si aplica)
+    REPORTS_VIEW = "reports.view"       # Consultar reportes
+    REPORTS_EXPORT = "reports.export"   # Exportar CSV/XLSX/PDF
 
 
 # Matriz de permisos por rol (podés ajustarla sin tocar vistas)
@@ -267,7 +267,7 @@ ROLE_POLICY = {
         Perm.ORG_EMPLEADOS_MANAGE,
         Perm.CATALOG_SERVICES_MANAGE,
         Perm.CATALOG_PRICES_MANAGE,
-        Perm.REPORTS_VIEW,
+
 
         # Customers
         Perm.CUSTOMERS_VIEW,
@@ -351,6 +351,9 @@ ROLE_POLICY = {
         Perm.NOTIF_SMTP_TEST,
         Perm.CASHBOX_VIEW, Perm.CASHBOX_OPEN, Perm.CASHBOX_CLOSE,
         Perm.CASHBOX_COUNT, Perm.CASHBOX_REPORT, Perm.CASHBOX_CONFIG,
+
+        Perm.REPORTS_VIEW,
+        Perm.REPORTS_EXPORT
     },
 
     # Operador: solo puede ver catálogo (no crear/editar/borrar).
@@ -418,6 +421,9 @@ ROLE_POLICY = {
         Perm.CATALOG_VIEW,
         Perm.INVOICING_VIEW,
         Perm.INVOICING_DOWNLOAD,
+
+        Perm.REPORTS_VIEW,
+
     },
 }
 

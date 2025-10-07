@@ -1,0 +1,295 @@
+{# templates/reports/monthly_consolidated.html #}
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Reportes — Consolidado Mensual" %}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .report-header{display:flex;align-items:start;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+  .report-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+  .card-elevated{box-shadow:0 8px 18px rgba(0,0,0,.05)}
+  .kpi{display:grid;grid-template-columns:1fr auto;gap:.25rem;align-items:center;padding:.75rem 1rem;border-radius:.5rem;background:var(--bs-body-bg);border:1px solid var(--bs-border-color)}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .5rem;border:1px solid var(--bs-border-color);border-radius:999px;font-size:.8125rem;background:var(--bs-body-bg)}
+  .chip .lbl{color:var(--bs-secondary-color)}
+  .table tfoot td{background:var(--bs-tertiary-bg)}
+  .month-pill{font-variant-numeric:tabular-nums}
+  canvas[id^="chart"]{display:block;width:100% !important;max-height:260px}
+  @media (max-width:576px){.kpi{grid-template-columns:1fr}.report-header{align-items:stretch}}
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="report-header mb-2">
+    <div>
+      <h1 class="h4 m-0">{% trans "Consolidado mensual" %}</h1>
+      <p class="text-secondary mb-0">
+        {% trans "Evolución de ventas por mes y participación por sucursal en el período seleccionado." %}
+      </p>
+    </div>
+    <div class="report-actions">
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_monthly&format=csv&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-csv me-1"></i>{% trans "Exportar CSV" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_monthly&format=xlsx&{{ request.GET.urlencode }}">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>{% trans "Exportar XLSX" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_monthly&format=pdf&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-pdf me-1"></i>{% trans "Exportar PDF" %}
+      </a>
+    </div>
+  </div>
+
+  {# ——— Chips + acciones ——— #}
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="d-flex flex-wrap gap-2">
+      <span class="chip"><span class="lbl">{% trans "Desde" %}:</span> {{ filters.desde }}</span>
+      <span class="chip"><span class="lbl">{% trans "Hasta" %}:</span> {{ filters.hasta }}</span>
+      {% if filters.sucursal_label %}
+        <span class="chip"><span class="lbl">{% trans "Sucursal" %}:</span> {{ filters.sucursal_label }}</span>
+      {% endif %}
+      {% if filters.estados_count %}
+        <span class="chip"><span class="lbl">{% trans "Estados" %}:</span> {{ filters.estados_count }}</span>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="?">
+        <i class="bi bi-x-circle me-1"></i>{% trans "Limpiar" %}
+      </a>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#filtersModal">
+        <i class="bi bi-funnel me-1"></i>{% trans "Editar filtros" %}
+      </button>
+    </div>
+  </div>
+
+  {# ——— Modal de filtros ——— #}
+  <div class="modal fade" id="filtersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <form method="get">
+          <div class="modal-header">
+            <h5 class="modal-title">{% trans "Filtros del reporte" %}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% trans 'Cerrar' %}"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_desde.id_for_label }}">{% trans "Desde" %}</label>
+                {{ form.fecha_desde }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_hasta.id_for_label }}">{% trans "Hasta" %}</label>
+                {{ form.fecha_hasta }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.sucursal.id_for_label }}">{% trans "Sucursal" %}</label>
+                {{ form.sucursal }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.estados.id_for_label }}">{% trans "Estados de venta" %}</label>
+                {{ form.estados }}
+                <div class="form-text">{% trans "Dejar vacío para incluir todos." %}</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <a class="btn btn-outline-secondary" href="?">{% trans "Limpiar" %}</a>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-funnel me-1"></i>{% trans "Aplicar filtros" %}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {% if series_mensual %}
+    {# KPIs #}
+    <div class="row g-2 mb-3">
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="label">{% trans "Total vendido" %}</div><div class="value text-end">{{ totales.total_vendido|floatformat:2 }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="label">{% trans "Meses con actividad" %}</div><div class="value text-end">{{ series_mensual|length }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="label">{% trans "Ticket promedio" %}</div><div class="value text-end">{{ totales.ticket_promedio|floatformat:2 }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="label">{% trans "Sucursales activas" %}</div><div class="value text-end">{{ por_sucursal_resumen|length }}</div></div>
+      </div>
+    </div>
+
+    {# Gráficos #}
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Evolución mensual" %}</h6>
+              {% if series_mensual|length > 0 %}
+                {% with first=series_mensual.0 last=series_mensual|last %}
+                  <span class="text-secondary small">
+                    <i class="bi bi-calendar3 me-1"></i>
+                    <span class="month-pill">{{ first.anio }}-{{ first.mes|stringformat:"02d" }}</span>
+                    &nbsp;→&nbsp;
+                    <span class="month-pill">{{ last.anio }}-{{ last.mes|stringformat:"02d" }}</span>
+                  </span>
+                {% endwith %}
+              {% endif %}
+            </div>
+            <canvas id="chartMensual"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-5">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Participación por sucursal" %}</h6>
+              <span class="text-secondary small">{% trans "Sobre total del período" %}</span>
+            </div>
+            <canvas id="chartSucursales"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Tabla mensual consolidada (no por sucursal) #}
+    <div class="row g-3 mt-1">
+      <div class="col-12 col-lg-7">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <h6 class="mb-3">{% trans "Ventas por mes" %}</h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{% trans "Mes" %}</th>
+                    <th class="text-end">{% trans "Ventas" %}</th>
+                    <th class="text-end">{% trans "Total" %}</th>
+                    <th class="text-end">{% trans "Ticket prom." %}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in series_mensual %}
+                    <tr>
+                      <td class="month-pill">{{ r.anio }}-{{ r.mes|stringformat:"02d" }}</td>
+                      <td class="text-end">{{ r.ventas|default:0 }}</td>
+                      <td class="text-end">{{ r.total_ventas|floatformat:2 }}</td>
+                      <td class="text-end">{{ r.ticket_promedio|floatformat:2 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr class="fw-semibold">
+                    <td>{% trans "Total" %}</td>
+                    <td class="text-end">{{ totales.ventas }}</td>
+                    <td class="text-end">{{ totales.total_vendido|floatformat:2 }}</td>
+                    <td class="text-end">{{ totales.ticket_promedio|floatformat:2 }}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# Resumen por sucursal #}
+      <div class="col-12 col-lg-5">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <h6 class="mb-3">{% trans "Resumen por sucursal" %}</h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{% trans "Sucursal" %}</th>
+                    <th class="text-end">{% trans "Total" %}</th>
+                    <th class="text-end">{% trans "% del total" %}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for s in por_sucursal_resumen %}
+                    <tr>
+                      <td>{{ s.nombre }}</td>
+                      <td class="text-end">{{ s.total_ventas|floatformat:2 }}</td>
+                      <td class="text-end">
+                        {% with total=totales.total_vendido|default:1 %}
+                          {% widthratio s.total_ventas total 100 as pct %}{{ pct }}%
+                        {% endwith %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr class="fw-semibold">
+                    <td>{% trans "Total" %}</td>
+                    <td class="text-end">{{ totales.total_vendido|floatformat:2 }}</td>
+                    <td class="text-end">100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Datos para charts — seguros #}
+    {{ series_mensual|json_script:"seriesMensualData" }}
+    {{ por_sucursal_resumen|json_script:"sucursalesData" }}
+
+  {% else %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle me-1"></i> {% trans "No hay datos para el rango seleccionado." %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+  const fmt = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2}).format(v||0);
+
+  const mEl = document.getElementById('seriesMensualData');
+  const sEl = document.getElementById('sucursalesData');
+  const mensual = JSON.parse(mEl?.textContent || '[]');
+  const suc = JSON.parse(sEl?.textContent || '[]');
+
+  // Linea mensual
+  const lm = mensual.map(r => `${r.anio}-${String(r.mes).padStart(2,'0')}`);
+  const dm = mensual.map(r => r.total_ventas || 0);
+
+  const $m = document.getElementById('chartMensual');
+  if ($m && mensual.length) {
+    new Chart($m, {
+      type:'line',
+      data:{ labels: lm, datasets:[{ label:'{{ _("Total vendido") }}', data: dm, fill:true, tension:.25 }] },
+      options:{ responsive:true, maintainAspectRatio:false, animation:false,
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:(v)=>fmt(v) } } } }
+    });
+  }
+
+  // Doughnut por sucursal
+  const ls = suc.map(r => r.nombre);
+  const ds = suc.map(r => r.total_ventas || 0);
+
+  const $s = document.getElementById('chartSucursales');
+  if ($s && suc.length) {
+    const total = ds.reduce((a,b)=>a+(+b||0),0) || 1;
+    new Chart($s, {
+      type:'doughnut',
+      data:{ labels: ls, datasets:[{ data: ds }] },
+      options:{ responsive:true, maintainAspectRatio:false, animation:false,
+        plugins:{ legend:{ position:'bottom' },
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed, pct = (v*100/total).toFixed(1)+'%';
+            return ctx.label+': '+fmt(v)+' ('+pct+')';
+          } } } } }
+    });
+  }
+})();
+</script>
+{% endblock %}

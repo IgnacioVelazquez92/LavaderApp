@@ -1,0 +1,239 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Reportes — Pagos por método" %}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .report-header{display:flex;align-items:start;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+  .report-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+  .card-elevated{box-shadow:0 8px 18px rgba(0,0,0,.05)}
+  .kpi{display:grid;grid-template-columns:1fr auto;gap:.25rem;align-items:center;padding:.75rem 1rem;border-radius:.5rem;background:var(--bs-body-bg);border:1px solid var(--bs-border-color)}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .5rem;border:1px solid var(--bs-border-color);border-radius:999px;font-size:.8125rem;background:var(--bs-body-bg)}
+  .chip .lbl{color:var(--bs-secondary-color)}
+  .table tfoot td{background:var(--bs-tertiary-bg)}
+  canvas[id^="chart"]{display:block;width:100%!important;max-height:260px}
+  @media (max-width:576px){.kpi{grid-template-columns:1fr}.report-header{align-items:stretch}}
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="report-header mb-2">
+    <div>
+      <h1 class="h4 m-0">{% trans "Pagos por método" %}</h1>
+      <p class="text-secondary mb-0">
+        {% trans "Totales de cobros y propinas por método de pago en el período seleccionado." %}
+      </p>
+    </div>
+    <div class="report-actions">
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=payments_by_method&format=csv&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-csv me-1"></i>{% trans "Exportar CSV" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=payments_by_method&format=xlsx&{{ request.GET.urlencode }}">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>{% trans "Exportar XLSX" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=payments_by_method&format=pdf&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-pdf me-1"></i>{% trans "Exportar PDF" %}
+      </a>
+    </div>
+  </div>
+
+  {# ——— Resumen de filtros + acciones (chips) ——— #}
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="d-flex flex-wrap gap-2">
+      <span class="chip"><span class="lbl">{% trans "Desde" %}:</span> {{ filters.desde }}</span>
+      <span class="chip"><span class="lbl">{% trans "Hasta" %}:</span> {{ filters.hasta }}</span>
+      {% if filters.sucursal_label %}
+        <span class="chip"><span class="lbl">{% trans "Sucursal" %}:</span> {{ filters.sucursal_label }}</span>
+      {% endif %}
+      {% if filters.metodos_count %}
+        <span class="chip"><span class="lbl">{% trans "Métodos" %}:</span> {{ filters.metodos_count }}</span>
+      {% endif %}
+      {% if filters.turno_label %}
+        <span class="chip"><span class="lbl">{% trans "Turno" %}:</span> {{ filters.turno_label }}</span>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="?">
+        <i class="bi bi-x-circle me-1"></i>{% trans "Limpiar" %}
+      </a>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#filtersModal">
+        <i class="bi bi-funnel me-1"></i>{% trans "Editar filtros" %}
+      </button>
+    </div>
+  </div>
+
+  {# ——— Modal de filtros (mismo form, método GET) ——— #}
+  <div class="modal fade" id="filtersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <form method="get">
+          <div class="modal-header">
+            <h5 class="modal-title">{% trans "Filtros del reporte" %}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% trans 'Cerrar' %}"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_desde.id_for_label }}">{% trans "Desde" %}</label>
+                {{ form.fecha_desde }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_hasta.id_for_label }}">{% trans "Hasta" %}</label>
+                {{ form.fecha_hasta }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.sucursal.id_for_label }}">{% trans "Sucursal" %}</label>
+                {{ form.sucursal }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.turno.id_for_label }}">{% trans "Turno" %}</label>
+                {{ form.turno }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.metodos.id_for_label }}">{% trans "Métodos de pago" %}</label>
+                {{ form.metodos }}
+                <div class="form-text">{% trans "Dejar vacío para incluir todos." %}</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <a class="btn btn-outline-secondary" href="?">{% trans "Limpiar" %}</a>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-funnel me-1"></i>{% trans "Aplicar filtros" %}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {% if detalle %}
+    {# KPIs #}
+    <div class="row g-2 mb-3">
+      <div class="col-12 col-sm-6">
+        <div class="kpi"><div class="lbl">{% trans "Total cobrado" %}</div><div class="value text-end">{{ totales.total|floatformat:2 }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6">
+        <div class="kpi"><div class="lbl">{% trans "Propinas" %}</div><div class="value text-end">{{ totales.propinas|floatformat:2 }}</div></div>
+      </div>
+    </div>
+
+    {# Gráficos #}
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Distribución por método" %}</h6>
+              <span class="text-secondary small">{% trans "Monto vs. Propinas" %}</span>
+            </div>
+            <canvas id="chartBar"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-5">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Participación de cada método" %}</h6>
+              <span class="text-secondary small">{% trans "Solo monto cobrado" %}</span>
+            </div>
+            <canvas id="chartDoughnut"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Tabla #}
+    <div class="card card-elevated mt-3">
+      <div class="card-body">
+        <h6 class="mb-3">{% trans "Detalle" %}</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>{% trans "Método" %}</th>
+                <th class="text-end">{% trans "Monto" %}</th>
+                <th class="text-end">{% trans "Propinas" %}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in detalle %}
+                <tr>
+                  <td>{{ r.metodo }}</td>
+                  <td class="text-end">{{ r.total|floatformat:2 }}</td>
+                  <td class="text-end">{{ r.propinas|floatformat:2 }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="fw-semibold">
+                <td>{% trans "Total" %}</td>
+                <td class="text-end">{{ totales.total|floatformat:2 }}</td>
+                <td class="text-end">{{ totales.propinas|floatformat:2 }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {# Datos para charts — seguro (json_script) #}
+    {{ detalle|json_script:"paymentsData" }}
+
+  {% else %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle me-1"></i> {% trans "No hay datos para el rango seleccionado." %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  window.__charts = window.__charts || {};
+  const kill = id => { try { window.__charts[id]?.destroy(); } catch(e){} };
+  const fmt = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2}).format(v||0);
+
+  const rows = JSON.parse(document.getElementById('paymentsData')?.textContent || '[]');
+
+  const labels = rows.map(r => r.metodo);
+  const serieMonto = rows.map(r => r.total || 0);
+  const serieProp = rows.map(r => r.propinas || 0);
+
+  // Barras
+  const cBar = document.getElementById('chartBar');
+  if (cBar && rows.length) {
+    kill('bar');
+    window.__charts.bar = new Chart(cBar, {
+      type:'bar',
+      data:{ labels, datasets:[
+        { label:'{{ _("Monto") }}', data:serieMonto },
+        { label:'{{ _("Propinas") }}', data:serieProp }
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, animation:false,
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:fmt } } } }
+    });
+  }
+
+  // Doughnut
+  const cD = document.getElementById('chartDoughnut');
+  if (cD && rows.length) {
+    kill('doughnut');
+    const total = serieMonto.reduce((a,b)=>a+(+b||0),0) || 1;
+    window.__charts.doughnut = new Chart(cD, {
+      type:'doughnut',
+      data:{ labels, datasets:[{ data:serieMonto }] },
+      options:{ responsive:true, maintainAspectRatio:false, animation:false,
+        plugins:{ legend:{ position:'bottom' },
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed, pct = (v*100/total).toFixed(1)+'%';
+            return ctx.label+': '+fmt(v)+' ('+pct+')';
+          }}}}}
+    });
+  }
+})();
+</script>
+{% endblock %}

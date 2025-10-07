@@ -1,0 +1,304 @@
+{# templates/reports/sales_daily.html #}
+{% extends "base_auth.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block title %}{% trans "Reportes — Ventas diarias" %}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .report-header{display:flex;align-items:start;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+  .report-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .5rem;border:1px solid var(--bs-border-color);border-radius:999px;font-size:.8125rem;background:var(--bs-body-bg)}
+  .chip .lbl{color:var(--bs-secondary-color)}
+  .kpi{display:grid;grid-template-columns:1fr auto;gap:.25rem;align-items:center;padding:.75rem 1rem;border-radius:.5rem;background:var(--bs-body-bg);border:1px solid var(--bs-border-color)}
+  .card-elevated{box-shadow:0 8px 18px rgba(0,0,0,.05)}
+  .table thead th{white-space:nowrap}
+  .table tfoot td{background:var(--bs-tertiary-bg)}
+  canvas[id^="chart"]{display:block;width:100%!important;max-height:260px}
+  @media (max-width:576px){.kpi{grid-template-columns:1fr}.report-header{align-items:stretch}}
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="report-header mb-2">
+    <div>
+      <h1 class="h4 m-0">{% trans "Ventas diarias" %}</h1>
+      <p class="text-secondary mb-0">{% trans "Resumen operativo del período seleccionado: ventas por día, pagos por método y diferencia." %}</p>
+    </div>
+    <div class="report-actions">
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_daily&format=csv&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-csv me-1"></i>{% trans "Exportar CSV" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_daily&format=xlsx&{{ request.GET.urlencode }}">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>{% trans "Exportar XLSX" %}
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'reports:export' %}?type=sales_daily&format=pdf&{{ request.GET.urlencode }}">
+        <i class="bi bi-filetype-pdf me-1"></i>{% trans "Exportar PDF" %}
+      </a>
+    </div>
+  </div>
+
+  {# --- Resumen de filtros (sin acceder al form) --- #}
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="d-flex flex-wrap gap-2">
+      <span class="chip"><span class="lbl">{% trans "Desde" %}:</span> {{ filters.desde }}</span>
+      <span class="chip"><span class="lbl">{% trans "Hasta" %}:</span> {{ filters.hasta }}</span>
+      {% if filters.sucursal_label %}
+        <span class="chip"><span class="lbl">{% trans "Sucursal" %}:</span> {{ filters.sucursal_label }}</span>
+      {% endif %}
+      {% if filters.metodos_count %}
+        <span class="chip"><span class="lbl">{% trans "Métodos" %}:</span> {{ filters.metodos_count }}</span>
+      {% endif %}
+      {% if filters.estados_count %}
+        <span class="chip"><span class="lbl">{% trans "Estados" %}:</span> {{ filters.estados_count }}</span>
+      {% endif %}
+      {% if filters.turno_label %}
+        <span class="chip"><span class="lbl">{% trans "Turno" %}:</span> {{ filters.turno_label }}</span>
+      {% endif %}
+    </div>
+
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="?">
+        <i class="bi bi-x-circle me-1"></i>{% trans "Limpiar" %}
+      </a>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#filtersModal">
+        <i class="bi bi-funnel me-1"></i>{% trans "Editar filtros" %}
+      </button>
+    </div>
+  </div>
+
+  {# ----- MODAL DE FILTROS ----- #}
+  <div class="modal fade" id="filtersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <form method="get">
+          <div class="modal-header">
+            <h5 class="modal-title">{% trans "Filtros del reporte" %}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% trans 'Cerrar' %}"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_desde.id_for_label }}">{% trans "Desde" %}</label>
+                {{ form.fecha_desde }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.fecha_hasta.id_for_label }}">{% trans "Hasta" %}</label>
+                {{ form.fecha_hasta }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.sucursal.id_for_label }}">{% trans "Sucursal" %}</label>
+                {{ form.sucursal }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.turno.id_for_label }}">{% trans "Turno" %}</label>
+                {{ form.turno }}
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.metodos.id_for_label }}">{% trans "Métodos de pago" %}</label>
+                {{ form.metodos }}
+                <div class="form-text">{% trans "Dejar vacío para incluir todos." %}</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="{{ form.estados.id_for_label }}">{% trans "Estados de venta" %}</label>
+                {{ form.estados }}
+                <div class="form-text">{% trans "Opcional. Si no seleccionás, se incluyen todos." %}</div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <a class="btn btn-outline-secondary" href="?">{% trans "Limpiar" %}</a>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-funnel me-1"></i>{% trans "Aplicar filtros" %}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {% if ventas_por_dia %}
+    {# KPIs #}
+    <div class="row g-2 mb-3">
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="lbl">{% trans "Total ventas" %}</div><div class="value text-end">{{ totales.total_ventas|floatformat:2 }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="lbl">{% trans "Total pagos" %}</div><div class="value text-end">{{ totales.total_pagos|floatformat:2 }}</div></div>
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        {% with diff=totales.diferencia|default:0 %}
+          <div class="kpi"><div class="lbl">{% trans "Diferencia" %}</div>
+            <div class="value text-end {% if diff >= 0 %}text-success{% else %}text-danger{% endif %}">{{ diff|floatformat:2 }}</div>
+          </div>
+        {% endwith %}
+      </div>
+      <div class="col-12 col-sm-6 col-xl-3">
+        <div class="kpi"><div class="lbl">{% trans "Días con ventas" %}</div><div class="value text-end">{{ ventas_por_dia|length }}</div></div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Curva de ventas" %}</h6>
+              <span class="text-secondary small">{% trans "Por día" %}</span>
+            </div>
+            <canvas id="chartVentasDia" height="140"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-5">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">{% trans "Pagos por método" %}</h6>
+              <span class="text-secondary small">{% trans "Monto y propinas" %}</span>
+            </div>
+            <canvas id="chartPagosMetodo" height="140"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-1">
+      <div class="col-12 col-lg-7">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <h6 class="mb-3">{% trans "Ventas por día" %}</h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{% trans "Fecha" %}</th>
+                    <th class="text-end">{% trans "Ventas" %}</th>
+                    <th class="text-end">{% trans "Items" %}</th>
+                    <th class="text-end">{% trans "Total" %}</th>
+                    <th class="text-end">{% trans "Ticket prom." %}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in ventas_por_dia %}
+                    <tr>
+                      <td>{{ r.fecha }}</td>
+                      <td class="text-end">{{ r.ventas }}</td>
+                      <td class="text-end">{{ r.total_items|default:0 }}</td>
+                      <td class="text-end">{{ r.total_monto|floatformat:2 }}</td>
+                      <td class="text-end">{{ r.ticket_promedio|floatformat:2 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr class="fw-semibold">
+                    <td>{% trans "Total" %}</td>
+                    <td class="text-end">{{ ventas_por_dia|length }}</td>
+                    <td></td>
+                    <td class="text-end">{{ totales.total_ventas|floatformat:2 }}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-5">
+        <div class="card card-elevated">
+          <div class="card-body">
+            <h6 class="mb-3">{% trans "Pagos por método" %}</h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{% trans "Método" %}</th>
+                    <th class="text-end">{% trans "Monto" %}</th>
+                    <th class="text-end">{% trans "Propinas" %}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in pagos_por_metodo %}
+                    <tr>
+                      <td>{{ r.metodo }}</td>
+                      <td class="text-end">{{ r.total|floatformat:2 }}</td>
+                      <td class="text-end">{{ r.propinas|floatformat:2 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr class="fw-semibold">
+                    <td>{% trans "Total" %}</td>
+                    <td class="text-end">{{ totales.total_pagos|floatformat:2 }}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Datos para Chart.js de forma segura #}
+    {{ ventas_por_dia|json_script:"ventasData" }}
+    {{ pagos_por_metodo|json_script:"pagosData" }}
+  {% else %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle me-1"></i> {% trans "No hay datos para el rango seleccionado." %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const money = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:2}).format(v||0);
+  window.__charts = window.__charts || {};
+  const kill = id => { try { window.__charts[id]?.destroy(); } catch(e){} };
+
+  const ventas = JSON.parse(document.getElementById('ventasData')?.textContent || '[]');
+  const pagos  = JSON.parse(document.getElementById('pagosData')?.textContent  || '[]');
+
+  // Ventas por día
+  const c1 = document.getElementById('chartVentasDia');
+  if (c1 && ventas.length) {
+    kill('ventas');
+    window.__charts.ventas = new Chart(c1, {
+      type: 'line',
+      data: {
+        labels: ventas.map(r => r.fecha),
+        datasets: [{
+          label: '{{ _("Total vendido") }}',
+          data: ventas.map(r => r.total_monto || 0),
+          tension: .25, fill: true
+        }]
+      },
+      options: { responsive:true, maintainAspectRatio:false, animation:false,
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:money } } } }
+    });
+  }
+
+  // Pagos por método
+  const c2 = document.getElementById('chartPagosMetodo');
+  if (c2 && pagos.length) {
+    kill('pagos');
+    window.__charts.pagos = new Chart(c2, {
+      type: 'bar',
+      data: {
+        labels: pagos.map(r => r.metodo),
+        datasets: [
+          { label:'{{ _("Monto") }}',    data: pagos.map(r => r.total || 0) },
+          { label:'{{ _("Propinas") }}', data: pagos.map(r => r.propinas || 0) }
+        ]
+      },
+      options: { responsive:true, maintainAspectRatio:false, animation:false,
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:money } } } }
+    });
+  }
+})();
+</script>
+{% endblock %}

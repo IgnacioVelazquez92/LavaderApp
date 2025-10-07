@@ -26,6 +26,7 @@ urlpatterns = [
                 namespace="notifications"),
     ),
     path("saas/", include("apps.saas.urls", namespace="saas")),
+    path("reports/", include("apps.reports.urls", namespace="reports")),
     path("", login_required(TemplateView.as_view(
         template_name="home_dashboard.html")), name="home"),
 

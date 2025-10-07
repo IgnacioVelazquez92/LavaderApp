@@ -89,15 +89,24 @@
   <div class="accordion-item">
     <h2 class="accordion-header" id="acc-rep-h">
       <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#acc-rep-b">
-        Reportes
+        <i class="bi bi-bar-chart me-2"></i> Reportes
       </button>
     </h2>
     <div id="acc-rep-b" class="accordion-collapse collapse" data-bs-parent="#sidebarAccordion">
       <div class="accordion-body p-0">
         <nav class="nav flex-column">
-          <a class="nav-link px-3 py-2" href="/reportes/ventas/">Ventas</a>
-          <a class="nav-link px-3 py-2" href="/reportes/clientes/">Clientes</a>
-          <a class="nav-link px-3 py-2" href="/reportes/caja/">Caja</a>
+          <a class="nav-link px-3 py-2" href="{% url 'reports:sales_daily' %}">
+            <i class="bi bi-calendar-day me-2"></i> Ventas diarias
+          </a>
+          <a class="nav-link px-3 py-2" href="{% url 'reports:payments_by_method' %}">
+            <i class="bi bi-credit-card me-2"></i> Pagos por método
+          </a>
+          <a class="nav-link px-3 py-2" href="{% url 'reports:sales_by_shift' %}">
+            <i class="bi bi-cash-stack me-2"></i> Resumen de caja
+          </a>
+          <a class="nav-link px-3 py-2" href="{% url 'reports:monthly' %}">
+            <i class="bi bi-graph-up-arrow me-2"></i> Consolidado mensual
+          </a>
         </nav>
       </div>
     </div>
