@@ -1,3 +1,5 @@
+{# apps/customers/templates/customers/_form_fields.html #}
+
 {% if form.non_field_errors %}
 <div class="alert alert-danger">
   {% for e in form.non_field_errors %}<div>{{ e }}</div>{% endfor %}
@@ -22,8 +24,18 @@
   </div>
 
   {% for field in form %}
-    {% if field.name not in 'tipo_persona activo' %}
-      <div class="{% if field.name in 'direccion localidad provincia cp notas razon_social' %}col-md-6{% elif field.name in 'nombre apellido document email tel_wpp fecha_nac' %}col-md-4{% else %}col-md-6{% endif %}">
+    {# EXCLUIR campos específicos sin usar tuplas/listas #}
+    {% if field.name != 'tipo_persona' and field.name != 'activo' %}
+      {# GRID: decidir ancho por nombre de campo (sin listas literales) #}
+      <div class="
+        {% if field.name == 'direccion' or field.name == 'localidad' or field.name == 'provincia' or field.name == 'cp' or field.name == 'notas' or field.name == 'razon_social' %}
+          col-md-6
+        {% elif field.name == 'nombre' or field.name == 'apellido' or field.name == 'documento' or field.name == 'email' or field.name == 'tel_wpp' or field.name == 'fecha_nac' %}
+          col-md-4
+        {% else %}
+          col-md-6
+        {% endif %}
+      ">
         <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
 
         {% if field.field.widget.input_type == 'textarea' %}
@@ -32,7 +44,7 @@
                     {% for k,v in field.field.widget.attrs.items %} {{k}}="{{v}}"{% endfor %}>{{ field.value|default_if_none:"" }}</textarea>
 
         {% else %}
-          {# >>> FIX: si es fecha, formatear el value como YYYY-MM-DD <<< #}
+          {# Formatear fechas como YYYY-MM-DD para inputs type=date #}
           {% if field.field.widget.input_type == 'date' or field.name == 'fecha_nac' %}
             <input type="date"
                    name="{{ field.html_name }}"

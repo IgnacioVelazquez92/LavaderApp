@@ -1,5 +1,7 @@
+# apps/customers/forms/customer.py
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 
 from ..models import Cliente
 from .. import normalizers
@@ -126,6 +128,40 @@ class CustomerForm(forms.ModelForm):
         parts = [p.strip() for p in str(value).split(",")]
         return [p for p in parts if p]
 
+    # ----------------- Validaciones de duplicados por empresa -----------------
+
+    def clean(self):
+        """
+        Chequea duplicados por empresa activa antes del guardado para
+        devolver errores de campo en lugar de caer en 500 por constraints.
+        """
+        cleaned = super().clean()
+        empresa = getattr(getattr(self, "request", None),
+                          "empresa_activa", None)
+        if not empresa:
+            return cleaned  # En principio siempre hay tenancy; por las dudas.
+
+        qs = Cliente.objects.filter(empresa=empresa)
+        if self.instance and self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+
+        email = cleaned.get("email") or ""
+        documento = cleaned.get("documento") or ""
+        tel_wpp = cleaned.get("tel_wpp") or ""
+
+        # Validamos solo si no están vacíos (igual que las UniqueConstraint condicionales).
+        if email and qs.filter(email=email).exists():
+            self.add_error(
+                "email", "Ya existe un cliente con este email en la empresa.")
+        if documento and qs.filter(documento=documento).exists():
+            self.add_error(
+                "documento", "Ya existe un cliente con este documento en la empresa.")
+        if tel_wpp and qs.filter(tel_wpp=tel_wpp).exists():
+            self.add_error(
+                "tel_wpp", "Ya existe un cliente con este teléfono en la empresa.")
+
+        return cleaned
+
     # ----------------- Guardado -----------------
 
     def save(self, commit=True):
@@ -146,7 +182,38 @@ class CustomerForm(forms.ModelForm):
             obj.creado_por = self.request.user
 
         if commit:
-            obj.full_clean()  # asegura validaciones del modelo
-            obj.save()
+            try:
+                obj.full_clean()  # asegura validaciones del modelo (incluye constraints)
+                obj.save()
+            except ValidationError as ve:
+                # Mapear errores del modelo al formulario y no guardar
+                error_dict = getattr(ve, "message_dict", {}) or {}
+                for field, msgs in error_dict.items():
+                    if field == "__all__":
+                        for m in msgs:
+                            self.add_error(None, m)
+                    else:
+                        for m in msgs:
+                            if field in self.fields:
+                                self.add_error(field, m)
+                            else:
+                                self.add_error(None, f"{field}: {m}")
+                return obj
+            except IntegrityError as ie:
+                # Condición de carrera contra UniqueConstraint: traducimos por nombre de constraint
+                msg = str(ie)
+                if "uniq_cliente_email_por_empresa" in msg:
+                    self.add_error(
+                        "email", "Ya existe un cliente con este email en la empresa.")
+                elif "uniq_cliente_documento_por_empresa" in msg:
+                    self.add_error(
+                        "documento", "Ya existe un cliente con este documento en la empresa.")
+                elif "uniq_cliente_tel_por_empresa" in msg:
+                    self.add_error(
+                        "tel_wpp", "Ya existe un cliente con este teléfono en la empresa.")
+                else:
+                    self.add_error(
+                        None, "No se pudo guardar por una restricción de unicidad.")
+                return obj
             # ModelForm ya guarda M2M si existieran (no hay en este form). No hace falta save_m2m.
         return obj

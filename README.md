@@ -4061,115 +4061,7 @@ apps/saas/
 3. (Opcional) Habilitar que `/saas/upgrade/` haga `change_plan` automático en entornos de demo.
 4. Integrar **pasarela** (Mercado Pago): checkout + webhooks → `confirm_paid_cycle`.
 
-# Módulo 13 — `apps/audit` (Auditoría de Cambios y Accesos)
-
-> **Objetivo del módulo:** Registrar eventos de **auditoría** (quién hizo qué y cuándo) sobre modelos y vistas clave del sistema. En el MVP: traza mínima de **accesos a vistas sensibles** y **mutaciones** (create/update/delete) con un **diff** compacto.
-
----
-
-## 1) Estructura de carpetas/archivos
-
-```
-apps/audit/
-├─ __init__.py
-├─ apps.py                      # Config de la app (name="apps.audit")
-├─ admin.py                     # Registro de AuditEvent en admin
-├─ migrations/
-│  └─ __init__.py
-├─ models.py                    # Modelo: AuditEvent
-├─ urls.py                      # Rutas: listado y detalle (opcional en MVP)
-├─ views.py                     # Vistas server-rendered (listado/filtrado de auditoría)
-├─ middleware.py                # Middleware: registra accesos a vistas marcadas como sensibles
-├─ hooks/
-│  ├─ __init__.py
-│  ├─ django_signals.py         # Conexiones a post_save/post_delete para modelos clave
-│  └─ audit_helpers.py          # Helpers para construir diffs y normalizar payloads
-├─ services/
-│  ├─ __init__.py
-│  └─ audit_log.py              # API interna: write_event(actor, action, object_ref, diff, meta)
-├─ selectors.py                  # Lecturas: filtrar eventos por fecha/usuario/modelo/empresa
-├─ templates/
-│  └─ audit/
-│     ├─ list.html              # Listado con filtros
-│     └─ detail.html            # Vista detalle de un evento (payload/diff)
-└─ static/
-   └─ audit/
-      ├─ audit.css              # Estilos (enfatizar campos cambiados)
-      └─ audit.js               # UX (toggle JSON pretty-print, filtros)
-```
-
-### Rol de cada componente
-
-- **`models.py`**: `AuditEvent(empresa, usuario, accion, tabla, fila_pk, diff_json, meta_json, creado_en)`; `accion ∈ {create, update, delete, access}`.
-- **`middleware.py`**: registra `access` para vistas marcadas (por convención: añadir un atributo en la vista o usar path regex).
-- **`hooks/django_signals.py`**: conecta `post_save`/`post_delete` para modelos críticos (Venta, Pago, Comprobante, PrecioServicio, etc.) y construye el **diff** con `audit_helpers`.
-- **`services/audit_log.py`**: punto único de escritura; asegura normalización y control de tamaño de `diff_json`.
-- **`selectors.py`**: consultas para reportes/filtrado.
-- **`templates/audit/*`**: interfaz simple para inspección (opcional en MVP).
-
----
-
-## 2) Endpoints propuestos
-
-- `GET  /audit/` → Listado de eventos con filtros: fecha (rango), usuario, modelo, acción, empresa/sucursal.
-- `GET  /audit/<uuid:id>/` → Detalle del evento (muestra `diff_json` y `meta_json`).
-
-> Los endpoints son opcionales en MVP si solo se consulta por admin. Se recomiendan para soporte.
-
----
-
-## 3) Contratos de entrada/salida (conceptual)
-
-### Escritura de evento (API interna)
-
-- **Input**:
-  - `actor`: `request.user` o sistema.
-  - `accion`: `create|update|delete|access`.
-  - `tabla` y `fila_pk`: referencia al objeto (o `None` si es acceso general).
-  - `diff_json`: JSON compacto (`{"campo": ["antes", "despues"], ...}` para update; o snapshot mínimo para create/delete).
-  - `meta_json`: JSON con contexto (IP, path, método, empresa_id, sucursal_id, user_agent).
-- **Proceso**: normaliza y persiste `AuditEvent`.
-- **Output**: id de evento para posible correlación con logs técnicos.
-
-### Acceso a vista sensible (middleware)
-
-- **Input**: `request` a rutas marcadas (p.ej. `/ventas/<id>/`, `/pagos/`, `/comprobantes/`).
-- **Proceso**: si cumple criterios, invoca `audit_log.write_event(accion="access", ...)`.
-- **Output**: evento `access` registrado (no afecta respuesta).
-
-### Mutaciones (signals)
-
-- **Input**: `post_save` (`created=True/False`) y `post_delete` de modelos seleccionados.
-- **Proceso**: construir `diff_json` comparando estado anterior/posterior (para update) o snapshot (create/delete).
-- **Output**: evento `create|update|delete` persistido.
-
----
-
-## 4) Integraciones y alcance
-
-- **Modelos iniciales a auditar (MVP)**: `Venta`, `Pago`, `Comprobante`, `PrecioServicio`.
-- **Campos sensibles**: montos, estado, referencias; no registrar datos altamente sensibles (en MVP no hay tarjetas).
-- **Relación con `app_log`**: `AuditEvent` es **funcional**; `app_log` es **técnico**. Pueden correlacionarse por timestamps o IDs si se desea.
-
----
-
-## 5) Seguridad
-
-- Vistas `/audit/` requieren rol `admin` de la **empresa activa**.
-- Sanitizar `meta_json` (no guardar cookies/headers sensibles).
-- Limitar tamaño de `diff_json` para evitar payloads excesivos.
-
----
-
-## 6) Roadmap inmediato
-
-1. Modelo `AuditEvent` y migración.
-2. Servicio `audit_log.write_event(...)`.
-3. Hooks: conectar `post_save/post_delete` de 3–4 modelos clave.
-4. Middleware de `access` para 1–2 rutas sensibles.
-5. Listado/Detalle básico para inspección rápida en soporte.
-
-# Módulo 14 — `apps/app_log` (Observabilidad: Logs Técnicos + Auditoría + Negocio)
+# Módulo 13 — `apps/app_log` (Observabilidad: Logs Técnicos + Auditoría + Negocio)
 
 > **Objetivo:** Proveer observabilidad **profesional y reutilizable**:
 >
@@ -4360,7 +4252,7 @@ _(ver bloque de LOGGING en el settings del proyecto)_
 
 ---
 
-# Módulo 15 — `apps/reports` — Reportes Operativos (v1.1)
+# Módulo 14 — `apps/reports` — Reportes Operativos (v1.1)
 
 Módulo de **reportería y analítica** sobre datos consolidados de _LavaderosApp_. Lee en **solo lectura** las entidades de `sales`, `payments` y `cashbox` para construir **resúmenes operativos diarios**, **consolidados mensuales** y **datasets** para exportación. Respeta **tenancy** (`request.empresa_activa`) y **permisos** via `EmpresaPermRequiredMixin` / `Perm.REPORTS_*`.
 

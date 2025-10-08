@@ -1,6 +1,7 @@
+# apps/customers/views.py
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
-from django.http import Http404
+from django.http import Http404, HttpResponseRedirect
 from django.urls import reverse_lazy
 from django.utils.functional import cached_property
 from django.views.generic import ListView, CreateView, UpdateView, DetailView
@@ -12,7 +13,7 @@ from apps.vehicles.models import Vehiculo
 from .forms import CustomerForm
 from apps.vehicles import selectors as vehicle_selectors
 
-# ✅ permisos/mixins según tu diseño
+# ✅ permisos
 from apps.org.permissions import Perm, has_empresa_perm, EmpresaPermRequiredMixin
 
 
@@ -101,7 +102,8 @@ class CustomerCreateView(EmpresaPermRequiredMixin, TenancyMixin, CreateView):
 
     - Inyectamos request al form para que el form setee empresa/creado_por
       y aplique normalizaciones (tel E.164, lower(email), etc.).
-    - Redirige al listado con mensaje de éxito.
+    - Si hay errores en save() (ValidationError/IntegrityError mapeados al form),
+      NO redirige: re-renderiza el form con errores (HTTP 200).
     """
     template_name = "customers/form.html"
     model = Cliente
@@ -118,14 +120,22 @@ class CustomerCreateView(EmpresaPermRequiredMixin, TenancyMixin, CreateView):
         return kwargs
 
     def form_valid(self, form):
-        resp = super().form_valid(form)
+        """
+        Evitamos usar super().form_valid() para poder inspeccionar si el form
+        acumuló errores durante save() (p.ej. por constraints) y, en ese caso,
+        responder con form_invalid().
+        """
+        self.object = form.save(commit=True)
+        if form.errors:
+            return self.form_invalid(form)
         messages.success(self.request, "Cliente creado correctamente.")
-        return resp
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class CustomerUpdateView(EmpresaPermRequiredMixin, TenancyMixin, UpdateView):
     """
     Edición de cliente. Se asegura de que el objeto pertenezca a la empresa activa.
+    Si save() mapea errores al form, NO redirige.
     """
     template_name = "customers/form.html"
     model = Cliente
@@ -147,9 +157,11 @@ class CustomerUpdateView(EmpresaPermRequiredMixin, TenancyMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        resp = super().form_valid(form)
+        self.object = form.save(commit=True)
+        if form.errors:
+            return self.form_invalid(form)
         messages.success(self.request, "Cliente actualizado.")
-        return resp
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class CustomerDetailView(EmpresaPermRequiredMixin, TenancyMixin, DetailView):

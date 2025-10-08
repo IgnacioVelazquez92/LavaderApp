@@ -1,10 +1,131 @@
-{% if messages %}
-  <div class="my-3">
+{# templates/includes/_messages.html #}
+{# Cambiá top-0 -> bottom-0 si preferís esquina inferior derecha #}
+<div id="toast-host" class="toast-container position-fixed top-0 end-0 p-3" style="z-index:1080;">
+  {% if messages %}
     {% for message in messages %}
-      <div class="alert alert-{{ message.tags }} d-flex align-items-center" role="alert">
-        <div class="flex-grow-1">{{ message }}</div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+      {% with level=message.tags %}
+      <div class="toast 
+                  text-bg-{% if 'success' in level %}success{% elif 'error' in level or 'danger' in level %}danger{% elif 'warning' in level %}warning{% else %}info{% endif %} 
+                  shadow 
+                  toast-level-{% if 'success' in level %}success{% elif 'error' in level or 'danger' in level %}danger{% elif 'warning' in level %}warning{% else %}info{% endif %}"
+           role="status" aria-live="polite" aria-atomic="true"
+           data-duration="4500"
+           style="--toast-duration:4500ms;">
+        <div class="d-flex align-items-start">
+          <div class="toast-body pe-2">
+            {{ message }}
+          </div>
+          <button type="button" class="btn-close {% if 'success' in level or 'info' in level %}btn-close-white{% endif %} me-2 m-auto"
+                  data-bs-dismiss="toast" aria-label="Cerrar"></button>
+        </div>
+        <div class="toast-progress"></div>
       </div>
+      {% endwith %}
     {% endfor %}
-  </div>
-{% endif %}
+  {% endif %}
+</div>
+
+<style>
+  .toast-container { display:flex; flex-direction:column; align-items:end; gap:.75rem; }
+  .toast { overflow:hidden; }
+  .toast-progress{
+    position:absolute; left:0; bottom:0; height:3px; width:100%;
+    background: var(--toast-progress-color, rgba(255,255,255,.85));
+    animation: toast-progress var(--toast-duration, 4000ms) linear forwards;
+    opacity:.9;
+  }
+  .toast:hover .toast-progress{ animation-play-state: paused; }
+  @keyframes toast-progress { from{width:100%} to{width:0%} }
+
+  .toast-level-success { --toast-progress-color:#198754; }
+  .toast-level-danger  { --toast-progress-color:#dc3545; }
+  .toast-level-warning { --toast-progress-color:#ffc107; color:#000; }
+  .toast-level-info    { --toast-progress-color:#0dcaf0; }
+</style>
+
+<script>
+(function(){
+  // Inicializa todos los toasts (autocierre + pausa en hover)
+  function initToasts(){
+    const host = document.getElementById('toast-host');
+    if (!host) return;
+    const nodes = host.querySelectorAll('.toast');
+    if (!nodes.length) return;
+
+    // Requiere Bootstrap para instanciar toasts
+    if (!window.bootstrap || !window.bootstrap.Toast) return false;
+
+    nodes.forEach((el) => {
+      const duration = parseInt(el.getAttribute('data-duration') || 4500, 10);
+      let remaining = duration;
+      let startTs = Date.now();
+      let timerId = null;
+
+      const instance = new bootstrap.Toast(el, { autohide: false });
+
+      const startTimer = () => {
+        clearTimeout(timerId);
+        startTs = Date.now();
+        timerId = setTimeout(() => instance.hide(), remaining);
+        const bar = el.querySelector('.toast-progress');
+        if (bar) bar.style.removeProperty('animation-play-state');
+      };
+
+      const pauseTimer = () => {
+        clearTimeout(timerId);
+        remaining -= (Date.now() - startTs);
+        const bar = el.querySelector('.toast-progress');
+        if (bar) bar.style.setProperty('animation-play-state', 'paused');
+      };
+
+      el.addEventListener('mouseenter', pauseTimer);
+      el.addEventListener('mouseleave', startTimer);
+      el.addEventListener('shown.bs.toast', startTimer);
+      el.addEventListener('hide.bs.toast', () => clearTimeout(timerId));
+
+      instance.show();
+    });
+    return true;
+  }
+
+  // Fallback: si no hay Bootstrap tras varios intentos, renderizamos como alerts estáticos
+  function fallbackToAlerts(){
+    const host = document.getElementById('toast-host');
+    if (!host) return;
+    const toasts = host.querySelectorAll('.toast');
+    if (!toasts.length) return;
+    host.classList.remove('toast-container','position-fixed','top-0','bottom-0','end-0','p-3');
+    host.style.zIndex = '';
+    host.style.position = '';
+    toasts.forEach((el)=>{
+      const is = (cls) => el.className.indexOf(cls) !== -1;
+      const level = is('text-bg-success') ? 'success' :
+                    is('text-bg-danger')  ? 'danger'  :
+                    is('text-bg-warning') ? 'warning' : 'info';
+      el.outerHTML = '<div class="alert alert-'+level+' alert-dismissible fade show my-2" role="alert">'
+        + el.querySelector('.toast-body')?.innerHTML
+        + '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>'
+        + '</div>';
+    });
+  }
+
+  // Esperamos DOM listo y luego intentamos inicializar.
+  document.addEventListener('DOMContentLoaded', function(){
+    let tries = 0;
+    const maxTries = 10;          // ~2s si interval = 200ms
+    const interval = 200;
+
+    function attempt(){
+      if (initToasts()) return;   // listo
+      tries += 1;
+      if (tries < maxTries) {
+        setTimeout(attempt, interval);
+      } else {
+        // Bootstrap no disponible: fallback a alerts para no perder mensajes
+        fallbackToAlerts();
+      }
+    }
+    attempt();
+  });
+})();
+</script>
