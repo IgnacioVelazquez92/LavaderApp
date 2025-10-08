@@ -9,6 +9,7 @@
       {% trans "Nuevo servidor" %}
     </a>
   {% endif %}
+
 </div>
 
 <table class="table table-sm align-middle">
@@ -91,4 +92,9 @@
     {% endfor %}
   </tbody>
 </table>
+
+<p class="small text-muted mt-3">
+  ¿Usás Gmail y no sabés cómo generar una contraseña de aplicación?
+  <a href="{% url 'notifications:smtp_guide' %}">Seguí esta guía paso a paso</a>.
+</p>
 {% endblock %}

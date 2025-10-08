@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import TemplateView
 from .views import (
     TemplateListView,
     TemplateCreateView,
@@ -44,4 +45,7 @@ urlpatterns = [
          EmailServerDeleteView.as_view(), name="emailserver_delete"),
     path("emailservers/<int:pk>/probar/",
          emailserver_test_connection_view, name="emailserver_test"),
+
+    path("guia-doble-factor/", TemplateView.as_view(
+         template_name="notifications/guia_doble_factor.html"), name="smtp_guide"),
 ]

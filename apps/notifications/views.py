@@ -194,7 +194,7 @@ class TemplateUpdateView(EmpresaPermRequiredMixin, UpdateView):
 
 class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
     """
-    GET: formulario con plantillas ACTIVAS (email y whatsapp) + destinatario sugerido según canal.
+    GET: formulario con plantillas ACTIVAS (email y whatsapp) + sugerencias de destinatario por canal.
     POST: usa dispatcher.enviar_desde_venta() (valida estado=terminado),
           registra Log y:
             - canal=email   -> envía real por SMTP y redirige con mensaje de éxito.
@@ -204,13 +204,17 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
     template_name = "notifications/send_from_sale.html"
     form_class = SendFromSaleForm
 
-    # --- helpers internos ---
+    # ----------------------
+    # Helpers internos
+    # ----------------------
     def _venta_queryset(self):
         # Import local para evitar ciclos
         from apps.sales.models import Venta
         return Venta.objects.filter(empresa=self.empresa)
 
-    # --- lifecycle ---
+    # ----------------------
+    # Lifecycle
+    # ----------------------
     def dispatch(self, request, *args, **kwargs):
         self.venta = get_object_or_404(
             self._venta_queryset(), pk=kwargs.get("venta_id"))
@@ -228,7 +232,6 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
         kwargs = super().get_form_kwargs()
 
         # Plantillas ACTIVAS de ambos canales.
-        # Si no tenés un selector unificado, uní dos querysets:
         try:
             qs_email = selectors.plantillas_activas_email(self.empresa.id)
             qs_wapp = selectors.plantillas_activas_whatsapp(self.empresa.id)
@@ -237,10 +240,13 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
             # Fallback si tenés un selector único
             qs_plantillas = selectors.plantillas_activas(self.empresa.id)
 
-        # Sugerencias de destinatario (preferimos email si existe; si no, wpp)
+        # Sugerencias de destinatario por canal
         cliente = getattr(self.venta, "cliente", None)
-        suggested_email = getattr(cliente, "email", "") or ""
-        suggested_wpp = getattr(cliente, "tel_wpp", "") or ""
+        suggested_email = (getattr(cliente, "email", "") or "").strip()
+        # Usá el campo correcto de tu modelo (tel_wpp / telefono / phone ...)
+        suggested_wpp = (getattr(cliente, "tel_wpp", "") or "").strip()
+
+        # Inicial genérica para GET (preferimos email si hay; sino wpp; sino vacío)
         initial_dest = suggested_email or suggested_wpp or ""
 
         kwargs.update({
@@ -248,10 +254,15 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
             "venta": self.venta,
             "queryset_plantillas": qs_plantillas,
             "initial_destinatario": initial_dest,
+            # Pasamos también los hints por canal para que el template/JS los use
+            "suggested_email": suggested_email,
+            "suggested_wpp": suggested_wpp,
         })
         return kwargs
 
-    # --- POST ok ---
+    # ----------------------
+    # POST OK
+    # ----------------------
     def form_valid(self, form: SendFromSaleForm):
         plantilla: PlantillaNotif = form.cleaned_data["plantilla"]
         destinatario = form.cleaned_data["destinatario"]
@@ -285,18 +296,18 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
             return super().form_invalid(form)
 
         # Resultado por canal
-        estado = getattr(log, "estado", "").lower()
+        estado = (getattr(log, "estado", "") or "").lower()
         if "error" in estado:
-            msg = (getattr(log, "error_msg", "") or _(
-                "No se pudo completar el envío."))
+            msg = getattr(log, "error_msg", "") or _(
+                "No se pudo completar el envío.")
             messages.error(self.request, msg)
             return super().form_invalid(form)
 
         if canal == Canal.EMAIL:
             messages.success(self.request, _("Email enviado correctamente."))
-            return self.redirect_success()
+            return redirect(self.get_success_url())
         else:
-            # WhatsApp: deep link en misma página (como tu MVP)
+            # WhatsApp: deep link en misma página (MVP)
             wa_url = dispatcher.build_whatsapp_web_url(
                 log.destinatario, log.cuerpo_renderizado)
             messages.success(self.request, _(
@@ -309,28 +320,34 @@ class SendFromSaleView(EmpresaPermRequiredMixin, TenancyMixin, FormView):
             })
             return self.render_to_response(context)
 
-    def redirect_success(self):
-        return super().form_valid(self.get_form())  # respeta get_success_url()
-
-    # --- POST inválido ---
+    # ----------------------
+    # POST inválido
+    # ----------------------
     def form_invalid(self, form):
         messages.error(self.request, _("Revisá los errores en el formulario."))
         return super().form_invalid(form)
 
-    # --- contexto común ---
+    # ----------------------
+    # Contexto común
+    # ----------------------
     def get_context_data(self, **kwargs):
         """
         Garantiza 'venta' y flags SIEMPRE en el contexto (GET/POST).
-        Agrega bandera smtp_activo para UX (banner/tooltip en template).
+        Agrega bandera smtp_activo y las sugerencias por canal para UX.
         """
         ctx = super().get_context_data(**kwargs)
         emp = self.empresa
         user = self.request.user
+        cliente = getattr(self.venta, "cliente", None)
 
         ctx.setdefault("venta", getattr(self, "venta", None))
         ctx.setdefault("was_prepared", False)
         ctx.setdefault("wa_url", "")
         ctx.setdefault("cuerpo_renderizado", "")
+
+        # Sugerencias por canal disponibles para el template/JS
+        ctx["suggested_email"] = (getattr(cliente, "email", "") or "").strip()
+        ctx["suggested_wpp"] = (getattr(cliente, "tel_wpp", "") or "").strip()
 
         ctx["empresa"] = emp
         ctx["puede_enviar"] = has_empresa_perm(user, emp, Perm.NOTIF_SEND)

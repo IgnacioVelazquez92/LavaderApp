@@ -4,7 +4,8 @@ Forms de apps.notifications
 
 - TemplateForm: ABM de plantillas (únicas por empresa + validaciones simples).
 - SendFromSaleForm: Enviar notificación desde una venta (elige plantilla activa,
-  infiere canal/destinatario y valida según canal —email o E.164—).
+  valida destinatario según el canal de la plantilla —email o E.164— y admite
+  sugerencias por canal para autocompletar desde el template/JS).
 - PreviewForm: Render de vista previa con/sin venta real.
 
 Convenciones:
@@ -33,7 +34,7 @@ E164_RE = re.compile(r"^\+?[1-9]\d{6,14}$")  # ITU-T E.164, 7–15 dígitos
 # ----------------------------
 def _bootstrapify(form: forms.Form) -> None:
     """Inyecta clases Bootstrap 5 a todos los campos del form."""
-    for name, field in form.fields.items():
+    for _, field in form.fields.items():
         widget = field.widget
         if isinstance(widget, (forms.Select, forms.SelectMultiple)):
             widget.attrs["class"] = (widget.attrs.get(
@@ -65,10 +66,12 @@ def _validate_destinatario_por_canal(*, canal: str, destinatario: str) -> None:
         if not EMAIL_RE.match(dest):
             raise ValidationError(
                 "El email del destinatario no es válido (formato).", code="invalid_email_format")
+
     elif canal == Canal.WHATSAPP:
         if not E164_RE.match(dest):
             raise ValidationError(
                 "El WhatsApp debe estar en formato E.164 (ej.: +549381XXXXXXX).", code="invalid_e164")
+
     else:
         raise ValidationError(
             "Canal no soportado en el MVP.", code="unsupported_channel")
@@ -94,7 +97,8 @@ class TemplateForm(forms.ModelForm):
         widgets = {
             "cuerpo_tpl": forms.Textarea(
                 attrs={
-                    "placeholder": "Ej.: Hola {{cliente.nombre}}, tu auto ({{vehiculo.patente}}) ya está listo para retirar..."}
+                    "placeholder": "Ej.: Hola {{cliente.nombre}}, tu auto ({{vehiculo.patente}}) ya está listo para retirar..."
+                }
             ),
             "asunto_tpl": forms.TextInput(
                 attrs={
@@ -174,7 +178,11 @@ class TemplateForm(forms.ModelForm):
 # SendFromSaleForm
 # ----------------------------
 class SendFromSaleForm(forms.Form):
-    # (igual que antes, no tocamos nada)
+    """
+    Envío desde venta. El canal se infiere de la PLANTILLA elegida.
+    - Valida 'destinatario' según el canal de esa plantilla.
+    - Admite sugerencias por canal (email/tel) para uso desde template/JS.
+    """
     plantilla = forms.ModelChoiceField(
         queryset=PlantillaNotif.objects.none(),
         label="Plantilla",
@@ -183,7 +191,9 @@ class SendFromSaleForm(forms.Form):
     destinatario = forms.CharField(
         label="Destinatario",
         max_length=255,
-        help_text="Email (para canal email) o teléfono E.164 (para canal WhatsApp).",
+        help_text="Email (para canal Email) o teléfono E.164 (para canal WhatsApp).",
+        widget=forms.TextInput(
+            attrs={"placeholder": "Se autocompletará según el canal de la plantilla…"}),
     )
     nota_extra = forms.CharField(
         label="Nota adicional (opcional)",
@@ -196,13 +206,22 @@ class SendFromSaleForm(forms.Form):
         max_length=80,
         required=False,
         help_text="Se almacenará en el Log. En el MVP no evita duplicados.",
+        widget=forms.HiddenInput,  # suele venir generado/omitido
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
         self.empresa = kwargs.pop("empresa", None)
         self.venta = kwargs.pop("venta", None)
         qs_plantillas = kwargs.pop("queryset_plantillas", None)
         initial_destinatario = kwargs.pop("initial_destinatario", None)
+        # Sugerencias por canal (para que el template/JS pueda usarlas)
+        self.suggested_email = kwargs.pop("suggested_email", "") or ""
+        self.suggested_wpp = kwargs.pop("suggested_wpp", "") or ""
+
         super().__init__(*args, **kwargs)
 
         if self.empresa is None or self.venta is None:
@@ -211,6 +230,7 @@ class SendFromSaleForm(forms.Form):
         if qs_plantillas is None:
             qs_plantillas = PlantillaNotif.objects.filter(
                 empresa=self.empresa, activo=True)
+
         self.fields["plantilla"].queryset = qs_plantillas.order_by("clave")
 
         _bootstrapify(self)
@@ -229,9 +249,12 @@ class SendFromSaleForm(forms.Form):
         return plantilla
 
     def clean_destinatario(self) -> str:
+        """
+        Valida el destinatario según el canal de la plantilla elegida.
+        Si no hay plantilla (caso límite), solo exige que no esté vacío.
+        """
         data = self.cleaned_data
-        plantilla: PlantillaNotif | None = data.get(
-            "plantilla") or self.fields["plantilla"].queryset.first()
+        plantilla: PlantillaNotif | None = data.get("plantilla") or None
         destinatario: str = (data.get("destinatario") or "").strip()
 
         if not plantilla:
@@ -244,6 +267,8 @@ class SendFromSaleForm(forms.Form):
             canal=plantilla.canal, destinatario=destinatario)
         return destinatario
 
+    # Utilidad opcional: si el campo está vacío, intentar inferir según canal
+    # (si querés usarla desde la vista antes de is_valid())
     def infer_destinatario_si_vacio(self) -> None:
         if self["destinatario"].value():
             return
@@ -258,11 +283,13 @@ class SendFromSaleForm(forms.Form):
 
         cliente = getattr(self.venta, "cliente", None)
         if plantilla.canal == Canal.EMAIL:
-            val = getattr(cliente, "email", "") or ""
+            val = getattr(cliente, "email", "") or self.suggested_email
         elif plantilla.canal == Canal.WHATSAPP:
-            val = getattr(cliente, "tel_wpp", "") or ""
+            # Ajustá el nombre del campo de teléfono según tu modelo (tel_wpp / telefono / phone)
+            val = getattr(cliente, "tel_wpp", "") or self.suggested_wpp
         else:
             val = ""
+
         if val:
             self.fields["destinatario"].initial = val
 

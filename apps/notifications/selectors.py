@@ -47,10 +47,20 @@ def logs_por_rango(
     return qs.order_by("-enviado_en")
 
 
-def plantillas_activas_whatsapp(empresa_id):
-    return (PlantillaNotif.objects
-            .filter(empresa_id=empresa_id, activo=True, canal=Canal.WHATSAPP)
-            .order_by("clave"))
+def plantillas_activas_whatsapp(empresa_id: int):
+    return (
+        PlantillaNotif.objects
+        .filter(empresa_id=empresa_id, activo=True, canal=Canal.WHATSAPP)
+        .order_by("clave")
+    )
+
+
+def plantillas_activas_email(empresa_id: int):
+    return (
+        PlantillaNotif.objects
+        .filter(empresa_id=empresa_id, activo=True, canal=Canal.EMAIL)
+        .order_by("clave")
+    )
 
 
 def get_smtp_activo(empresa) -> EmailServer | None:

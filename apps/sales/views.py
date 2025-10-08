@@ -321,31 +321,46 @@ class VentaDetailView(EmpresaPermRequiredMixin, DetailView):
             }
         )
 
-        # ---------- Notificaciones (WhatsApp) ----------
+        # --- Notificaciones (canales disponibles) ---
         empresa = self.empresa_activa
-        has_wa_tpl = (
-            notif_selectors.plantillas_activas_whatsapp(
-                empresa.id).exists() if empresa else False
+
+        has_wa_tpl = notif_selectors.plantillas_activas_whatsapp(
+            empresa.id).exists() if empresa else False
+        has_email_tpl = notif_selectors.plantillas_activas_email(
+            empresa.id).exists() if empresa else False
+
+        # SMTP activo para email real
+        # si ya lo tenés importado, omití esta línea
+        from apps.notifications.selectors import has_smtp_activo
+        smtp_act = has_smtp_activo(empresa) if empresa else False
+
+        # Puede notificar si la venta está TERMINADO y hay al menos un canal utilizable
+        can_notify_any = (
+            venta.estado == VentaEstado.TERMINADO
+            and (
+                (has_email_tpl and smtp_act)  # Email disponible y SMTP OK
+                or has_wa_tpl                 # o WhatsApp disponible
+            )
         )
-        can_notify = (venta.estado == VentaEstado.TERMINADO) and has_wa_tpl
 
         reasons = []
         if venta.estado != VentaEstado.TERMINADO:
             reasons.append("La venta no está en estado TERMINADO.")
-        if not has_wa_tpl:
+        if not (has_email_tpl or has_wa_tpl):
             reasons.append(
-                "No hay plantillas de WhatsApp activas en la empresa.")
+                "No hay plantillas activas (Email o WhatsApp) en la empresa.")
+        elif has_email_tpl and not smtp_act:
+            reasons.append(
+                "Hay plantillas de Email, pero no hay un SMTP activo configurado.")
 
-        ctx.update(
-            {
-                "has_whatsapp_templates": has_wa_tpl,
-                "can_notify": can_notify,
-                "notify_url": reverse(
-                    "notifications:send_from_sale", kwargs={"venta_id": str(venta.id)}
-                ),
-                "notify_disabled_reason": " ".join(reasons) if reasons else "",
-            }
-        )
+        ctx.update({
+            "has_whatsapp_templates": has_wa_tpl,
+            "has_email_templates": has_email_tpl,
+            "smtp_activo": smtp_act,
+            "can_notify": can_notify_any,  # reutilizamos el nombre que ya usabas
+            "notify_url": reverse("notifications:send_from_sale", kwargs={"venta_id": str(venta.id)}),
+            "notify_disabled_reason": " ".join(reasons) if reasons else "",
+        })
 
         # ---------- Flags UI por permiso ----------
         u, emp = self.request.user, empresa

@@ -19,6 +19,29 @@
     </div>
   </div>
 
+  {# Chips con datos del cliente para referencia rápida #}
+  <div class="mb-3">
+    {% if suggested_email %}
+      <span class="badge bg-light text-dark border me-2">
+        <i class="bi bi-envelope me-1"></i>{{ suggested_email }}
+      </span>
+    {% else %}
+      <span class="badge bg-light text-dark border me-2">
+        <i class="bi bi-envelope me-1"></i>Sin email
+      </span>
+    {% endif %}
+
+    {% if suggested_wpp %}
+      <span class="badge bg-light text-dark border">
+        <i class="bi bi-whatsapp me-1"></i>{{ suggested_wpp }}
+      </span>
+    {% else %}
+      <span class="badge bg-light text-dark border">
+        <i class="bi bi-whatsapp me-1"></i>Sin WhatsApp
+      </span>
+    {% endif %}
+  </div>
+
   {# Banner SMTP #}
   {% if not smtp_activo %}
     <div class="alert alert-warning d-flex align-items-center" role="alert">
@@ -46,9 +69,18 @@
           <div class="alert alert-danger">{{ form.non_field_errors }}</div>
         {% endif %}
 
+        {# ============ PLANTILLA (render manual para inyectar data-canal) ============ #}
         <div class="mb-3">
-          <label for="{{ form.plantilla.id_for_label }}" class="form-label fw-semibold">Plantilla</label>
-          {{ form.plantilla }}
+          <label for="id_plantilla" class="form-label fw-semibold">Plantilla</label>
+          <select name="plantilla" id="id_plantilla" class="form-select" required>
+            <option value="">— Elegí una plantilla —</option>
+            {% for p in form.fields.plantilla.queryset %}
+              <option value="{{ p.id }}" data-canal="{{ p.canal }}"
+                {% if form.data.plantilla|stringformat:"s" == p.id|stringformat:"s" or form.initial.plantilla == p.id %}selected{% endif %}>
+                {{ p.clave }}{% if not p.activo %} (inactiva){% endif %}
+              </option>
+            {% endfor %}
+          </select>
           {% if form.plantilla.errors %}
             <div class="invalid-feedback d-block">{{ form.plantilla.errors|striptags }}</div>
           {% else %}
@@ -58,18 +90,26 @@
           {% endif %}
         </div>
 
-        <div class="mb-3">
-          <label for="{{ form.destinatario.id_for_label }}" class="form-label fw-semibold">Destinatario</label>
+        {# ============ DESTINATARIO ============ #}
+        <div class="mb-2">
+          <label for="{{ form.destinatario.id_for_label }}" class="form-label fw-semibold">
+            Destinatario <small class="text-muted" id="destHelp"></small>
+          </label>
           {{ form.destinatario }}
           {% if form.destinatario.errors %}
             <div class="invalid-feedback d-block">{{ form.destinatario.errors|striptags }}</div>
           {% else %}
             <div class="form-text">
-              Si la plantilla es <b>Email</b>, usá un correo válido. Si es <b>WhatsApp</b>, usá formato E.164 (ej.: +549381XXXXXXX).
+              Si la plantilla es <b>Email</b>, ingresá un correo válido. Si es <b>WhatsApp</b>, usá formato E.164 (ej.: +549381XXXXXXX).
             </div>
           {% endif %}
+          <div id="noDataAlert" class="alert alert-warning mt-2 py-2 d-none">
+            No encontramos el dato del cliente para este canal.
+            <span class="small text-muted">Podés ingresarlo manualmente arriba.</span>
+          </div>
         </div>
 
+        {# ============ NOTA EXTRA ============ #}
         <div class="mb-3">
           <label for="{{ form.nota_extra.id_for_label }}" class="form-label fw-semibold">Nota adicional (opcional)</label>
           {{ form.nota_extra }}
@@ -125,4 +165,58 @@
   });
 </script>
 {% endif %}
+
+{# ============ UX JS: autocompletar destinatario según canal de la plantilla ============ #}
+<script>
+  // Sugerencias desde el contexto
+  const SUG_EMAIL = "{{ suggested_email|escapejs }}";
+  const SUG_WAPP  = "{{ suggested_wpp|escapejs }}";
+
+  const selPlantilla = document.getElementById('id_plantilla');
+  const inpDest      = document.getElementById('id_destinatario');
+  const help         = document.getElementById('destHelp');
+  const noDataAlert  = document.getElementById('noDataAlert');
+
+  // Guardamos el último valor “auto” aplicado para no pisar ediciones del usuario
+  let lastAutoValue = null;
+
+  function applyChannelHints(canal) {
+    if (canal === 'email') {
+      help.textContent = '(email del cliente)';
+      inpDest.placeholder = 'nombre@dominio.com';
+      const candidate = SUG_EMAIL;
+      if (!inpDest.value || inpDest.value === lastAutoValue) {
+        inpDest.value = candidate || '';
+        lastAutoValue = candidate || '';
+      }
+      noDataAlert.classList.toggle('d-none', !!candidate);
+    } else if (canal === 'whatsapp') {
+      help.textContent = '(teléfono en formato +549...)';
+      inpDest.placeholder = '+5493811234567';
+      const candidate = SUG_WAPP;
+      if (!inpDest.value || inpDest.value === lastAutoValue) {
+        inpDest.value = candidate || '';
+        lastAutoValue = candidate || '';
+      }
+      noDataAlert.classList.toggle('d-none', !!candidate);
+    } else {
+      help.textContent = '';
+      noDataAlert.classList.add('d-none');
+    }
+  }
+
+  // Al cambiar plantilla, detectamos canal y aplicamos hints
+  selPlantilla.addEventListener('change', () => {
+    const opt = selPlantilla.selectedOptions[0];
+    const canal = opt ? opt.dataset.canal : '';
+    applyChannelHints(canal);
+    // (Opcional) acá podrías fetch-ears la Preview si querés actualizarla dinámicamente
+  });
+
+  // Si venís de POST inválido (con una plantilla seleccionada), aplicá los hints
+  window.addEventListener('DOMContentLoaded', () => {
+    const opt = selPlantilla.selectedOptions[0];
+    if (opt && opt.dataset.canal) applyChannelHints(opt.dataset.canal);
+  });
+</script>
 {% endblock %}

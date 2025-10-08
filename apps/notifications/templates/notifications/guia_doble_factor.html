@@ -1,0 +1,67 @@
+{% extends "base_auth.html" %}
+{% load static %}
+
+{% block title %}Guía: Activar Doble Factor en Google{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h1 class="h4 mb-1">Configurar Doble Factor y Contraseña de Aplicación (Gmail)</h1>
+      <p class="text-muted mb-0">Guía paso a paso para habilitar el envío de correos desde LavaderosApp usando tu cuenta de Google.</p>
+    </div>
+    <div>
+      <a href="{% url 'notifications:emailserver_list' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver a servidores SMTP
+      </a>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <ol class="list-group list-group-numbered list-group-flush">
+        <li class="list-group-item">
+          Iniciá sesión en tu cuenta de <a href="https://myaccount.google.com/" target="_blank" rel="noopener">Google</a>.
+        </li>
+        <li class="list-group-item">
+          En el menú lateral izquierdo, hacé clic en <strong>Seguridad</strong>.
+        </li>
+        <li class="list-group-item">
+          Activá la opción <strong>Verificación en dos pasos</strong>.<br>
+          <small class="text-muted">Google te pedirá confirmar tu identidad (celular o app Google Authenticator).</small><br>
+          <a class="btn btn-sm btn-outline-primary mt-2" href="https://myaccount.google.com/security-checkup" target="_blank" rel="noopener">
+            Ir a Seguridad Google
+          </a>
+        </li>
+        <li class="list-group-item">
+          Una vez activada la verificación en dos pasos, volvés a <strong>Seguridad → Contraseñas de aplicaciones</strong>.<br>
+          <small class="text-muted">Si no ves esa opción, revisá que la verificación en dos pasos esté correctamente activada.</small><br>
+          <a class="btn btn-sm btn-outline-primary mt-2" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">
+            Abrir página de contraseñas de aplicación
+          </a>
+        </li>
+        <li class="list-group-item">
+          Elegí el tipo de app como <strong>Correo</strong> y el dispositivo como <strong>Otro</strong>. Escribí “LavaderosApp”.
+        </li>
+        <li class="list-group-item">
+          Google generará una contraseña de 16 caracteres. Copiala y pegala en el campo <strong>Contraseña SMTP</strong> al configurar tu servidor en LavaderosApp.
+          <div class="alert alert-warning small mt-2 mb-0">
+            ⚠️ Esa contraseña reemplaza tu contraseña normal de Gmail. No la compartas con nadie.
+          </div>
+        </li>
+        <li class="list-group-item">
+          Guardá los cambios en LavaderosApp y usá el botón <strong>Probar conexión</strong> para verificar que el envío funcione correctamente.
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="alert alert-info mt-3 d-flex align-items-start">
+    <i class="bi bi-info-circle-fill me-2"></i>
+    <div>
+      <strong>Nota:</strong> Si preferís usar otro proveedor (Outlook, Yahoo, etc.), también podés hacerlo configurando su respectivo
+      servidor SMTP. Solo asegurate de habilitar el acceso mediante contraseña de aplicación o permitir apps seguras.
+    </div>
+  </div>
+</div>
+{% endblock %}
