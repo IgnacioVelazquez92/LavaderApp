@@ -1,0 +1,48 @@
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold"><i class="bi bi-whatsapp me-1"></i> Notificaciones</span>
+      {% if has_whatsapp_templates %}
+        <span class="badge text-bg-success">Plantillas WA disponibles</span>
+      {% else %}
+        <span class="badge text-bg-secondary">Sin plantillas WA</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if can_notify %}
+        <div class="alert alert-success d-flex align-items-center" role="alert">
+          <i class="bi bi-check-circle-fill me-2"></i>
+          La venta está <strong>TERMINADO</strong>. Podés notificar al cliente por WhatsApp.
+          {% if venta.saldo_pendiente > 0 %}
+            <div class="small text-muted ms-1">(Saldo pendiente: ${{ venta.saldo_pendiente }})</div>
+          {% endif %}
+        </div>
+        <div class="d-grid">
+          <a class="btn btn-success" href="{{ notify_url }}">
+            <i class="bi bi-send-fill"></i> Notificar por WhatsApp
+          </a>
+        </div>
+      {% else %}
+        <div class="alert alert-warning d-flex align-items-start" role="alert">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>
+          <div>
+            <div class="fw-semibold mb-1">No se puede notificar todavía</div>
+            <div class="small text-muted">
+              {{ notify_disabled_reason|default:"Revisá el estado de la venta o cargá una plantilla de WhatsApp." }}
+            </div>
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <a class="btn btn-outline-secondary btn-sm" href="{% url 'notifications:templates_list' %}">
+            <i class="bi bi-ui-checks-grid"></i> Gestionar plantillas
+          </a>
+          {% if venta.estado != "terminado" %}
+            <button class="btn btn-outline-secondary btn-sm" type="button" disabled>
+              <i class="bi bi-gear-wide-connected"></i> Esperando TERMINADO
+            </button>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  

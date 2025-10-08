@@ -1,0 +1,59 @@
+
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+    <h1 class="h4 mb-0">Venta</h1>
+  
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'sales:list' %}">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+  
+      {# Iniciar trabajo #}
+      {% if puede_iniciar_trabajo %}
+        {% if puede_iniciar %}
+          <button type="button" class="btn btn-outline-primary"
+                  data-bs-toggle="modal"
+                  data-bs-target="#startVentaModal{{ venta.pk }}">
+            <i class="bi bi-play-fill"></i> Iniciar trabajo
+          </button>
+        {% else %}
+          <button type="button" class="btn btn-outline-primary" disabled
+                  data-bs-toggle="tooltip" data-bs-title="No tenés permisos para iniciar.">
+            <i class="bi bi-play-fill"></i> Iniciar trabajo
+          </button>
+        {% endif %}
+      {% endif %}
+  
+      {# Finalizar #}
+      {% if puede_finalizar_trabajo %}
+        {% if puede_finalizar %}
+          <button type="button" class="btn btn-success"
+                  data-bs-toggle="modal"
+                  data-bs-target="#finalizeVentaModal{{ venta.pk }}">
+            <i class="bi bi-flag-checkered"></i> Marcar terminado
+          </button>
+        {% else %}
+          <button type="button" class="btn btn-success" disabled
+                  data-bs-toggle="tooltip" data-bs-title="No tenés permisos para finalizar.">
+            <i class="bi bi-flag-checkered"></i> Marcar terminado
+          </button>
+        {% endif %}
+      {% endif %}
+  
+      {# Cancelar #}
+      {% if venta.estado in "borrador,en_proceso,terminado" %}
+        {% if puede_cancelar %}
+          <button type="button" class="btn btn-outline-danger"
+                  data-bs-toggle="modal"
+                  data-bs-target="#cancelVentaModal{{ venta.pk }}">
+            <i class="bi bi-x-circle"></i> Cancelar
+          </button>
+        {% else %}
+          <button type="button" class="btn btn-outline-danger" disabled
+                  data-bs-toggle="tooltip" data-bs-title="No tenés permisos para cancelar.">
+            <i class="bi bi-x-circle"></i> Cancelar
+          </button>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  

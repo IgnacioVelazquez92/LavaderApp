@@ -1,0 +1,32 @@
+{# apps/sales/templates/sales/detail/_modal_start.html #}
+{% if puede_iniciar_trabajo and puede_iniciar %}
+<div class="modal fade" id="startVentaModal{{ venta.pk }}" tabindex="-1"
+     aria-labelledby="startVentaModalLabel{{ venta.pk }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="startVentaModalLabel{{ venta.pk }}">Iniciar trabajo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex align-items-start">
+          <i class="bi bi-info-circle-fill text-primary fs-4 me-2"></i>
+          <div>
+            <p class="h6 mb-1"><strong>Cliente:</strong> {{ venta.cliente }}</p>
+            <p class="mb-0 text-muted small">La venta pasará a <strong>EN PROCESO</strong>.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+        <form method="post" action="{% url 'sales:start' pk=venta.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline-primary">
+            <i class="bi bi-play-fill"></i> Iniciar trabajo
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,80 @@
+
+<div class="card mb-2">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-muted">ID:</span>
+          <code class="small">{{ venta.pk }}</code>
+        </div>
+  
+        <div class="d-flex flex-wrap gap-2">
+          {# Estado (proceso) #}
+          {% if venta.estado == "borrador" %}
+            <span class="badge text-bg-secondary">Borrador</span>
+          {% elif venta.estado == "en_proceso" %}
+            <span class="badge text-bg-warning">En proceso</span>
+          {% elif venta.estado == "terminado" %}
+            <span class="badge text-bg-info">Terminado</span>
+          {% elif venta.estado == "cancelado" %}
+            <span class="badge text-bg-danger">Cancelado</span>
+          {% else %}
+            <span class="badge text-bg-light">—</span>
+          {% endif %}
+  
+          {# Pago #}
+          {% if venta.payment_status == "pagada" %}
+            <span class="badge text-bg-success">Pagada</span>
+          {% elif venta.payment_status == "parcial" %}
+            <span class="badge text-bg-warning">Pago parcial</span>
+          {% else %}
+            <span class="badge text-bg-secondary">No pagada</span>
+          {% endif %}
+  
+          {# Saldo #}
+          {% if venta.saldo_pendiente == 0 %}
+            <span class="badge text-bg-success">Saldo cubierto</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Saldo pendiente</span>
+          {% endif %}
+        </div>
+      </div>
+  
+      {% if venta.estado == "cancelado" %}
+        <div class="alert alert-danger d-flex align-items-start" role="alert">
+          <i class="bi bi-x-octagon-fill me-2 fs-5"></i>
+          <div>
+            <div class="fw-semibold">Venta cancelada</div>
+            <div class="small">No se pueden registrar pagos ni emitir comprobantes sobre ventas canceladas.</div>
+          </div>
+        </div>
+      {% endif %}
+  
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <div class="small text-muted">Cliente</div>
+          <div>{{ venta.cliente }}</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-muted">Vehículo</div>
+          <div>{{ venta.vehiculo }}</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-muted">Sucursal</div>
+          <div>{{ venta.sucursal }}</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="small text-muted">Creado</div>
+          <div>{{ venta.creado|date:"d/m/Y H:i" }}</div>
+        </div>
+      </div>
+  
+      {% if venta.notas %}
+        <hr>
+        <div>
+          <div class="small text-muted mb-1">Notas</div>
+          <div class="border rounded p-2 bg-light text-break">{{ venta.notas|linebreaksbr }}</div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  

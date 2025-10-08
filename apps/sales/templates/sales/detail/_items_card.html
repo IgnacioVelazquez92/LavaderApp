@@ -1,0 +1,36 @@
+{# apps/sales/templates/sales/detail/_items_card.html #}
+<div class="card mb-2">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Ítems</span>
+      {% if venta.estado == "borrador" or venta.estado == "en_proceso" %}
+        <span class="badge text-bg-light">Edición habilitada</span>
+      {% else %}
+        <span class="badge text-bg-light">Edición bloqueada</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Servicio</th>
+              <th class="text-end">Subtotal</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in venta_items %}
+              {% include "sales/_item_row.html" with item=item venta=venta %}
+            {% empty %}
+              <tr>
+                <td colspan="3">
+                  <div class="alert alert-info mb-0">Aún no hay ítems.</div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  

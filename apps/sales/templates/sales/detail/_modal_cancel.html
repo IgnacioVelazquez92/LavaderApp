@@ -1,0 +1,32 @@
+{# apps/sales/templates/sales/detail/_modal_cancel.html #}
+{% if venta.estado == "borrador" or venta.estado == "en_proceso" or venta.estado == "terminado" %}
+  {% if puede_cancelar %}
+  <div class="modal fade" id="cancelVentaModal{{ venta.pk }}" tabindex="-1"
+       aria-labelledby="cancelVentaModalLabel{{ venta.pk }}" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="cancelVentaModalLabel{{ venta.pk }}">Cancelar venta</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex align-items-start">
+            <i class="bi bi-exclamation-triangle-fill text-danger fs-4 me-2"></i>
+            <div>
+              <p class="h6 mb-1"><strong>Cliente:</strong> {{ venta.cliente }}</p>
+              <p class="mb-0 text-muted small">Esta acción no se puede deshacer.</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+          <form method="post" action="{% url 'sales:cancel' pk=venta.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Cancelar venta</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+{% endif %}

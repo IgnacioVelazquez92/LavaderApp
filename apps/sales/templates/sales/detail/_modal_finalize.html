@@ -1,0 +1,30 @@
+{# apps/sales/templates/sales/detail/_modal_finalize.html #}
+{% if puede_finalizar_trabajo and puede_finalizar %}
+<div class="modal fade" id="finalizeVentaModal{{ venta.pk }}" tabindex="-1"
+     aria-labelledby="finalizeVentaModalLabel{{ venta.pk }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="finalizeVentaModalLabel{{ venta.pk }}">Marcar terminado</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex align-items-start">
+          <i class="bi bi-exclamation-triangle-fill text-warning fs-4 me-2"></i>
+          <div>
+            <p class="h6 mb-1"><strong>Cliente:</strong> {{ venta.cliente }}</p>
+            <p class="mb-0 text-muted small">Al marcar <strong>TERMINADO</strong>, ya no se podrán agregar servicios (aunque aún falte pagar).</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Volver</button>
+        <form method="post" action="{% url 'sales:finalize' pk=venta.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success">Marcar terminado</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

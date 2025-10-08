@@ -1,53 +1,46 @@
 {# apps/sales/templates/sales/_discounts_card.html #}
-{# apps/sales/templates/sales/_discounts_card.html #}
-<div class="card mb-3">
+<div class="card">
   <div class="card-header d-flex align-items-center justify-content-between">
     <span class="fw-semibold">
       <i class="bi bi-tags"></i> Descuentos y promociones
     </span>
 
-    <div class="btn-group" role="group" aria-label="Acciones descuentos">
+    {# --- Acciones: móvil = dropdown / desktop = botones --- #}
+    <!-- Desktop (md+) -->
+    <div class="d-none d-md-inline-flex gap-2">
       <!-- Descuento por venta -->
-      <button
-        type="button"
-        class="btn btn-sm btn-outline-primary"
-        data-bs-toggle="modal"
-        data-bs-target="#mdlDiscountOrder"
-        {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}
-      >
+      <button type="button"
+              class="btn btn-sm btn-outline-primary"
+              data-bs-toggle="modal"
+              data-bs-target="#mdlDiscountOrder"
+              {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}>
         <i class="bi bi-percent"></i> Descuento (venta)
       </button>
 
       <!-- Descuento por ítem -->
-      <button
-        type="button"
-        class="btn btn-sm btn-outline-primary"
-        data-bs-toggle="modal"
-        data-bs-target="#mdlDiscountItem"
-        {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}
-      >
+      <button type="button"
+              class="btn btn-sm btn-outline-primary"
+              data-bs-toggle="modal"
+              data-bs-target="#mdlDiscountItem"
+              {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}>
         <i class="bi bi-percent"></i> Descuento (ítem)
       </button>
 
       <!-- Promo por venta -->
-      <button
-        type="button"
-        class="btn btn-sm btn-outline-success"
-        data-bs-toggle="modal"
-        data-bs-target="#mdlPromoOrder"
-        {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}
-      >
+      <button type="button"
+              class="btn btn-sm btn-outline-success"
+              data-bs-toggle="modal"
+              data-bs-target="#mdlPromoOrder"
+              {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}>
         <i class="bi bi-lightning"></i> Promo (venta)
       </button>
 
       <!-- Promo por ítem -->
-      <button
-        type="button"
-        class="btn btn-sm btn-outline-success"
-        data-bs-toggle="modal"
-        data-bs-target="#mdlPromoItem"
-        {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}
-      >
+      <button type="button"
+              class="btn btn-sm btn-outline-success"
+              data-bs-toggle="modal"
+              data-bs-target="#mdlPromoItem"
+              {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}>
         <i class="bi bi-lightning"></i> Promo (ítem)
       </button>
 
@@ -63,6 +56,64 @@
         </button>
       {% endif %}
     </div>
+
+    <!-- Mobile (xs-sm) -->
+    <div class="dropdown d-md-none">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Acciones
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li>
+          <button class="dropdown-item"
+                  type="button"
+                  data-bs-toggle="modal"
+                  data-bs-target="#mdlDiscountOrder"
+                  {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled{% endif %}>
+            <i class="bi bi-percent"></i> Descuento (venta)
+          </button>
+        </li>
+        <li>
+          <button class="dropdown-item"
+                  type="button"
+                  data-bs-toggle="modal"
+                  data-bs-target="#mdlDiscountItem"
+                  {% if not puede_agregar_descuento or not descuentos_habilitados %}disabled{% endif %}>
+            <i class="bi bi-percent"></i> Descuento (ítem)
+          </button>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <button class="dropdown-item"
+                  type="button"
+                  data-bs-toggle="modal"
+                  data-bs-target="#mdlPromoOrder"
+                  {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled{% endif %}>
+            <i class="bi bi-lightning"></i> Promo (venta)
+          </button>
+        </li>
+        <li>
+          <button class="dropdown-item"
+                  type="button"
+                  data-bs-toggle="modal"
+                  data-bs-target="#mdlPromoItem"
+                  {% if not puede_aplicar_promo or not descuentos_habilitados %}disabled{% endif %}>
+            <i class="bi bi-lightning"></i> Promo (ítem)
+          </button>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          {% if puede_gestionar_promos %}
+            <a class="dropdown-item" href="{{ promos_list_url }}">
+              <i class="bi bi-gear"></i> Gestionar
+            </a>
+          {% else %}
+            <button class="dropdown-item" type="button" disabled>
+              <i class="bi bi-gear"></i> Gestionar
+            </button>
+          {% endif %}
+        </li>
+      </ul>
+    </div>
   </div>
 
   <div class="card-body p-0">
@@ -71,13 +122,13 @@
         <table class="table table-sm align-middle mb-0">
           <thead class="table-light">
             <tr>
-              <th style="width: 120px;">Tipo</th>
-              <th style="width: 120px;">Modo</th>
-              <th style="width: 120px;" class="text-end">Valor</th>
+              <th>Tipo</th>
+              <th class="d-none d-md-table-cell">Modo</th>
+              <th class="text-end d-none d-lg-table-cell">Valor</th>
               <th>Motivo / Promoción</th>
-              <th style="width: 220px;">Ítem</th>
-              <th style="width: 140px;">Origen</th>
-              <th style="width: 70px;" class="text-end">Acciones</th>
+              <th class="d-none d-lg-table-cell">Ítem</th>
+              <th class="d-none d-xl-table-cell">Origen</th>
+              <th class="text-end">Acc.</th>
             </tr>
           </thead>
           <tbody>
@@ -85,58 +136,73 @@
               <tr>
                 <td>
                   {% if adj.kind == 'item' %}
-                    <span class="badge bg-secondary">Por ítem</span>
+                    <span class="badge bg-secondary">Ítem</span>
                   {% else %}
-                    <span class="badge bg-primary">Por venta</span>
+                    <span class="badge bg-primary">Venta</span>
                   {% endif %}
+
+                  {# Info comprimida para mobile #}
+                  <div class="d-md-none small text-muted mt-1">
+                    {% if adj.mode == 'percent' %}{{ adj.value }}%{% else %}${{ adj.value }}{% endif %}
+                    ·
+                    {% if adj.item %}
+                      {{ adj.item.servicio.nombre }}
+                    {% else %}
+                      venta
+                    {% endif %}
+                  </div>
                 </td>
-                <td>
+
+                <td class="d-none d-md-table-cell">
                   {% if adj.mode == 'percent' %}
                     <span class="badge bg-info text-dark">%</span>
                   {% else %}
                     <span class="badge bg-info text-dark">$</span>
                   {% endif %}
                 </td>
-                <td class="text-end">
+
+                <td class="text-end d-none d-lg-table-cell">
                   {% if adj.mode == 'percent' %}{{ adj.value }}%{% else %}${{ adj.value }}{% endif %}
                 </td>
+
                 <td class="text-wrap">
                   {% if adj.promotion %}
                     <i class="bi bi-lightning-charge"></i>
-                    {{ adj.motivo|default_if_none:'' }} ({{ adj.promotion.nombre }})
+                    {{ adj.motivo|default_if_none:'' }} {% if adj.promotion.nombre %}({{ adj.promotion.nombre }}){% endif %}
                   {% else %}
                     {{ adj.motivo|default_if_none:'' }}
                   {% endif %}
                 </td>
-                <td>
+
+                <td class="d-none d-lg-table-cell">
                   {% if adj.item %}
                     <div class="small">
-                      <div class="fw-semibold">{{ adj.item.servicio.nombre }}</div>
+                      <div class="fw-semibold text-truncate" style="max-width: 220px;">{{ adj.item.servicio.nombre }}</div>
                       <div class="text-muted">x{{ adj.item.cantidad }} · ${{ adj.item.precio_unitario }}</div>
                     </div>
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td>
+
+                <td class="d-none d-xl-table-cell">
                   {% if adj.source == 'manual' %}
                     <span class="badge bg-dark-subtle text-dark border">Manual</span>
                   {% elif adj.source == 'promo' %}
                     <span class="badge bg-success">Promo</span>
                   {% elif adj.source == 'payment' %}
-                    <span class="badge bg-warning text-dark">Por pago</span>
+                    <span class="badge bg-warning text-dark">Pago</span>
                   {% else %}
                     <span class="badge bg-light text-dark">Otro</span>
                   {% endif %}
                 </td>
+
                 <td class="text-end">
                   <form method="post" action="{% url 'sales:discount_delete' venta.id adj.id %}" class="d-inline">
                     {% csrf_token %}
-                    <button
-                      type="submit"
-                      class="btn btn-sm btn-outline-danger"
-                      {% if not puede_quitar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}
-                    >
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-danger"
+                            {% if not puede_quitar_descuento or not descuentos_habilitados %}disabled title="No habilitado en este estado o por permisos."{% endif %}>
                       <i class="bi bi-trash"></i>
                     </button>
                   </form>
