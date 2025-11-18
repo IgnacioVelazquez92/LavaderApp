@@ -2459,7 +2459,9 @@ erDiagram
     %% Integraciones
     Venta ||..o{ Pago        : registra
     Venta ||..|| Comprobante : emite
-    Venta }o--|| TurnoCaja   : turno      %% NUEVO: trazabilidad de caja
+
+    %% NUEVO: trazabilidad de caja
+    Venta }o--|| TurnoCaja   : turno
 ```
 
 **Aclaraciones**
@@ -4553,19 +4555,23 @@ flowchart TD
     subgraph Request
         A[HTTP Request]
         B[RequestIDMiddleware]
-        C[RequestLogMiddleware (access enriquecido)]
-        D[Views/Services (business logs)]
-        E[Signals (Audit CRUD)]
+        C[RequestLogMiddleware acceso enriquecido]
+        D[Views/Services business logs]
+        E[Signals Audit CRUD]
     end
 
-    A --> B --> C --> D --> F
-    D --> E --> F
+    A --> B
+    B --> C
+    C --> D
+    D --> F
+    D --> E
+    E --> F
     C --> F
 
     subgraph Sinks
         F[Handlers]
         F --> G[BD: AppLog / AuditLog]
-        F --> H[Archivos: logs/YYYY-MM-DD/<username>.log]
+        F --> H[Archivos: logs/YYYY-MM-DD/username.log]
     end
 ```
 
