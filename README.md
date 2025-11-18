@@ -3031,7 +3031,7 @@ sequenceDiagram
 
 # Módulo 9 — `apps/invoicing` (Comprobantes no fiscales + numeración por sucursal)
 
-> **Objetivo:** Emitir **comprobantes no fiscales** (p. ej. **REMITO** o **TICKET**) para **ventas pagadas**; numeración **atómica** por **Sucursal + Punto de Venta + Tipo**, guardar **snapshot inmutable** (ítems, totales, descuentos/promos, metadatos) y generar archivo **HTML** y (opcional) **PDF** imprimible.  
+> **Objetivo:** Emitir **comprobantes no fiscales** (p. ej. **REMITO** o **TICKET**) para **ventas pagadas**; numeración **atómica** por **Sucursal + Punto de Venta + Tipo**, guardar un **snapshot inmutable** (ítems, totales, descuentos/promos, metadatos) y **renderizar** la factura (HTML / PDF) **bajo demanda**, sin persistir archivos en disco.  
 > **Stack:** Django (CBVs server-rendered) + Bootstrap 5 (UI/templating), renderer HTML→PDF.  
 > **Estados relevantes:** La emisión requiere **`payment_status="pagada"`** (independiente del estado de proceso `borrador/en_proceso/terminado/cancelado`).
 
@@ -3039,7 +3039,7 @@ sequenceDiagram
 
 ## 1) Estructura del módulo
 
-```
+```text
 apps/invoicing/
 ├─ __init__.py
 ├─ apps.py                           # name="apps.invoicing"
@@ -3047,7 +3047,7 @@ apps/invoicing/
 ├─ migrations/
 │  └─ __init__.py
 ├─ models.py                         # Comprobante, SecuenciaComprobante, TipoComprobante
-├─ urls.py                           # Rutas: listado, detalle, descargar, emitir (desde venta)
+├─ urls.py                           # Rutas: listado, detalle, descargar, emitir (desde venta) y públicas
 ├─ views.py                          # List, Detail, Emit (FormView), Download, públicos (print/download)
 ├─ forms/
 │  ├─ __init__.py
@@ -3055,29 +3055,34 @@ apps/invoicing/
 ├─ services/
 │  ├─ __init__.py
 │  ├─ numbering.py                   # next_number(): numeración atómica (sucursal/tipo/punto_venta)
-│  ├─ emit.py                        # emitir(): valida → numera → snapshot → render → persistencia
-│  └─ renderers.py                   # render_html(context) y html_to_pdf(html) (opcional)
+│  ├─ emit.py                        # emitir(): valida → numera → snapshot → persiste Comprobante
+│  └─ renderers.py                   # render_html(snapshot) y html_to_pdf(html) (on-demand, sin guardar)
 ├─ selectors.py                      # por_rango(empresa, sucursal?, tipo?, desde?, hasta?)
 ├─ templates/
 │  └─ invoicing/
 │     ├─ list.html                   # Listado con filtros (fecha/sucursal/tipo)
 │     ├─ emit.html                   # Form de emisión (modal de confirmación claro)
 │     ├─ detail.html                 # Detalle del comprobante (metadatos + acciones)
-│     └─ _invoice_print.html         # Plantilla imprimible A4 B/N (con “PAGADO”, descuentos/promos)
-├─ static/
-│  └─ invoicing/
-│     ├─ invoicing.css               # Reglas mínimas para impresión (opcional)
-│     └─ invoicing.js                # Mejoras UI (opcional)
-└─ pdf/
-   └─ storage_backend.md             # Notas de almacenamiento (MEDIA en dev; S3/GCS en prod)
+│     └─ _invoice_print.html         # Plantilla imprimible A4 B/N (con “PAGADA”, descuentos/promos)
+└─ static/
+   └─ invoicing/
+      ├─ invoicing.css               # Reglas mínimas para impresión (opcional)
+      └─ invoicing.js                # Mejoras UI (opcional)
 ```
 
-**Cambios clave vs iteración anterior**
+### Cambios clave vs iteración anterior
 
 - Se **alineó** con la separación **`estado`** (proceso) / **`payment_status`** (pago) de `Venta`.
-- **Form de emisión**: quedó **minimal** (Tipo + Cliente de facturación opcional). El **Punto de Venta** **no** lo pide el usuario; el sistema lo resuelve vía secuencia y/o `sucursal_activa.punto_venta` (si fue configurado).
-- **Snapshot** incluye ahora **ajustes** (promos/desc.) con etiquetas listas para UI (`kind_label`), y totales derivados (**precio_lista_total**, **descuento_total**, **promo_total**, etc.).
-- Plantilla **imprimible**: muestra **precio de lista**, **descuento/promoción** (si aplica) y un **sello “PAGADO”** (si `payment_status="pagada"`). **Propina** no figura en el total (se mantiene fuera del total imponible/operativo del comprobante).
+- Se simplificó el **form de emisión**: quedó **minimal** (Tipo + Cliente de facturación opcional). El **Punto de Venta** **no** se pide al usuario; el sistema lo resuelve vía secuencia (`SecuenciaComprobante`) y/o `sucursal_activa.punto_venta` (si está configurado).
+- El **snapshot** incluye ahora el detalle de **ajustes** (promos/descuentos) con etiquetas listas para la UI (`kind_label`, `scope`, `label`, `monto`, `target`, etc.).
+- La plantilla **imprimible** (`_invoice_print.html`) muestra:
+  - **Precio de lista** (subtotal anterior a descuentos),
+  - **Descuentos / promociones** (desglose),
+  - Un **sello “PAGADA”** si `payment_status="pagada"`.
+- **Cambio arquitectónico importante**:  
+  Ya **no** se guardan archivos HTML/PDF en disco (ni en MEDIA ni en S3).
+  - El modelo `Comprobante` mantiene **solo el snapshot JSON** y los metadatos.
+  - Las vistas de descarga/impresión usan `snapshot` → `renderers.render_html(snapshot)` → `renderers.html_to_pdf(html)` **en el momento del GET** y devuelven el archivo al vuelo.
 
 ---
 
@@ -3085,54 +3090,97 @@ apps/invoicing/
 
 ### 2.1 `TipoComprobante` (enum)
 
-- Valores actuales: `REMITO`, `TICKET`. Extensible.
-- `choices` para forms/filters.
-
-### 2.2 `SecuenciaComprobante`
-
-- Claves: `sucursal(FK)`, `tipo (enum)`, `punto_venta (int)`, `proximo_numero (int)`.
-- **Unicidad**: `(sucursal, tipo, punto_venta)`.
-- Usada por `services/numbering.py` con **row lock** para asignar números de forma **atómica** y **concurrente-segura**.
-
-### 2.3 `Comprobante`
-
-- **Relaciones**: `empresa(FK)`, `sucursal(FK)`, `venta(OneToOne)` _(MVP: 1 venta → 1 comprobante)_, `cliente(FK)`, `cliente_facturacion(FK opc.)`, `emitido_por (User)`.
-- **Numeración**: `tipo (enum)`, `punto_venta (int)`, `numero (int)` + propiedad `numero_completo` (formato `PPPP-NNNNNNNN`).
-- **Valores**: `total`, `moneda`.
-- **Snapshot**: `JSONField` **inmutable** (ítems, totales, ajustes, metadatos).
-- **Archivos**: `archivo_html` (obligatorio), `archivo_pdf` (opcional).
-- **Público opcional**: `public_key`, `public_expires_at`, `public_revocado` (para vista/descarga pública).
-
-> **Cliente de facturación**: el modelo vive en **`apps.customers`** (`ClienteFacturacion`, OneToOne o perfil alternativo vinculado al cliente). Su uso es **opcional** y se ofrece solo si existe un perfil.
+- Valores actuales: `REMITO`, `TICKET` (extensible).
+- Se usa como `choices` tanto en forms como en filtros y en el modelo `Comprobante`.
 
 ---
 
-## 3) Snapshot (contrato)
+### 2.2 `SecuenciaComprobante`
 
-**Estructura mínima (ejemplo):**
+- Claves principales:
+  - `sucursal (FK a org.Sucursal)`
+  - `tipo` (`TipoComprobante`)
+  - `punto_venta` (`CharField` o `IntegerField` según implementación; logica de padding va en servicios)
+  - `proximo_numero` (`PositiveIntegerField`)
+- **Unicidad**: `(sucursal, tipo, punto_venta)`.
+- Usada por `services/numbering.py` con **row lock** (`select_for_update`) para asignar números de forma **atómica** y **concurrente-segura**.
 
-```json
+---
+
+### 2.3 `Comprobante`
+
+- **Relaciones:**
+  - `empresa (FK a org.Empresa)`
+  - `sucursal (FK a org.Sucursal)`
+  - `venta (OneToOne a sales.Venta)` → MVP: **1 venta → 1 comprobante**
+  - `cliente (FK a customers.Cliente)` (cliente operativo de la venta)
+  - `cliente_facturacion (FK opcional a customers.ClienteFacturacion)`
+  - `emitido_por (FK a User)` (operador que emitió)
+- **Numeración:**
+  - `tipo` (`TipoComprobante`)
+  - `punto_venta` (`CharField`/`IntegerField`)
+  - `numero` (`PositiveIntegerField`)
+  - Propiedad `numero_completo` → `PPPP-NNNNNNNN` (padding a 4 y 8 dígitos).
+- **Valores económicos:**
+  - `moneda` (string corta, ej. `"ARS"`)
+  - `total` (`Decimal`) → copia del total de la venta al momento de emisión.
+- **Snapshot inmutable:**
+  - `snapshot = JSONField` → contrato estable para `_invoice_print.html` y renderers.
+  - Incluye:
+    - `comprobante` (tipo, número, fecha de emisión, moneda),
+    - `empresa` (id, nombre, logo embebido),
+    - `sucursal` (id, nombre, punto de venta, dirección opcional),
+    - `cliente` (id, nombre, apellido),
+    - `cliente_facturacion` (si se usó),
+    - `vehiculo`,
+    - `venta` (id, estado, payment_status, subtotal, descuento, precio_lista, propina, total, saldo_pendiente, notas),
+    - `items` (servicios, cantidades, precios, subtotal),
+    - `ajustes` (promos y descuentos manuales),
+    - `leyendas`.
+- **Metadatos de emisión:**
+  - `emitido_en` (`DateTimeField(auto_now_add=True)`)
+  - `emitido_por` (`FK` a usuario)
+- **Acceso público:**
+  - `public_key` (`UUIDField` exclusivo, no adivinable),
+  - `public_revocado` (`BooleanField`),
+  - `public_expires_at` (`DateTimeField` opcional).
+  - Helpers `.get_public_path()`, `.get_public_download_path()`, `.get_public_url()`, `.get_public_download_url()`.
+
+> **Importante:**  
+> El modelo **ya no** tiene campos `archivo_html` ni `archivo_pdf`.  
+> Toda la lógica de archivos vive en las vistas `*DownloadView` + `services.renderers`.
+
+---
+
+## 3) Snapshot (contrato efectivo)
+
+### 3.1 Forma real generada en `_build_snapshot(...)`
+
+Generado en `apps/invoicing/services/emit.py::_build_snapshot`:
+
+```jsonc
 {
   "comprobante": {
     "tipo": "TICKET",
-    "numero": "0001-00001234",
-    "emitido_en": "2025-10-01T00:00:00-03:00",
+    "numero": "0001-00000003",
+    "emitido_en": "2025-11-16T22:26:03.123456-03:00",
     "moneda": "ARS"
   },
   "empresa": {
     "id": 8,
     "nombre": "Lavadero XYZ",
-    "logo_data": "data:image/png;base64,..."
+    "logo_data": "data:image/png;base64,..." // opcional, puede ser null
   },
-  "sucursal": { "id": 3, "nombre": "Casa Central", "punto_venta": "1" },
+  "sucursal": {
+    "id": 3,
+    "nombre": "Casa Central",
+    "punto_venta": "1",
+    "direccion": "Av. Siempre Viva 742" // opcional, puede no estar
+  },
   "cliente": {
     "id": 21,
     "nombre": "Juan",
-    "apellido": "Pérez",
-    "cuit": "20-12345678-9",
-    "domicilio": "Av. Siempreviva 742",
-    "localidad": "San Miguel",
-    "iva": "RI"
+    "apellido": "Pérez"
   },
   "cliente_facturacion": {
     "razon_social": "EMPRESA SA",
@@ -3140,62 +3188,77 @@ apps/invoicing/
     "cond_iva": "RI",
     "domicilio_fiscal": "Ruta 9 km 123, Tucumán"
   },
-  "vehiculo": { "id": 10, "patente": "ABC123", "tipo": "Pick-up" },
+  "vehiculo": {
+    "id": 10,
+    "patente": "ABC123",
+    "tipo": "Pick-up"
+  },
   "venta": {
     "id": "1c8dd985-9984-469f-9891-b8f9f4f8b595",
     "estado": "terminado",
     "payment_status": "pagada",
-    "subtotal": "35000.00",
-    "descuento": "2000.00",
+    "subtotal": "6000.00",
+    "descuento": "300.00", // total de descuentos/promos ya aplicado en cálculos
+    "precio_lista": "6000.00", // base visible como "Precio de lista" en el comprobante
     "propina": "0.00",
-    "total": "33000.00",
+    "total": "5700.00",
     "saldo_pendiente": "0.00",
-    "notas": ""
+    "notas": "vino a dejarlo el cuñado"
   },
   "items": [
     {
       "servicio_id": 5,
-      "servicio_nombre": "Lavado Full",
+      "servicio_nombre": "ENCERADO",
       "cantidad": 1,
-      "precio_unitario": "35000.00",
-      "subtotal": "35000.00"
+      "precio_unitario": "6000.00",
+      "subtotal": "6000.00"
     }
   ],
   "ajustes": [
     {
-      "scope": "venta",
-      "kind": "promo",
-      "kind_label": "Promoción",
-      "label": "Promo Primavera -10%",
-      "monto": "3500.00",
-      "porcentaje": true,
-      "target": null
+      "scope": "venta", // "venta" | "item"
+      "kind": "descuento_manual", // "promo" | "descuento_manual"
+      "kind_label": "Descuento", // etiqueta amigable para UI
+      "label": "Familiar", // motivo o nombre de promo
+      "monto": "300.00", // monto efectivo aplicado (Decimal → str)
+      "importe": "300.00", // alias por compatibilidad
+      "porcentaje": false, // true si fue % a nivel modelo
+      "target": null // nombre del servicio si es por ítem
     },
     {
       "scope": "venta",
-      "kind": "descuento_manual",
-      "kind_label": "Descuento",
-      "label": "Redondeo",
-      "monto": "500.00",
-      "porcentaje": false,
+      "kind": "promo",
+      "kind_label": "Promoción",
+      "label": "PROMO 30%",
+      "monto": "600.00",
+      "importe": "600.00",
+      "porcentaje": true,
       "target": null
     }
   ],
-  "totales": {
-    "precio_lista_total": "35000.00",
-    "promo_total": "3500.00",
-    "descuento_total": "500.00"
-  },
-  "leyendas": { "no_fiscal": "Documento no fiscal." }
+  "leyendas": {
+    "no_fiscal": "Documento no fiscal."
+  }
 }
 ```
 
-**Notas**
+### 3.2 Detalles importantes
 
-- **`ajustes`** lista **promociones y descuentos** (por venta o por ítem) con: `scope`, `kind`, **`kind_label`** (texto listo: “Promoción”/“Descuento”), `label`, `monto`, `porcentaje`, `target` (si aplica a un servicio puntual).
-- **`totales`** agrega sumatorias útiles para la plantilla: **`precio_lista_total`**, **`promo_total`**, **`descuento_total`**.
-- **`payment_status`** persiste el estado de pago en el momento de emisión (drive de “PAGADO”).
-- El snapshot se valida (JSON-serializable) y **no se muta** luego de emitirse el comprobante.
+- **Ítems**: vienen de `VentaItem` (query tolerante vía `_items_qs(venta)`).
+- **Ajustes**: se obtienen con `_ajustes_qs(venta)` soportando:
+  - `SalesAdjustment` de tipo:
+    - `source = manual` (descuentos manuales),
+    - `source = promo` (promociones),
+    - `source = payment` (descuentos de método de pago).
+  - `scope`: auto-detectado según presencia de `item` / `venta_item`.
+  - `kind_label`: `"Promoción"` o `"Descuento"` para UI.
+  - `monto`: el valor **real** de ese ajuste, _no_ el porcentaje de configuración.
+- **`precio_lista`**:
+  - Se guarda en `snapshot.venta.precio_lista` y se muestra como “Precio de lista” en el template.
+  - Por ahora coincide con el `subtotal` vigente, que ya representa la suma de parciales de servicios.
+- **`payment_status`**:
+  - Persistido en `snapshot.venta.payment_status` al momento de emisión.
+  - Usado por `_invoice_print.html` para mostrar sello **“PAGADA”**.
 
 ---
 
@@ -3208,29 +3271,141 @@ next_number(sucursal, tipo, punto_venta) -> ctx
 # ctx: { punto_venta: int, numero: int, numero_completo: "PPPP-NNNNNNNN" }
 ```
 
-- Resuelve/crea `SecuenciaComprobante` y **incrementa** bajo transacción.
-- El **punto de venta** puede venir de `Sucursal` (config app org) y/o por parámetro. En UI, **no se solicita**; lo resuelve el backend/secuencia.
+- Usa `SecuenciaComprobante`:
+  - Obtiene/crea la fila `(sucursal, tipo, punto_venta)` con `select_for_update`.
+  - Incrementa `proximo_numero`.
+- El `punto_venta` puede:
+  - venir explícito por parámetro (`punto_venta=1`),
+  - o derivarse de configuración en `Sucursal` (si se decide en el futuro).
+- La UI **no expone** el punto de venta; solo el tipo de comprobante.
+
+---
 
 ### 4.2 Emisión — `services/emit.py`
 
 ```python
-emitir(
-  *, venta_id, tipo: str, punto_venta: int = 1,
-  cliente_facturacion_id: int | None = None,
-  actor: User | None = None,
-  reintentos_idempotentes: bool = True,
-) -> EmitirResultado  # { comprobante, creado: bool }
+@dataclass
+class EmitirResultado:
+    comprobante: Comprobante
+    creado: bool  # False si se devolvió uno existente por idempotencia
 ```
 
-**Validaciones y flujo:**
+```python
+@transaction.atomic
+def emitir(
+    *,
+    venta_id,
+    tipo: str,
+    punto_venta: int = 1,
+    cliente_facturacion_id: Optional[int] = None,
+    actor=None,
+    reintentos_idempotentes: bool = True,
+) -> EmitirResultado:
+    ...
+```
 
-1. Cargar `Venta` con relaciones necesarias.
-2. Exigir `payment_status == "pagada"` y **no** `estado == "cancelado"`.
-3. Si ya existe comprobante y `reintentos_idempotentes=True` → devolver existente (`creado=False`).
-4. `next_number(...)` por `(sucursal, tipo, punto_venta)`.
-5. Construir **snapshot** (ítems, ajustes, totales).
-6. Render HTML (+ PDF opcional), persistir archivos y registro `Comprobante`.
-7. (Opcional) **Auto-emisión** (`emitir_auto(...)`) disponible para flujos que lo requieran (por defecto **OFF**; controlado a nivel app/setting).
+#### Flujo interno
+
+1. **Carga de Venta**  
+   `Venta.objects.select_related("empresa", "sucursal", "cliente", "vehiculo", "vehiculo__tipo")` + `prefetch` de `items`.
+
+2. **Validaciones de negocio**
+
+   - `payment_status == "pagada"` → obligatorio.
+   - `estado != "cancelado"` → no se permite emitir sobre una venta cancelada.
+
+3. **Idempotencia 1:1**
+
+   - Si `venta.comprobante` ya existe:
+     - Si `reintentos_idempotentes=True` → devuelve el existente (`creado=False`).
+     - Si no → lanza `ValueError`.
+
+4. **Tipo de comprobante**
+
+   - `tipo in TipoComprobante.values`; si no, `ValueError`.
+
+5. **Cliente de facturación opcional**
+
+   - `cliente_facturacion_id` debe pertenecer al **mismo cliente** de la venta.
+   - Si no corresponde, lanza `ValueError`.
+
+6. **Numeración atomizada**
+
+   - Llama a `next_number(sucursal=venta.sucursal, tipo=tipo, punto_venta=punto_venta)`.
+   - Recibe `numero_completo` y `punto_venta` real (contexto de secuencia).
+
+7. **Snapshot**
+
+   - Construye snapshot mediante `_build_snapshot(...)`:
+     - Ítems, totales, ajustes, textos, cliente, vehículo, etc.
+   - Valida que sea JSON-serializable (`json.dumps(snapshot)`).
+
+8. **Persistencia del Comprobante**
+
+   - Crea `Comprobante` con:
+     - `empresa`, `sucursal`, `venta`, `cliente`, `cliente_facturacion`,
+     - `tipo`, `punto_venta`, `numero`,
+     - `moneda` (tomada de `snapshot["comprobante"]["moneda"]`),
+     - `total = venta.total`,
+     - `snapshot = snapshot`,
+     - `emitido_por = actor`.
+
+9. **Archivos**
+
+   - **No se guardan archivos** (`archivo_html` / `archivo_pdf` fueron eliminados).
+   - La generación HTML/PDF ocurre **en las vistas** de descarga/imprimible usando:
+     - `renderers.render_html({"snapshot": comprobante.snapshot})`,
+     - `renderers.html_to_pdf(html)`.
+
+10. **Retorno**
+    - Devuelve `EmitirResultado(comprobante=comp, creado=True)`.
+
+---
+
+### 4.3 Auto-emisión — `emitir_auto(...)`
+
+```python
+@transaction.atomic
+def emitir_auto(*, venta_id, actor=None) -> Optional[EmitirResultado]:
+    """
+    Emite automáticamente si:
+      - payment_status='pagada'
+      - no está cancelada
+      - no existe comprobante aún
+    """
+    ...
+```
+
+- Pensada para hooks automáticos (ej. al completar cobro).
+- Usa internamente `emitir(...)` con:
+  - `tipo = TipoComprobante.TICKET`,
+  - `punto_venta = 1`,
+  - `cliente_facturacion_id = None`,
+  - `reintentos_idempotentes = True`.
+
+---
+
+### 4.4 Renderers — `services/renderers.py` (contrato)
+
+Contrato esperado:
+
+```python
+def render_html(context: dict) -> str:
+    """
+    Renderiza el comprobante a HTML usando template `_invoice_print.html`.
+    Normalmente `context = {"snapshot": comprobante.snapshot}`.
+    """
+    ...
+
+def html_to_pdf(html: str) -> bytes | None:
+    """
+    Convierte HTML a PDF (puede devolver None si no se configuró motor PDF).
+    """
+    ...
+```
+
+- **Importante**: estos helpers **no** tocan base de datos ni storage.
+  - La vista arma el context usando `comprobante.snapshot` y se lo pasa tal cual.
 
 ---
 
@@ -3238,10 +3413,13 @@ emitir(
 
 ### 5.1 `InvoiceEmitForm`
 
-- **Campos**:
-  - `tipo` (`TipoComprobante.choices`).
-  - `cliente_facturacion`: `ModelChoiceField` sobre perfiles **del cliente operativo actual** (si existe). Si el cliente **no** tiene perfil, el campo no se muestra en la UI.
-- **UI Rules**: clases Bootstrap; validaciones livianas; **sin** campo de **punto de venta** (lo decide el sistema).
+- Campos:
+  - `tipo` → `ChoiceField` con `TipoComprobante.choices`.
+  - `cliente_facturacion` → `ModelChoiceField` opcional:
+    - Se inicializa en `__init__(self, *, venta, ...)` con los perfiles de facturación asociados al cliente de la venta (si existen).
+- Reglas de UI:
+  - Mostrar `cliente_facturacion` **solo** si el cliente tiene al menos un perfil de facturación.
+  - No incluye `punto_venta` (lo resuelve el sistema).
 
 ---
 
@@ -3249,137 +3427,358 @@ emitir(
 
 ### 6.1 URLs (`namespace="invoicing"`)
 
-```
+```text
 GET   /comprobantes/                               name="invoicing:list"
 GET   /comprobantes/<uuid:pk>/                     name="invoicing:detail"
 GET   /comprobantes/<uuid:pk>/descargar/           name="invoicing:download"
-GET   /public/comprobantes/<key>/                  name="invoicing:public_view"      # sin auth
-GET   /public/comprobantes/<key>/descargar/        name="invoicing:public_download"  # sin auth
+
+GET   /public/comprobantes/<key>/                  name="invoicing:public_detail"
+GET   /public/comprobantes/<key>/descargar/        name="invoicing:public_download"
 
 # Inicio desde venta:
 GET   /ventas/<uuid:venta_id>/emitir/              name="invoicing:emit"
 POST  /ventas/<uuid:venta_id>/emitir/              name="invoicing:emit"
 ```
 
-### 6.2 Seguridad declarativa (permisos)
+---
 
-- **Fuente de verdad**: `apps.org.permissions.Perm` + `ROLE_POLICY`.
-- **Mixins**: todas las vistas usan `EmpresaPermRequiredMixin` (con Tenancy). **No** mezclar con `LoginRequiredMixin` directo.
-- **Perms sugeridos** para este módulo:
+### 6.2 Permisos (declarativos)
+
+- Fuente: `apps.org.permissions.Perm`.
+- Mixins:
+  - `EmpresaPermRequiredMixin` (resuelve `empresa_activa`, valida pertenencia, etc).
+- Permisos relevantes:
   - `INVOICING_VIEW` → listar/ver comprobantes.
-  - `INVOICING_EMIT` → emitir comprobante desde venta.
-  - `INVOICING_DOWNLOAD` → descargar archivo del comprobante.
-- **Tenancy**: todos los querysets filtran por **empresa activa**; descarga valida propiedad.
+  - `INVOICING_EMIT` → emitir comprobantes desde venta.
+  - `INVOICING_DOWNLOAD` → descargar comprobante (HTML/PDF).
+- Vistas públicas (`PublicInvoiceView`, `PublicInvoiceDownloadView`) **no** usan auth, pero sí:
+  - `public_key`,
+  - `public_revocado`,
+  - `public_expires_at`.
 
-### 6.3 Vistas
+---
 
-- `ComprobanteListView` → filtros por sucursal/tipo/fechas vía `selectors.por_rango(...)` (siempre por empresa activa).
-- `ComprobanteDetailView` → `select_related` (empresa, sucursal, venta, cliente, cliente_facturacion, emitido_por) y filtro por empresa.
-- `EmitirComprobanteView` → valida `payment_status="pagada"`. Form minimal con confirmación (modal). Flag `puede_emitir` calculado en contexto.
-- `ComprobanteDownloadView` → sirve **PDF** si existe; si no, **HTML**. Filtro por empresa.
-- `PublicInvoiceView/PublicInvoiceDownloadView` → ver/descargar por `public_key` con control de expiración y revocación.
+### 6.3 `ComprobanteListView`
+
+- Filtra por empresa activa (`self.empresa_activa`).
+- Filtros GET:
+  - `sucursal` (id),
+  - `tipo` (`TipoComprobante`),
+  - `desde`, `hasta` (rangos de fecha).
+- Usa selector `selectors.por_rango(...)`.
+- Context adicional:
+  - `tipos_disponibles`,
+  - `sucursales_disponibles`,
+  - `filtros` (para repoblar form).
+
+---
+
+### 6.4 `ComprobanteDetailView`
+
+- `DetailView` con:
+  - `model = Comprobante`,
+  - `context_object_name = "comprobante"`,
+  - `template_name = "invoicing/detail.html"`,
+  - `required_perms = (Perm.INVOICING_VIEW,)`.
+- `get_queryset`:
+
+  - filtra por `empresa=self.empresa_activa`,
+  - `select_related("empresa", "sucursal", "venta", "cliente", "cliente_facturacion", "emitido_por")`.
+
+- El template `detail.html`:
+  - Muestra metadatos (número, tipo, fecha, empresa, sucursal).
+  - Muestra resumen de venta (cliente, vehículo, estado, payment_status, notas).
+  - Renderiza tabla de ítems y totales a partir de `comprobante.snapshot` (`snap = comprobante.snapshot`).
+
+---
+
+### 6.5 `EmitirComprobanteView` (`FormView` + mixins)
+
+- Mixins:
+  - `EmpresaPermRequiredMixin`,
+  - `VentaScopedMixin` (lee `venta_id` y valida que la venta sea de la empresa activa).
+- `template_name = "invoicing/emit.html"`,
+- `form_class = InvoiceEmitForm`,
+- `required_perms = (Perm.INVOICING_EMIT,)`.
+- `dispatch`:
+  - Bloquea `POST` si `venta.payment_status != "pagada"`.
+- `form_valid`:
+  - Llama a `emitir(...)`,
+  - Hace `messages.success/info` según `resultado.creado`,
+  - Redirige a `comp.get_absolute_url()`.
+
+El contexto incluye:
+
+- `venta`,
+- `venta_pagada`, `ya_tiene_comprobante`, `comprobante_existente`, `puede_emitir`.
+
+---
+
+### 6.6 `ComprobanteDownloadView` (privada)
+
+- `GET /comprobantes/<uuid:pk>/descargar/`
+- Mixins:
+  - `EmpresaPermRequiredMixin`,
+  - `required_perms = (Perm.INVOICING_DOWNLOAD,)`.
+- Flujo:
+  1. Busca `Comprobante` por `pk` **y** `empresa=self.empresa_activa`.
+  2. Obtiene `snapshot = comp.snapshot`.
+  3. Llama a `renderers.render_html({"snapshot": snapshot})`.
+  4. Si se configuró engine PDF:
+     - `pdf_bytes = renderers.html_to_pdf(html)`.
+     - Devuelve `FileResponse(io.BytesIO(pdf_bytes), content_type="application/pdf", filename=...)`.
+  5. Si no hay engine PDF:
+     - Devuelve `HttpResponse(html, content_type="text/html; charset=utf-8")` con cabecera `Content-Disposition` de descarga.
+
+> **No se leen ni escriben archivos físicos.** Toda la respuesta se genera en memoria a partir de `snapshot`.
+
+---
+
+### 6.7 `PublicInvoiceView` (detalle público)
+
+- `GET /public/comprobantes/<key>/`
+- `DetailView` con:
+  - `template_name = "invoicing/_invoice_print.html"`,
+  - `context_object_name = "comprobante"`.
+- `get_object`:
+  - Busca `Comprobante` por `public_key = key`,
+  - Valida:
+    - `not public_revocado`,
+    - `public_expires_at is None or now <= public_expires_at`.
+- `get_context_data`:
+  - agrega:
+    - `snapshot = self.object.snapshot`,
+    - `public = True`.
+
+Se usa sobre todo para ver/impresión en pantalla.
+
+---
+
+### 6.8 `PublicInvoiceDownloadView` (descarga pública)
+
+- `GET /public/comprobantes/<key>/descargar/`
+- Flujo similar a `ComprobanteDownloadView`, pero:
+  - Busca por `public_key`,
+  - Aplica las mismas validaciones (`public_revocado`, `public_expires_at`),
+  - Usa `renderers.render_html({"snapshot": comp.snapshot})` y `html_to_pdf`.
 
 ---
 
 ## 7) Plantillas (UX)
 
-### 7.1 `emit.html` (resumen)
+### 7.1 `emit.html`
 
-- Breadcrumbs + header claros.
-- Avisos:
-  - Si **no pagada** → alerta **warning** (no deja emitir).
-  - Si **ya tiene comprobante** → alerta **info** con link a detalle.
-- **Formulario simple**:
-  - **Tipo** (select).
-  - **Cliente de facturación** (solo si el cliente tiene perfil de facturación cargado).
-- **Modal de confirmación** con lenguaje claro orientado a usuario (“Vamos a generar el comprobante… no se puede deshacer… crear PDF/HTML para imprimir o enviar”).
+- Breadcrumb + título “Emitir comprobante”.
+- Tarjetas de estado:
+  - Si la venta **no está pagada** → alerta `warning` explicando que debe pagarse antes de emitir.
+  - Si la venta **ya tiene comprobante** → alerta `info` con link al comprobante.
+- Formulario:
+  - Select de `tipo` (REMITO / TICKET).
+  - Select opcional de `cliente_facturacion`.
+- Modal de confirmación:
+  - Explica que se va a generar un comprobante no fiscal,
+  - Aclara que no es posible “desemitir” (habrá anulación/nota de crédito en versiones futuras).
+
+---
 
 ### 7.2 `list.html`
 
-- Filtros por **Sucursal**, **Tipo**, **Desde/Hasta**.
-- Tabla con: **N°**, **Tipo**, **Sucursal**, **Cliente**, **Total**, **Emitido**, **Acciones** (Ver / Descargar).
-- Paginación server-side.
+- Filtros por:
+  - `Sucursal`,
+  - `Tipo`,
+  - `Fecha desde` / `Fecha hasta`.
+- Tabla:
+  - N° (`numero_completo`),
+  - Tipo,
+  - Sucursal,
+  - Cliente,
+  - Total,
+  - Fecha/hora de emisión (`emitido_en`),
+  - Acciones (Ver / Descargar / Link público cuando se implemente la UI).
+- Paginación normal de Django.
+
+---
 
 ### 7.3 `detail.html`
 
-- Header con **N° completo**, **Tipo**, **Emitido** (fecha/hora).
-- Panel **Resumen**: Empresa/Sucursal, Moneda, Total, Cliente (operativo) y, si aplica, **Cliente de facturación**.
-- Panel **Cliente y Venta**: cliente, venta, vehículo, estado de venta (badge), notas.
-- Tabla **Ítems** (servicio, precio, subtotal) + footer (subtotal, descuento, total).
-- Acciones: Ver/Descargar archivo (HTML/PDF).
+- Header:
+  - `{{ comprobante.get_tipo_display }}` + `{{ comprobante.numero_completo }}`,
+  - Badges para `payment_status` y estado de la venta (desde snapshot).
+- Secciones:
+  - **Resumen**: empresa, sucursal, moneda, total, usuario que emitió.
+  - **Cliente y venta**: cliente operativo, cliente de facturación (si hay), vehículo, notas.
+  - **Ítems**:
+    - Usa `snap = comprobante.snapshot`,
+    - Itera sobre `snap.items`,
+    - Muestra `servicio_nombre`, `precio_unitario`, `subtotal`,
+    - Footer con `snap.venta.subtotal`, `snap.venta.descuento`, `comprobante.total`.
+- Acciones:
+  - Link a descarga,
+  - Link público (cuando la UI lo exponga).
+
+---
 
 ### 7.4 `_invoice_print.html` (A4 B/N)
 
-- **Encabezado**: logo (o placeholder), Empresa + Sucursal (dirección opcional), título (`REMITO`/`TICKET`), leyenda (_Documento no fiscal_), N° y fecha.
-- **Datos de Cliente**:
-  - Bloque del **cliente operativo**.
-  - Bloque **Facturado a** (solo si hay **Cliente de facturación**).
-- **Ítems** con columnas: CANTIDAD, DESCRIPCIÓN, P. UNIT., PARCIAL.
-- **Totales** al pie:
-  - **Precio de lista** (suma de parciales).
-  - **Promociones aplicadas** (si las hubo).
-  - **Descuentos** (si los hubo).
-  - **TOTAL** (importe final cobrado; **propina no** forma parte).
-- **Sello “PAGADO”** (si `payment_status="pagada"`): marca visual en layout (sin color).
-- **Observaciones** y **firmas** (entregué/recibí).
+- Encabezado:
+  - Logo (o placeholder “LOGO”),
+  - Nombre de empresa y sucursal + dirección (si se cargó en snapshot),
+  - Tipo de comprobante (`snapshot.comprobante.tipo`),
+  - Leyenda **“DOCUMENTO NO FISCAL”** (o “DOCUMENTO NO VÁLIDO COMO FACTURA” para REMITO),
+  - N° y fecha de emisión (`emitido_en[:10]`),
+  - Punto de venta.
+- Datos del cliente:
+  - Cliente operativo: nombre + apellido,
+  - Vehículo: patente + tipo,
+  - Venta: ID lógico (UUID),
+  - Moneda.
+  - Bloque “Facturado a” con `cliente_facturacion` (si hay).
+- Detalle de ítems:
+  - Columnas: **CANT.**, **DESCRIPCIÓN**, **PRECIO**, **SUBTOTAL**.
+  - Itera `snapshot.items`.
+- Totales:
+  - **Precio de lista** → `snapshot.venta.precio_lista` (fallback a `snapshot.venta.subtotal`),
+  - **Descuentos** → si `snapshot.venta.descuento != "0.00"`,
+  - **Total a pagar** → `snapshot.venta.total`.
+- Desglose de descuentos/promos:
+  - Tabla opcional si `snapshot.ajustes` no está vacío.
+  - Muestra:
+    - `Tipo` → `a.kind_label`,
+    - `Detalle` → `a.label` (+ target si es por ítem, + sufijo si es porcentaje),
+    - `Ámbito` → `a.scope|upper` (VENTA/ITEM),
+    - `Monto` → `a.monto`, filtrando ajustes con monto `"0.00"` si se desea.
+- Sello **“PAGADA”**:
+  - Posicionado absoluto,
+  - Se muestra si `snapshot.venta.payment_status == "pagada"`.
+- Observaciones:
+  - Bloque para mostrar `snapshot.venta.notas`.
+- Firmas:
+  - “Entregué conforme” / “Recibí conforme”.
 
 ---
 
 ## 8) Selectors
 
-### 8.1 `selectors.por_rango(empresa, sucursal=None, tipo=None, desde=None, hasta=None)`
+### 8.1 `selectors.por_rango(...)`
 
-- Devuelve `QuerySet` de `Comprobante` filtrado por empresa y opcionalmente sucursal/tipo/fechas (inclusive por día).
-- `select_related`: `empresa`, `sucursal`, `venta`, `cliente` (optimiza listados).
+```python
+def por_rango(
+    *,
+    empresa,
+    sucursal: Sucursal | None = None,
+    tipo: str | None = None,
+    desde: date | None = None,
+    hasta: date | None = None,
+) -> QuerySet[Comprobante]:
+    ...
+```
+
+- Filtra:
+  - Siempre por `empresa`,
+  - Opcionalmente por `sucursal`,
+  - Opcionalmente por `tipo`,
+  - Opcionalmente por rango de fechas (`emitido_en`).
+- Usa `select_related("empresa", "sucursal", "venta", "cliente")` para evitar N+1 en listados.
 
 ---
 
 ## 9) Integraciones
 
-- **Sales (`apps/sales`)**: en `sales:detail`, la tarjeta **Comprobante** usa flags:
-  - `venta_pagada` (por `payment_status`), `ya_tiene_comprobante`, `puede_emitir`.
-  - Si se puede emitir → CTA a `invoicing:emit`. Si ya existe → **Ver/Descargar**.
-- **Payments (`apps/payments`)**: cuando el service de pagos deja `saldo=0`, muta **`payment_status="pagada"`** (independiente de `estado`). Esto habilita la emisión.
-- **Customers (`apps.customers`)**: `ClienteFacturacion` OneToOne/perfil; si existe, se ofrece en el form de emisión y queda reflejado en el snapshot.
+### 9.1 Con `apps/sales`
+
+- En la vista de detalle de venta:
+  - Se calculan flags:
+    - `venta_pagada` → `payment_status == "pagada"`,
+    - `ya_tiene_comprobante` → `hasattr(venta, "comprobante")`,
+    - `puede_emitir` → `venta_pagada` y no tiene comprobante.
+  - CTA:
+    - Si `puede_emitir` → botón “Emitir comprobante”.
+    - Si ya tiene comprobante → link a `invoicing:detail` + atajo a descarga.
+
+### 9.2 Con `apps/payments`
+
+- Cuando el service de pagos recalcula saldo:
+  - Llama a `sync_payment_status_desde_saldo(venta=venta, actor=actor)`.
+  - Si el `saldo_pendiente` cae a 0 → `payment_status` pasa a `"pagada"` y se llama a `lifecycle.on_pagada(...)`.
+  - Esto habilita la emisión (no se fuerza automáticamente a emitir, salvo que se configure `emitir_auto` en un hook).
+
+### 9.3 Con `apps/customers`
+
+- `ClienteFacturacion` vive en `apps.customers`.
+- `InvoiceEmitForm` muestra opciones de `cliente_facturacion` solo si existen perfiles asociados al cliente operativo de la venta.
+- El snapshot refleja estos datos en `snapshot.cliente_facturacion`, reutilizados por `_invoice_print.html`.
 
 ---
 
 ## 10) Seguridad y Tenancy
 
-- **Tenancy**: todas las vistas usan `EmpresaPermRequiredMixin` (resuelve `empresa_activa`, membership, etc.).
-- **Permisos** (sugerencia, fuente de verdad en `apps.org.permissions`):
-  - `INVOICING_VIEW` → ver/listar.
-  - `INVOICING_EMIT` → emitir.
-  - `INVOICING_DOWNLOAD` → descargar.
-- **Defensa en profundidad**: templates solo reflejan **flags** para UX; la seguridad real vive en **mixins** (CBV) y **services** (reglas/validaciones).
+- Todas las vistas privadas (`list`, `detail`, `download`, `emit`) usan `EmpresaPermRequiredMixin`:
+  - Deriva `empresa_activa` desde middleware.
+  - Limita querysets por empresa.
+- Permisos:
+  - `INVOICING_VIEW` → lista / detalle,
+  - `INVOICING_EMIT` → emisión,
+  - `INVOICING_DOWNLOAD` → descarga.
+- Vistas públicas:
+  - No dependen de login; se protegen solo por:
+    - `public_key` (token UUID),
+    - expiración (`public_expires_at`),
+    - revocación (`public_revocado`).
 
 ---
 
 ## 11) QA Manual (checklist)
 
-1. **Venta pagada** (`payment_status="pagada"`) y **no cancelada** → `Emitir` disponible; crea `Comprobante` + archivos.
-2. **Reintento** de emisión sobre la misma venta (con `reintentos_idempotentes=True`) → devuelve existente (**mensaje info**).
-3. **Listado**: filtros por sucursal/tipo/fecha, paginado y conteo.
-4. **Detalle**: muestra N°, tipo, fecha, cliente (y facturación si aplica), ítems y totales.
-5. **Imprimible**: sello **PAGADO** si corresponde; **precio de lista**, **promociones** y **descuentos** si existieron; **propina** no se suma al total.
-6. **Descarga**: entrega **PDF** si existe; si no, **HTML** con `content-type` correcto.
-7. **Tenancy**: intentar acceder a comprobante de otra empresa → 404/redirect seguro.
-8. **Cliente de facturación**: si el cliente tiene perfil, aparece en form; si no, no “hace ruido”.
-9. **Número**: respeta secuencia por `(sucursal, tipo, punto_venta)` bajo concurrencia (sin saltos erráticos).
+1. **Venta pagada, no cancelada**
+   - `payment_status="pagada"`, `estado != "cancelado"` → botón “Emitir comprobante” disponible.
+   - POST a `invoicing:emit` crea `Comprobante` y redirige a `detail`.
+2. **Reintento de emisión**
+   - Llamar a `EmitirComprobanteView` de nuevo → no crea otro comprobante, reaprovecha el existente (mensaje informativo).
+3. **Listado**
+   - Filtros por sucursal/tipo/fecha funcionan.
+   - Paginación y total de registros acorde.
+4. **Detalle**
+   - Snapshot consistente con lo que se ve en `sales:detail` al momento de emitir.
+   - Ítems y totales coinciden.
+5. **Imprimible HTML (vista pública)**
+   - `PublicInvoiceView` muestra “PAGADA” cuando corresponde.
+   - “Precio de lista”, “Descuentos” y “TOTAL” reflejan snapshot.
+   - Observaciones muestran `venta.notas`.
+6. **Descarga HTML/PDF (privado y público)**
+   - `ComprobanteDownloadView` y `PublicInvoiceDownloadView`:
+     - Generan HTML desde `snapshot` usando `_invoice_print.html`.
+     - Generan PDF si `html_to_pdf` está disponible.
+     - **No** crean archivos en disco (se verifica MEDIA vacía).
+7. **Tenancy**
+   - Intentar acceder a un comprobante de otra empresa → 404 (o redirect) consistente.
+8. **Cliente de facturación**
+   - Si existe perfil, aparece en form y figura en comprobante.
+   - Si no existe, el form es simple (solo `tipo`) y el comprobante queda con cliente operativo.
+9. **Promos y descuentos**
+   - Aplicar descuento manual + promo → ver desglose en tabla “Descuentos y Promociones aplicadas”.
+   - Verificar que los montos no tengan líneas “0.00” indeseadas.
+10. **Sincronía con `sales.calculations`**
+    - Cambios de promociones/ajustes en venta recalculan totales.
+    - Emisión captura esos totales en snapshot sin inconsistencias.
 
 ---
 
 ## 12) Roadmap
 
-- **Anulación / Nota de crédito** (no fiscal) con encadenamiento.
-- **Exportes** (CSV/PDF por rango/filters).
-- **Impresión térmica** (layout chico).
-- **Campos fiscales por país** (si escala a integración AFIP/CAE u otros).
-- **Compartir público**: links con expiración y revocación ya soportados (UI pendiente).
+- **Anulación / Nota de crédito no fiscal**:
+  - Modelar relación entre comprobantes (ej. `comprobante_anula`).
+- **Exportes masivos**:
+  - CSV/Excel por rango de fechas y filtros.
+- **Layouts alternativos**:
+  - Diseño para impresora térmica / formato ticket.
+- **Campos fiscales país-específicos**:
+  - Si se integra con sistemas fiscales (AFIP, etc.).
+- **UI para links públicos**:
+  - Botones para copiar link público, configurar expiración y revocar.
 
 ---
 
-## 13) Flujo de alto nivel
+## 13) Flujo de alto nivel (actualizado)
 
 ```mermaid
 sequenceDiagram
@@ -3388,9 +3787,10 @@ sequenceDiagram
   participant SALES as Sales
   participant INV as Invoicing
   participant DB as DB
+  participant R as Renderers
 
   U->>SALES: Ver detalle de venta
-  U->>PAY: Registrar pagos (si corresponde)
+  U->>PAY: Registrar pagos
   PAY->>DB: Persistir pagos + recalcular saldo
   alt saldo == 0
     PAY->>DB: Venta.payment_status = "pagada"
@@ -3398,19 +3798,34 @@ sequenceDiagram
 
   U->>INV: Emitir comprobante (tipo, cliente_facturación?)
   INV->>DB: next_number(sucursal, tipo, ptoV) (atomic)
-  INV->>DB: Guardar Comprobante + snapshot + archivo HTML/PDF
-  DB-->>U: OK (número, enlaces Ver/Descargar)
+  INV->>DB: Guardar Comprobante + snapshot
+  DB-->>U: OK (número, link a detalle)
+
+  U->>INV: Descargar comprobante
+  INV->>DB: Leer Comprobante + snapshot
+  INV->>R: render_html({snapshot})
+  alt Motor PDF disponible
+    R-->>INV: pdf_bytes
+    INV-->>U: FileResponse PDF (on-the-fly)
+  else
+    R-->>INV: html
+    INV-->>U: HttpResponse HTML (on-the-fly)
+  end
 ```
 
 ---
 
 ### Resumen ejecutivo
 
-- Emisión **idempotente** para **ventas pagadas** con numeración **atómica** por sucursal/tipo/punto de venta.
-- **Snapshot** rico (ítems, ajustes y totales derivados) → plantillas claras: **precio de lista**, **descuento/promos** y sello **PAGADO**.
-- **Form minimal** (cero ruido): solo **Tipo** y, si aplica, **Cliente de facturación**.
-- Tenancy, permisos y CBVs alineados al estándar del proyecto.
-- Integrado con `sales` y `payments`; listo para crecer a anulaciones/exportes/impresoras térmicas.
+- El módulo **Invoicing** emite comprobantes no fiscales para **ventas pagadas**, con numeración **atómica** por `Sucursal + Tipo + Punto de Venta`.
+- El **snapshot** JSON es la única fuente de verdad para imprimir/descargar; contiene ítems, totales, ajustes y metadatos suficientes.
+- La impresión/descarga de comprobantes se realiza **on-demand** a partir del snapshot, sin guardar HTML/PDF en disco.
+- La arquitectura queda alineada con:
+  - `sales` (ventas, ajustes, promos),
+  - `payments` (saldo y `payment_status`),
+  - `customers` (perfiles de facturación),
+  - Tenancy y permisos corporativos.
+- Con este diseño, regenerar comprobantes históricos es siempre posible mientras exista el registro `Comprobante` + `snapshot` en la base.
 
 # Módulo 10 — `apps/notifications` (Plantillas, Envíos y Log de Notificaciones)
 
