@@ -3,13 +3,26 @@ from django.urls import path, include
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.conf.urls.static import static
-from apps.org.views import PostLoginRedirectView
+from apps.org.views import PostLoginRedirectView, DashboardView
 from django.contrib.auth.decorators import login_required
+from apps.saas.selectors import planes_activos
+from django.views.generic import TemplateView
+from django.shortcuts import render
+
+
+def public_home_view(request):
+    # Si ya está logueado, no tiene sentido mostrar la pública
+    if request.user.is_authenticated:
+        return redirect("home")
+    planes = planes_activos()
+    return render(request, "home_public.html", {"planes": planes})
+
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", include("apps.accounts.urls")),
+    path("public/", public_home_view, name="public_home"),
 
     # apps
     path("org/", include("apps.org.urls")),
@@ -27,11 +40,11 @@ urlpatterns = [
     ),
     path("saas/", include("apps.saas.urls", namespace="saas")),
     path("reports/", include("apps.reports.urls", namespace="reports")),
-    path("", login_required(TemplateView.as_view(
+    path("", login_required(DashboardView.as_view(
         template_name="home_dashboard.html")), name="home"),
 
     path("caja/", include(("apps.cashbox.urls", "cashbox"), namespace="cashbox")),
-    # path("", TemplateView.as_view(template_name="marketing/home.html"), name="home"),
+
     path("post-login/", PostLoginRedirectView.as_view(), name="post_login"),
 ]
 

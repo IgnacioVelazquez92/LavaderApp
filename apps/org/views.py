@@ -1,5 +1,12 @@
 # apps/org/views.py
 
+from apps.cashbox.models import TurnoCaja
+from apps.payments.models import Pago
+from apps.sales.models import Venta
+from django.db.models.functions import TruncHour
+from django.db.models import Sum, Count
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
@@ -8,7 +15,7 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render, get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.views import View
-from django.views.generic import ListView, CreateView, UpdateView
+from django.views.generic import ListView, CreateView, UpdateView, TemplateView
 
 from apps.accounts.models import EmpresaMembership
 from apps.org.forms.org import EmpresaForm, SucursalForm, EmpleadoForm
@@ -655,3 +662,84 @@ class EmpleadoDestroyUserView(EmpresaPermRequiredMixin, View):
         messages.success(
             request, f"Se eliminó el usuario {email} del sistema.")
         return redirect("org:empleados")
+
+
+# -------------------------------
+class DashboardView(LoginRequiredMixin, TemplateView):
+    template_name = "home_dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+
+        empresa = getattr(self.request, "empresa_activa", None)
+        sucursal_id = self.request.session.get("sucursal_id")
+        hoy = timezone.localdate()
+        tz = timezone.get_current_timezone()
+
+        # ------- Querysets base -------
+        ventas_qs = Venta.objects.all()
+        pagos_qs = Pago.objects.select_related(
+            "venta")  # empresa/sucursal vía venta
+
+        if empresa:
+            ventas_qs = ventas_qs.filter(empresa=empresa)
+            pagos_qs = pagos_qs.filter(venta__empresa=empresa)
+
+        if sucursal_id:
+            ventas_qs = ventas_qs.filter(sucursal_id=sucursal_id)
+            pagos_qs = pagos_qs.filter(venta__sucursal_id=sucursal_id)
+
+        # ------- Filtros del día -------
+        ventas_hoy = ventas_qs.filter(creado__date=hoy)
+        pagos_hoy = pagos_qs.filter(creado_en__date=hoy, es_propina=False)
+
+        # ------- KPIs -------
+        ventas_total = ventas_hoy.aggregate(total=Sum("total"))["total"] or 0
+        ventas_count = ventas_hoy.aggregate(c=Count("id"))["c"] or 0
+        pagos_total = pagos_hoy.aggregate(total=Sum("monto"))["total"] or 0
+
+        diferencia = float(ventas_total) - float(pagos_total)
+        alerta_diferencia = abs(diferencia) > 0.01
+
+        # ------- Caja / turno actual -------
+        caja_abierta = False
+        turno_actual = None
+        if empresa and sucursal_id:
+            turno_actual = (
+                TurnoCaja.objects
+                .filter(empresa=empresa, sucursal_id=sucursal_id, cerrado_en__isnull=True)
+                .order_by("-abierto_en")
+                .first()
+            )
+            caja_abierta = turno_actual is not None
+
+        # ------- Serie por hora (00..23) para Chart.js -------
+        ventas_por_hora = (
+            ventas_hoy
+            .annotate(hora=TruncHour("creado"))
+            .values("hora")
+            .annotate(monto=Sum("total"))
+            .order_by("hora")
+        )
+
+        labels_24h = [f"{h:02d}:00" for h in range(24)]
+        buckets = {h: 0.0 for h in range(24)}
+        for r in ventas_por_hora:
+            # r["hora"] es naive/aware según DB; normalizamos a TZ actual
+            h_local = r["hora"].astimezone(tz).hour
+            buckets[h_local] = float(r["monto"] or 0.0)
+        serie_24h = [buckets[h] for h in range(24)]
+
+        # ------- Contexto -------
+        ctx.update(
+            ventas_total=ventas_total,
+            ventas_count=ventas_count,
+            pagos_total=pagos_total,
+            diferencia=diferencia,
+            alerta_diferencia=alerta_diferencia,
+            caja_abierta=caja_abierta,
+            turno_actual=turno_actual,  # opcional por si querés mostrar algo del turno
+            horas_labels=labels_24h,
+            serie_ventas_horas=serie_24h,
+        )
+        return ctx

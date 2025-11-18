@@ -76,7 +76,7 @@ ROOT_URLCONF = "lavaderos.urls"  # ajusta al nombre real de tu módulo de URLs r
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        # overrides globales (account/, base.html, etc.)
+        # overrides globales (account/, base_public.html, etc.)
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
@@ -109,7 +109,8 @@ ACCOUNT_USERNAME_REQUIRED = False
 
 # Rutas de post-login/logout
 LOGIN_REDIRECT_URL = "/post-login/"
-LOGOUT_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/public/"
+LOGIN_URL = '/public/'
 
 # Permitir cerrar sesión con GET (sin página de confirmación)
 ACCOUNT_LOGOUT_ON_GET = True

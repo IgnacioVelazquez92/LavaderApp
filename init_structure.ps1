@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force -Path "$BASE\media"
 New-Item -ItemType Directory -Force -Path "$BASE\staticfiles"
 
 # Crear archivos vacíos
-New-Item -ItemType File -Force -Path "$BASE\templates\base.html"
+New-Item -ItemType File -Force -Path "$BASE\templates\base_public.html"
 New-Item -ItemType File -Force -Path "$BASE\templates\includes\_navbar.html"
 New-Item -ItemType File -Force -Path "$BASE\templates\includes\_messages.html"
 New-Item -ItemType File -Force -Path "$BASE\templates\includes\_footer.html"

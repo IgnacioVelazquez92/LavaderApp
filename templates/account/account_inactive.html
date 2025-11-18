@@ -1,0 +1,22 @@
+{% extends "base_public.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Cuenta desactivada" %}{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 600px;">
+  <div class="card shadow-sm border-0">
+    <div class="card-body text-center py-5">
+      <i class="bi bi-person-x display-4 text-danger mb-3"></i>
+      <h1 class="h4 mb-3">{% trans "Cuenta desactivada" %}</h1>
+      <p class="text-muted mb-4">
+        {% trans "Tu cuenta ha sido desactivada por un administrador o aún no está disponible para iniciar sesión." %}
+      </p>
+
+      <a href="{% url 'account_login' %}" class="btn btn-outline-primary">
+        <i class="bi bi-box-arrow-in-right"></i> {% trans "Volver al inicio de sesión" %}
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

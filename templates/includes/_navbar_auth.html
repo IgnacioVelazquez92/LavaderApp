@@ -1,36 +1,103 @@
+{# templates/includes/_navbar_auth.html #}
 {% load static %}
-<nav class="navbar navbar-expand-lg bg-body border-bottom shadow-sm sticky-top">
-  <div class="container">
-    <a class="navbar-brand d-flex align-items-center" href="/post-login/">
-      <img src="{% static 'img/logo.png' %}" alt="Logo" width="32" height="32" class="me-2">
-      <span class="fw-bold">Lavaderos</span>
+
+{# — Pre-resolver URLs opcionales sin romper si no existen — #}
+{% url 'home' as url_home %}
+
+{# Allauth (algunas pueden no existir según configuración) #}
+{% url 'account_email' as url_account_email %}
+{% url 'account_change_password' as url_account_change_password %}
+{% url 'account_logout' as url_account_logout %}
+
+{# Si tenés vistas propias de perfil/configuración, agregalas acá: #}
+{% url 'accounts:profile' as url_accounts_profile %}
+{% url 'accounts:settings' as url_accounts_settings %}
+
+<nav class="navbar navbar-expand-lg bg-body border-bottom sticky-top">
+  <div class="container-fluid">
+
+    {# Brand con logo de lavadero o fallback #}
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_home|default:'/' }}">
+      {% if request.empresa_activa and request.empresa_activa.logo %}
+        <img src="{{ request.empresa_activa.logo.url }}" alt="Logo" class="brand-logo">
+      {% elif request.empresa_activa and request.empresa_activa.logo_url %}
+        <img src="{{ request.empresa_activa.logo_url }}" alt="Logo" class="brand-logo">
+      {% else %}
+        <img src="{% static 'img/logo.png' %}" alt="Logo" class="brand-logo">
+      {% endif %}
+      <span class="d-none d-sm-inline">{{ request.empresa_activa.nombre|default:"Lavaderos" }}</span>
     </a>
 
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar"
-      aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
-    </button>
+    <div class="d-flex align-items-center gap-2 ms-auto">
 
-    <div class="collapse navbar-collapse" id="mainNavbar">
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <!-- Nada: menú de negocio está en el sidebar -->
-      </ul>
+      {# Botón: abrir sidebar en mobile (Offcanvas) #}
+      <button class="btn btn-outline-secondary btn-icon d-lg-none"
+              type="button"
+              aria-label="Menú"
+              data-bs-toggle="offcanvas"
+              data-bs-target="#mobileSidebar"
+              title="Menú">
+        <i class="bi bi-layout-sidebar-inset"></i>
+      </button>
 
-      <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
-        <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown"
-            aria-expanded="false">
-            {{ user.get_full_name|default:user.email|default:user.username }}
-          </a>
-          <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item" href="/cuenta/perfil/">Perfil</a></li>
-            <li><a class="dropdown-item" href="/cuenta/membresias/">Membresías</a></li>
-            <li><a class="dropdown-item" href="{% url 'account_change_password' %}">Cambiar contraseña</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item" href="/accounts/logout/">Salir</a></li>
-          </ul>
-        </li>
-      </ul>
+      {# User menu — Mobile: icon-only; Desktop: nombre + caret #}
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-icon d-inline d-lg-none"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                aria-label="Cuenta">
+          <i class="bi bi-person-circle"></i>
+        </button>
+
+        <button class="btn btn-outline-secondary d-none d-lg-inline-flex align-items-center"
+                data-bs-toggle="dropdown"
+                aria-expanded="false">
+          <i class="bi bi-person-circle me-2"></i>
+          <span class="me-1 text-truncate" style="max-width: 180px;">
+            {{ request.user.get_full_name|default:request.user.username }}
+          </span>
+          <i class="bi bi-caret-down-fill"></i>
+        </button>
+
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          <li class="dropdown-header">
+            {{ request.user.get_full_name|default:request.user.username }}
+            {% if request.empresa_activa %}
+              <div class="small text-muted">{{ request.empresa_activa.nombre }}</div>
+            {% endif %}
+          </li>
+          <li><hr class="dropdown-divider"></li>
+
+          {# Preferí mostrar primero vistas propias si existen #}
+          {% if url_accounts_profile %}
+            <li><a class="dropdown-item" href="{{ url_accounts_profile }}">
+              <i class="bi bi-person-gear me-2"></i> Perfil
+            </a></li>
+          {% elif url_accounts_settings %}
+            <li><a class="dropdown-item" href="{{ url_accounts_settings }}">
+              <i class="bi bi-person-gear me-2"></i> Configuración
+            </a></li>
+          {% elif url_account_email %}
+            <li><a class="dropdown-item" href="{{ url_account_email }}">
+              <i class="bi bi-envelope-at me-2"></i> Emails
+            </a></li>
+          {% endif %}
+
+          {% if url_account_change_password %}
+            <li><a class="dropdown-item" href="{{ url_account_change_password }}">
+              <i class="bi bi-key me-2"></i> Cambiar contraseña
+            </a></li>
+          {% endif %}
+
+          <li><hr class="dropdown-divider"></li>
+
+          {% if url_account_logout %}
+            <li><a class="dropdown-item text-danger" href="{{ url_account_logout }}">
+              <i class="bi bi-box-arrow-right me-2"></i> Cerrar sesión
+            </a></li>
+          {% endif %}
+        </ul>
+      </div>
     </div>
   </div>
 </nav>

@@ -1,26 +1,21 @@
-# ✅ Reemplazá COMPLETAMENTE el archivo por este contenido.
-#    Así mantenemos tus helpers anteriores *y* agregamos los nuevos símbolos
-#    que ya usan sales/payments (require_turno_abierto, SinTurnoAbierto).
-
 # apps/cashbox/services/guards.py
 """
 Guardas/validaciones reutilizables para Turnos de Caja.
 
-Objetivos:
-- Mantener compatibilidad con tus helpers previos:
+Compatibilidad:
+- API previa:
     - ensure_no_turno_abierto(...)
     - ensure_turno_abierto(...)
-    - ensure_empresa_habilitada_para_turnos(...)
-- Agregar los símbolos que estamos importando desde sales/payments:
+    - TurnoInexistenteError / TurnoExistenteError
+- API nueva:
     - get_turno_abierto(empresa, sucursal)
     - require_turno_abierto(empresa, sucursal)
-    - SinTurnoAbierto
+    - SinTurnoAbierto (subclase de TurnoInexistenteError)
 
-Convenciones:
-- A nivel de *enforcement mínimo* solemos exigir que exista *algún turno abierto*
-  en la sucursal (no necesariamente del mismo usuario), para que el flujo de caja
-  sea consistente con los pagos/ventas.
-- Si querés enforcement por-usuario, usá los helpers `ensure_*` con `usuario=...`.
+Criterio:
+- Enforcement mínimo a nivel sucursal: alcanza con que haya *algún* turno abierto
+  en la sucursal (no necesariamente del mismo usuario). Para enforcement por-usuario,
+  usá los helpers ensure_* con usuario=...
 """
 
 from __future__ import annotations
@@ -34,20 +29,29 @@ from apps.cashbox.models import TurnoCaja
 
 
 # ===========================
-# Excepciones públicas
+# Jerarquía de errores (compat)
 # ===========================
 
-class SinTurnoAbierto(Exception):
-    """No hay un TurnoCaja abierto para la sucursal/empresa dada."""
-
-
-class TurnoExistenteError(ValidationError):
-    """Se intentó abrir un turno nuevo pero ya hay uno abierto (según la política aplicada)."""
+class TurnoError(ValidationError):
+    """Base de errores de turnos de caja (compatible con flujos de forms/UX)."""
     pass
 
 
-class TurnoInexistenteError(ValidationError):
+class TurnoInexistenteError(TurnoError):
     """No se encontró turno abierto (según la política aplicada)."""
+    pass
+
+
+class SinTurnoAbierto(TurnoInexistenteError):
+    """
+    Alias semántico moderno para 'no hay turno abierto'.
+    Hereda de TurnoInexistenteError para compatibilidad hacia atrás.
+    """
+    pass
+
+
+class TurnoExistenteError(TurnoError):
+    """Se intentó abrir un turno nuevo pero ya hay uno abierto."""
     pass
 
 
@@ -72,8 +76,8 @@ def get_turno_abierto(empresa, sucursal) -> Optional[TurnoCaja]:
 
 def require_turno_abierto(empresa, sucursal) -> TurnoCaja:
     """
-    Retorna el turno abierto sucursal/empresa o lanza SinTurnoAbierto si no existe.
-    (Enforcement sucursal-level, recomendado para coherencia de caja.)
+    Retorna el turno abierto o lanza SinTurnoAbierto (subclase de TurnoInexistenteError).
+    Recomendado para coherencia de caja en vistas de ventas/pagos.
     """
     turno = get_turno_abierto(empresa, sucursal)
     if not turno:
@@ -83,14 +87,14 @@ def require_turno_abierto(empresa, sucursal) -> TurnoCaja:
 
 
 # ===========================
-# API previa (compat)
+# API previa (compatibilidad)
 # ===========================
 
 def ensure_no_turno_abierto(*, empresa, sucursal, usuario=None) -> bool:
     """
     Verifica que NO exista un turno abierto.
-    - Si `usuario` se provee → la verificación es por-usuario (abierto_por=usuario).
-    - Si `usuario` es None → la verificación es por sucursal (cualquier usuario).
+    - Si `usuario` se provee → verificación por-usuario (abierto_por=usuario).
+    - Si `usuario` es None → verificación por sucursal (cualquier usuario).
     Lanza TurnoExistenteError si encuentra uno abierto.
     """
     qs = TurnoCaja.objects.filter(
@@ -98,9 +102,8 @@ def ensure_no_turno_abierto(*, empresa, sucursal, usuario=None) -> bool:
         sucursal=sucursal,
         cerrado_en__isnull=True,
     )
-    # Si querés enforcement por usuario (opcional)
     if usuario is not None:
-        # Ajustá a tu campo real de usuario en TurnoCaja (ej.: abierto_por)
+        # Ajustar al nombre real del campo si difiere
         qs = qs.filter(abierto_por=usuario)
 
     if qs.exists():
@@ -112,9 +115,8 @@ def ensure_no_turno_abierto(*, empresa, sucursal, usuario=None) -> bool:
 def ensure_turno_abierto(*, empresa, sucursal, usuario=None) -> TurnoCaja:
     """
     Verifica que exista un turno abierto.
-    - Si `usuario` se provee → intenta encontrar turno abierto de ese usuario.
-      Si no existe, falla con TurnoInexistenteError.
-    - Si `usuario` es None → alcanza con que haya *algún* turno abierto en la sucursal.
+    - Con `usuario` → busca turno abierto de ese usuario, sino TurnoInexistenteError.
+    - Sin `usuario` → alcanza con *algún* turno abierto en la sucursal.
     Devuelve el turno encontrado.
     """
     qs = TurnoCaja.objects.filter(
@@ -124,7 +126,6 @@ def ensure_turno_abierto(*, empresa, sucursal, usuario=None) -> TurnoCaja:
     )
 
     if usuario is not None:
-        # Ajustá a tu campo real de usuario en TurnoCaja (ej.: abierto_por)
         turno = qs.filter(abierto_por=usuario).order_by("-abierto_en").first()
         if not turno:
             raise TurnoInexistenteError(
@@ -134,8 +135,8 @@ def ensure_turno_abierto(*, empresa, sucursal, usuario=None) -> TurnoCaja:
 
     turno = qs.order_by("-abierto_en").first()
     if not turno:
-        raise TurnoInexistenteError(
-            _("No hay un turno abierto para esta sucursal."))
+        # Usamos SinTurnoAbierto (subclase de TurnoInexistenteError) para mantener compat
+        raise SinTurnoAbierto(_("No hay un turno abierto para esta sucursal."))
     return turno
 
 
@@ -145,8 +146,7 @@ def ensure_empresa_habilitada_para_turnos(*, empresa) -> bool:
     Si tu modelo de suscripción define flags, validalos acá.
     """
     plan = getattr(empresa, "suscripcion", None)
-    # Cambiá el nombre del flag según tu modelo, o dejalo no restrictivo por ahora.
     if plan and hasattr(plan, "permite_turnos_caja") and not plan.permite_turnos_caja:
-        raise ValidationError(
+        raise TurnoError(
             _("Tu plan actual no incluye el módulo de caja / turnos."))
     return True

@@ -1,33 +1,41 @@
 {# templates/home_dashboard.html #}
 {% extends "base_auth.html" %}
+{% load static %}
 {% block title %}Panel — Lavaderos{% endblock %}
 
 {% block content %}
-  {# Evitamos "with ... if ..." (Django no lo permite). Usamos bloques separados. #}
-
+{# — Header compacto, icon-only actions — #}
   <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-3">
-    <div>
+    <div class="mb-2 mb-md-0">
       <h1 class="h3 mb-1">Panel</h1>
-
       {% if request.empresa_activa %}
         {% with suc_count=request.empresa_activa.sucursales.count %}
           <p class="text-body-secondary mb-0">
-            Lavadero: <strong>{{ request.empresa_activa.nombre }}</strong>
+            <span class="me-1">Lavadero:</span>
+            <strong>{{ request.empresa_activa.nombre }}</strong>
             <span class="ms-2 text-muted">({{ suc_count }} {% if suc_count == 1 %}sucursal{% else %}sucursales{% endif %})</span>
+            {% if caja_abierta %}
+              <span class="badge rounded-pill text-bg-success ms-2">Caja abierta</span>
+            {% else %}
+              <span class="badge rounded-pill text-bg-secondary ms-2">Caja cerrada</span>
+            {% endif %}
           </p>
         {% endwith %}
-      {% else %}
-        <p class="text-body-secondary mb-0">Comenzá creando tu lavadero.</p>
       {% endif %}
     </div>
 
     {% if request.empresa_activa and request.empresa_activa.sucursales.exists %}
-      <div class="mt-3 mt-md-0">
-        <form method="post" action="{% url 'org:selector' %}">
+      <div class="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap">
+        {# Selector de sucursal compacto #}
+        <form method="post" action="{% url 'org:selector' %}" class="d-flex align-items-center gap-1">
           {% csrf_token %}
-          <div class="input-group input-group-sm">
-            <label class="input-group-text" for="dashSucursalSelect">Sucursal</label>
-            <select class="form-select" id="dashSucursalSelect" name="sucursal" onchange="this.form.submit()">
+          <label for="dashSucursalSelect" class="visually-hidden">Sucursal</label>
+          <div class="input-group input-group-sm w-auto">
+            <span class="input-group-text"><i class="bi bi-shop"></i></span>
+            <select class="form-select form-select-sm w-auto"
+                    id="dashSucursalSelect"
+                    name="sucursal"
+                    onchange="this.form.submit()">
               {% for s in request.empresa_activa.sucursales.all %}
                 <option value="{{ s.id }}" {% if request.session.sucursal_id == s.id %}selected{% endif %}>
                   {{ s.nombre }}
@@ -36,133 +44,164 @@
             </select>
           </div>
         </form>
+
+        {# Botón: Actualizar (icon-only) #}
+        <button type="button"
+                class="btn btn-outline-secondary btn-icon"
+                aria-label="Actualizar"
+                data-bs-toggle="tooltip"
+                data-bs-title="Actualizar"
+                onclick="window.location.reload()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+
+        {# CTA contextual (icon-only) #}
+        {% if caja_abierta %}
+          <a href="{% url 'sales:create' %}"
+            class="btn btn-primary btn-icon"
+            aria-label="Nueva venta"
+            data-bs-toggle="tooltip"
+            data-bs-title="Nueva venta">
+            <i class="bi bi-receipt"></i>
+          </a>
+        {% else %}
+          {% if url_open_caja %}
+            <a href="{{ url_open_caja }}"
+              class="btn btn-warning btn-icon"
+              aria-label="Abrir caja"
+              data-bs-toggle="tooltip"
+              data-bs-title="Abrir caja">
+              <i class="bi bi-cash-coin"></i>
+            </a>
+          {% endif %}
+        {% endif %}
       </div>
     {% endif %}
   </div>
 
-  {# === Estado 1: NO HAY EMPRESA === #}
+
+  {# Onboarding #}
   {% if not request.empresa_activa %}
     <div class="card border">
       <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between">
         <div class="me-md-3">
           <h2 class="h5 mb-1">Bienvenido 👋</h2>
-          <p class="mb-0 text-body-secondary">Creá tu lavadero para configurar tu marca y continuar con el alta de la primera sucursal.</p>
+          <p class="mb-0 text-body-secondary">Creá tu lavadero para continuar.</p>
         </div>
-        <a href="{% url 'org:empresa_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
-          <i class="bi bi-building-add me-1"></i> Crear lavadero
-        </a>
+        <a href="{% url 'org:empresa_nueva' %}" class="btn btn-primary mt-3 mt-md-0"><i class="bi bi-building-add me-1"></i> Crear lavadero</a>
       </div>
     </div>
-  {% endif %}
 
-  {# === Estado 2: HAY EMPRESA PERO SIN SUCURSALES === #}
-  {% if request.empresa_activa and not request.empresa_activa.sucursales.exists %}
+  {% elif request.empresa_activa and not request.empresa_activa.sucursales.exists %}
     <div class="card border">
       <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between">
         <div class="me-md-3">
           <h2 class="h5 mb-1">Siguiente paso</h2>
-          <p class="mb-0 text-body-secondary">
-            Creá tu <strong>primera sucursal</strong> para empezar a operar.
-          </p>
+          <p class="mb-0 text-body-secondary">Creá tu <strong>primera sucursal</strong> para empezar a operar.</p>
         </div>
-        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0">
-          <i class="bi bi-pin-map-fill me-1"></i> Crear sucursal
-        </a>
+        <a href="{% url 'org:sucursal_nueva' %}" class="btn btn-primary mt-3 mt-md-0"><i class="bi bi-pin-map-fill me-1"></i> Crear sucursal</a>
       </div>
     </div>
-  {% endif %}
 
-  {# === Estado 3: LISTO PARA OPERAR (empresa + >=1 sucursal) === #}
-  {% if request.empresa_activa and request.empresa_activa.sucursales.exists %}
+  {% else %}
+    {# Dashboard operativo #}
     <div class="row g-3">
-      {# Acciones rápidas #}
-      <div class="col-12 col-xl-6">
-        <div class="card h-100 border">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Acciones rápidas</h2>
-            <div class="d-flex flex-wrap gap-2">
-              <button type="button" class="btn btn-primary btn-sm" disabled data-bs-toggle="tooltip" data-bs-title="Próximamente">
-                <i class="bi bi-receipt me-1"></i> Nueva venta
-              </button>
-              <a class="btn btn-outline-primary btn-sm" href="{% url 'org:sucursal_nueva' %}">
-                <i class="bi bi-pin-map me-1"></i> Nueva sucursal
-              </a>
-              <a class="btn btn-outline-primary btn-sm" href="{% url 'org:sucursales' %}">
-                <i class="bi bi-list-ul me-1"></i> Ver sucursales
-              </a>
-              <a class="btn btn-outline-secondary btn-sm" href="{% url 'org:empresas' %}">
-                <i class="bi bi-building me-1"></i> Editar lavadero
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {# KPIs placeholder #}
-      <div class="col-12 col-xl-6">
-        <div class="card h-100 border">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Resumen de hoy</h2>
-            <div class="row g-3">
-              <div class="col-6">
-                <div class="border rounded p-3 h-100">
-                  <div class="text-muted small">Ventas</div>
-                  <div class="fs-4 fw-semibold">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="border rounded p-3 h-100">
-                  <div class="text-muted small">Ingresos</div>
-                  <div class="fs-4 fw-semibold">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="border rounded p-3 h-100">
-                  <div class="text-muted small">Trabajos en curso</div>
-                  <div class="fs-4 fw-semibold">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="border rounded p-3 h-100">
-                  <div class="text-muted small">Clientes atendidos</div>
-                  <div class="fs-4 fw-semibold">—</div>
-                </div>
-              </div>
-            </div>
-            <div class="mt-3">
-              <button type="button" class="btn btn-outline-secondary btn-sm" disabled data-bs-toggle="tooltip" data-bs-title="Próximamente">
-                <i class="bi bi-graph-up-arrow me-1"></i> Ver reportes
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {# Tips / ayuda contextual #}
+      {# KPIs #}
       <div class="col-12">
-        <div class="card border">
-          <div class="card-body">
-            <h2 class="h6 mb-2">Sugerencias</h2>
-            <ul class="mb-0 text-body-secondary">
-              <li>Configurá tus <em>precios</em> y <em>servicios</em></li>
-              <li>Completá el <a href="{% url 'org:empresas' %}">perfil de tu lavadero</a> para una mejor presentación.</li>
-              <li>Agregá más <a href="{% url 'org:sucursales' %}">sucursales</a> si tu negocio crece.</li>
-            </ul>
+        <div class="row g-3">
+          <div class="col-6 col-lg-3">
+            <div class="border rounded p-3 h-100 kpi">
+              <div class="kpi-label">Ventas del día</div>
+              <div class="kpi-value">{{ ventas_count|default:0 }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="border rounded p-3 h-100 kpi">
+              <div class="kpi-label">Monto vendido</div>
+              <div class="kpi-value">${{ ventas_total|floatformat:2 }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="border rounded p-3 h-100 kpi">
+              <div class="kpi-label">Pagos registrados</div>
+              <div class="kpi-value">${{ pagos_total|floatformat:2 }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="border rounded p-3 h-100 kpi">
+              <div class="kpi-label">Diferencia (V - P)</div>
+              <div class="kpi-value {% if diferencia > 0.01 %}text-warning{% elif diferencia < -0.01 %}text-danger{% else %}text-success{% endif %}">
+                ${{ diferencia|floatformat:2 }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
+      
+      {% if alerta_diferencia %}
+        <div class="col-12">
+          <div class="alert {% if diferencia < -0.01 %}alert-danger{% else %}alert-warning{% endif %} d-flex align-items-center" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <div>Hay una diferencia entre lo vendido y lo cobrado hoy. Revisá caja y pagos.</div>
+          </div>
+        </div>
+      {% endif %}
+
+    {# Inserta los datos como JSON válido oculto en el DOM #}
+    {{ horas_labels|json_script:"dash-labels" }}
+    {{ serie_ventas_horas|json_script:"dash-series" }}
+
+    <div class="col-12">
+      <div class="card border">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 mb-0">Ventas por hora (hoy)</h2>
+            <span class="text-muted small">{{ request.empresa_activa.nombre }}</span>
+          </div>
+          <canvas id="chartVentasDia" height="120"></canvas>
+          <p class="text-muted small mt-2 mb-0">Se actualiza al recargar la página.</p>
+        </div>
+      </div>
+    </div>
+
     </div>
   {% endif %}
 {% endblock %}
 
 {% block extra_js %}
-<script>
-  // Habilitar tooltips Bootstrap (para botones “Próximamente”)
-  document.addEventListener('DOMContentLoaded', function () {
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-    tooltipTriggerList.forEach(function (tooltipTriggerEl) {
-      new bootstrap.Tooltip(tooltipTriggerEl)
-    })
-  });
-</script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const elLabels = document.getElementById('dash-labels');
+      const elSeries = document.getElementById('dash-series');
+      if (!elLabels || !elSeries) return;
+  
+      const labels = JSON.parse(elLabels.textContent);
+      const series = JSON.parse(elSeries.textContent);
+  
+      const $canvas = document.getElementById('chartVentasDia');
+      if ($canvas) {
+        new Chart($canvas.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{ label: 'Monto vendido', data: series, borderWidth: 1 }]
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }
+          }
+        });
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+      const tts = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+      tts.forEach(el => new bootstrap.Tooltip(el));
+    });
+  </script>
+  
 {% endblock %}

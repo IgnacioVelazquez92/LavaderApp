@@ -10,7 +10,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from apps.sales.calculations import calcular_totales
+from apps.sales.calculations import calcular_totales, calcular_montos_por_ajuste
 from apps.sales.fsm import VentaEstado, puede_transicionar
 from apps.sales.models import Venta
 from apps.cashbox.services.guards import require_turno_abierto, SinTurnoAbierto
@@ -138,26 +138,82 @@ def recalcular_totales(*, venta: Venta) -> Venta:
     Nota:
     - `calculations.calcular_totales` devuelve `saldo_pendiente = total` como baseline.
       La capa de payments luego debe recalcularlo en base a pagos reales.
+
+    Además:
+    - Actualiza `amount_applied` en cada SalesAdjustment, prorrateando de forma
+      que la suma de `amount_applied` sea exactamente igual a `venta.descuento`.
     """
+    from decimal import Decimal as _D
+
     items_qs = venta.items.all()
-    # Pasamos los ajustes (descuentos) para soportar item/order, %/monto:
     adjustments_qs = venta.adjustments.select_related("item").all()
 
+    # 1) Totales "oficiales" (NO tocamos la lógica existente)
     data = calcular_totales(
         items=items_qs,
-        descuento=venta.descuento,       # legacy; será ignorado si adjustments no está vacío
-        propina=venta.propina or Decimal("0.00"),
+        descuento=venta.descuento,       # legacy; se ignora si adjustments no está vacío
+        propina=venta.propina or _D("0.00"),
         adjustments=adjustments_qs,
     )
     for field, value in data.items():
         setattr(venta, field, value)
     venta.save(update_fields=list(data.keys()) + ["actualizado"])
-    return venta
 
+    # 2) Resetear montos aplicados por ajuste (baseline = 0)
+    venta.adjustments.update(amount_applied=_D("0.00"))
+
+    # Si no hay ajustes o no hay descuento total, no hay nada que prorratear
+    if not adjustments_qs or venta.descuento <= _D("0.00"):
+        return venta
+
+    # 3) Calcular montos "brutos" por ajuste usando la misma lógica conceptual
+    montos_raw = calcular_montos_por_ajuste(
+        items=items_qs,
+        adjustments=adjustments_qs,
+    )
+    total_raw = sum(montos_raw.values(), _D("0.00"))
+
+    if total_raw <= _D("0.00"):
+        # No se pudo descomponer el descuento por ajuste de forma significativa
+        return venta
+
+    # 4) Prorratear para que la suma matchee EXACTAMENTE venta.descuento
+    factor = venta.descuento / \
+        total_raw if total_raw != _D("0.00") else _D("0.00")
+
+    ids = [adj.id for adj in adjustments_qs]
+    scaled: dict[int, Decimal] = {}
+    acumulado = _D("0.00")
+
+    # Asignar a todos menos el último, corrigiendo centavos al final
+    for adj_id in ids[:-1]:
+        raw = montos_raw.get(adj_id, _D("0.00"))
+        val = (raw * factor).quantize(_D("0.01"))
+        if val < _D("0.00"):
+            val = _D("0.00")
+        scaled[adj_id] = val
+        acumulado += val
+
+    if ids:
+        last_id = ids[-1]
+        last_val = venta.descuento - acumulado
+        if last_val < _D("0.00"):
+            last_val = _D("0.00")
+        scaled[last_id] = last_val
+
+    # 5) Persistir amount_applied en cada ajuste
+    for adj in adjustments_qs:
+        monto = scaled.get(adj.id, _D("0.00"))
+        if adj.amount_applied != monto:
+            adj.amount_applied = monto
+            adj.save(update_fields=["amount_applied"])
+
+    return venta
 
 # ---------------------------------------------------------------------
 # FSM del PROCESO (estado)
 # ---------------------------------------------------------------------
+
 
 @transaction.atomic
 def cambiar_estado(*, venta: Venta, nuevo_estado: str) -> Venta:

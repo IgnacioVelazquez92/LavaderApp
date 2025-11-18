@@ -1,0 +1,27 @@
+{% extends "base_auth.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 520px;">
+  <h1 class="h4 mb-3">{% trans "Confirmar email" %}</h1>
+
+  {% if confirmation %}
+    <p class="mb-3">
+      {% blocktrans with email=confirmation.email_address.email %}
+        Confirmá que <strong>{{ email }}</strong> es tu dirección de correo.
+      {% endblocktrans %}
+    </p>
+
+    <form method="post" action="{% url 'account_confirm_email' confirmation.key %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-primary w-100">
+        <i class="bi bi-envelope-check"></i> {% trans "Confirmar" %}
+      </button>
+    </form>
+  {% else %}
+    <div class="alert alert-danger">
+      {% trans "Este enlace de confirmación no es válido o ya fue usado." %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

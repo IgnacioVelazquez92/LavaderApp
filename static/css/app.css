@@ -1,0 +1,124 @@
+/* — Botones solo-ícono, cuadrados y sin “salto” de texto — */
+.btn-icon {
+    width: 2.5rem;
+    /* 40px aprox */
+    height: 2.5rem;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.btn-icon>i {
+    font-size: 1.1rem;
+}
+
+/* — Cards KPI compactas y consistentes — */
+.kpi {
+    min-height: 84px;
+    /* evita “bailes” por wraps */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.kpi .kpi-label {
+    font-size: .8rem;
+    color: var(--bs-secondary-color);
+}
+
+.kpi .kpi-value {
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+/* — Grillas responsivas suaves — */
+@media (max-width: 575.98px) {
+    .kpi .kpi-value {
+        font-size: 1.25rem;
+    }
+}
+
+
+/* static/css/app.css */
+.brand-logo {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: .35rem;
+}
+
+.btn-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.btn-icon>i {
+    font-size: 1.1rem;
+}
+
+.navbar .text-truncate {
+    display: inline-block;
+    vertical-align: middle;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* Sidebar fijo y con scroll interno */
+.sidebar-app {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/* Estilo uniforme para los iconos y enlaces */
+.sidebar-app .nav-link {
+    color: var(--bs-body-color);
+    font-size: 0.95rem;
+}
+
+.sidebar-app .nav-link:hover {
+    background-color: var(--bs-secondary-bg);
+}
+
+.sidebar-app .nav-link.active {
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary);
+    font-weight: 600;
+}
+
+/* Acordeones más compactos */
+.sidebar-app .accordion-button {
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+}
+
+.sidebar-app .accordion-button i {
+    font-size: 1rem;
+}
+
+.sidebar-app .accordion-item {
+    border: none;
+}
+
+/* Ocultar scrollbar feo en WebKit */
+.sidebar-app::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar-app::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}

@@ -1,0 +1,177 @@
+{% extends "base_public.html" %}
+{% load static %}
+
+{% block title %}Lavaderos — Vendé más y cerrá caja sin dolor{% endblock %}
+{% block body_class %}bg-hero{% endblock %}
+
+{% block content %}
+  <section class="position-relative">
+    <div class="bubble"></div><div class="bubble"></div><div class="bubble"></div><div class="bubble"></div><div class="bubble"></div>
+
+    <div class="container py-5 py-lg-6">
+      <div class="row align-items-center g-4">
+        <div class="col-12 col-lg-6" data-aos="fade-up">
+          <h1 class="display-6 fw-bold mb-3">Tu lavadero, <span class="text-primary">ordenado</span> y vendiendo más</h1>
+          <p class="lead text-muted mb-4">Ventas, caja, notificaciones y reportes — todo en un solo lugar. Probalo gratis, sin tarjeta.</p>
+          <div class="d-flex gap-2">
+            <a href="{% url 'account_signup' %}" class="btn btn-primary btn-lg">Probar gratis</a>
+            <a href="#precios" class="btn btn-outline-secondary btn-lg">Ver planes</a>
+          </div>
+          <p class="small text-muted mt-3 mb-0"><i class="bi bi-shield-check me-1"></i>Datos seguros · <i class="bi bi-lightning-charge me-1 ms-2"></i>Setup en minutos</p>
+        </div>
+
+        <div class="col-12 col-lg-6" data-aos="fade-up" data-aos-delay="100">
+          <div class="card glass shadow-lg border-0">
+            <img src="{% static 'img/hero-dashboard.png' %}" class="card-img-top" alt="Vista del dashboard" loading="lazy">
+            <div class="card-body">
+              <div class="d-flex justify-content-between small text-muted">
+                <span><i class="bi bi-graph-up-arrow me-1"></i>Reportes en un click</span>
+                <span><i class="bi bi-whatsapp me-1"></i>Notificaciones</span>
+              </div>
+            </div>
+          </div>
+          <p class="text-muted small mt-2 text-center">Mockup ilustrativo.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="benefits" class="py-5">
+    <div class="container">
+      <div class="text-center mb-4" data-aos="fade-up">
+        <h2 class="h3 fw-bold mb-1">Resultados que importan</h2>
+        <p class="text-muted mb-0">Cobrás más rápido, reducís errores y ganás tiempo todos los días.</p>
+      </div>
+      <div class="row g-3">
+        <div class="col-12 col-md-6 col-xl-4" data-aos="fade-up">
+          <div class="card h-100">
+            <div class="card-body">
+              <h3 class="h6 fw-semibold"><i class="bi bi-cash-coin me-2 text-primary"></i>Cobros rápidos</h3>
+              <p class="text-muted small mb-0">Carga express de ventas y cierre de caja sin dolores de cabeza.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-4" data-aos="fade-up" data-aos-delay="50">
+          <div class="card h-100">
+            <div class="card-body">
+              <h3 class="h6 fw-semibold"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Reportes claros</h3>
+              <p class="text-muted small mb-0">Conocé tus picos, servicios más vendidos y rotación por sucursal.</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-4" data-aos="fade-up" data-aos-delay="100">
+          <div class="card h-100">
+            <div class="card-body">
+              <h3 class="h6 fw-semibold"><i class="bi bi-people me-2 text-primary"></i>Clientes que vuelven</h3>
+              <p class="text-muted small mb-0">Recordatorios por WhatsApp/Email y seguimiento de satisfacción.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mt-4">
+        <a class="btn btn-outline-secondary" href="#precios">Ver todos los planes</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="py-5 bg-body-tertiary">
+    <div class="container">
+      <div class="text-center mb-4" data-aos="fade-up">
+        <h2 class="h3 fw-bold mb-1">Todo en un solo lugar</h2>
+        <p class="text-muted mb-0">Ventas, caja, clientes, sucursales y notificaciones.</p>
+      </div>
+
+      <div id="tourCarousel" class="carousel slide shadow-sm rounded overflow-hidden" data-bs-ride="carousel" data-aos="fade-up">
+        <div class="carousel-inner">
+          <div class="carousel-item active">
+            <img src="{% static 'img/tour-caja.png' %}" class="d-block w-100" alt="Caja y cierres">
+            <div class="carousel-caption d-none d-md-block">
+              <h5>Caja y cierres</h5>
+              <p class="small">Cerrá en minutos y evitá diferencias.</p>
+            </div>
+          </div>
+          <div class="carousel-item">
+            <img src="{% static 'img/tour-reportes.png' %}" class="d-block w-100" alt="Reportes en un click">
+            <div class="carousel-caption d-none d-md-block">
+              <h5>Reportes en un click</h5>
+              <p class="small">Identificá picos y servicios más vendidos.</p>
+            </div>
+          </div>
+          <div class="carousel-item">
+            <img src="{% static 'img/tour-notificaciones.png' %}" class="d-block w-100" alt="Notificaciones">
+            <div class="carousel-caption d-none d-md-block">
+              <h5>Notificaciones</h5>
+              <p class="small">WhatsApp/Email para fidelizar y recordar turnos.</p>
+            </div>
+          </div>
+        </div>
+        <button class="carousel-control-prev" type="button" data-bs-target="#tourCarousel" data-bs-slide="prev">
+          <span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Anterior</span>
+        </button>
+        <button class="carousel-control-next" type="button" data-bs-target="#tourCarousel" data-bs-slide="next">
+          <span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Siguiente</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section id="precios" class="py-5">
+    <div class="container">
+      <div class="text-center mb-4" data-aos="fade-up">
+        <h2 class="h3 fw-bold mb-1">Elegí tu plan</h2>
+        <p class="text-muted mb-0">Empezá hoy y escalá cuando lo necesites.</p>
+      </div>
+
+      {% if not planes %}
+        <div class="alert alert-warning">No hay planes activos por el momento.</div>
+      {% else %}
+        <div class="row g-3">
+          {% for plan in planes %}
+            <div class="col-12 col-md-6 col-xl-4" data-aos="fade-up" data-aos-delay="{{ forloop.counter0|add:'0' }}0">
+              <div class="card shadow-sm h-100">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h5 class="card-title mb-0">{{ plan.nombre }}</h5>
+                    <div>
+                      {% if plan.default %}<span class="badge bg-primary">Recomendado</span>{% endif %}
+                      {% if plan.trial_days > 0 %}<span class="badge bg-success">Trial {{ plan.trial_days }} días</span>{% endif %}
+                    </div>
+                  </div>
+
+                  <p class="text-muted small mb-3">{{ plan.descripcion|default:"" }}</p>
+
+                  <div class="mb-3">
+                    <div class="fs-4 fw-bold">${{ plan.precio_mensual }}</div>
+                    <div class="text-muted small">/mes</div>
+                  </div>
+
+                  <ul class="list-unstyled mb-3 small">
+                    <li class="mb-1">• Hasta <strong>{{ plan.max_empresas_por_usuario }}</strong> empresa(s) por usuario</li>
+                    <li class="mb-1">• Hasta <strong>{{ plan.max_sucursales_por_empresa }}</strong> sucursal(es) por empresa</li>
+                    <li class="mb-1">• Hasta <strong>{{ plan.max_usuarios_por_empresa }}</strong> usuario(s) por empresa</li>
+                    <li class="mb-1">• Hasta <strong>{{ plan.max_empleados_por_sucursal }}</strong> empleado(s) por sucursal</li>
+                    <li class="mb-1">• <strong>{{ plan.max_storage_mb }} MB</strong> de almacenamiento</li>
+                  </ul>
+
+                  <div class="mt-auto pt-2">
+                    <a class="btn btn-primary w-100" href="{% url 'account_signup' %}">Crear cuenta gratis</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <p class="text-center text-muted small mt-3">¿Empresa en crecimiento? <a href="{% url 'saas:planes_public' %}">Compará todos los planes</a>.</p>
+    </div>
+  </section>
+
+  <section class="py-5 bg-body-tertiary">
+    <div class="container text-center" data-aos="fade-up">
+      <h2 class="h4 fw-bold mb-2">Empezá hoy</h2>
+      <p class="text-muted mb-3">Probá gratis y descubrí cómo simplificar tu día a día.</p>
+      <a href="{% url 'account_signup' %}" class="btn btn-primary btn-lg">Crear cuenta gratis</a>
+    </div>
+  </section>
+{% endblock %}

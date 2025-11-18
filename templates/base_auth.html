@@ -10,6 +10,7 @@
     <meta name="description" content="{% block meta_description %}Panel de gestión Lavaderos.{% endblock %}">
     <link rel="icon" href="{% static 'img/logo.png' %}">
 
+    {# === CSS PRINCIPAL === #}
     <link rel="preload" as="style" href="{% static 'css/bootswatch/Zephyr.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/bootswatch/Zephyr.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
@@ -18,30 +19,58 @@
   </head>
 
   <body class="vh-100 d-flex flex-column justify-content-between">
+
+    {# === NAVBAR AUTENTICADO === #}
     {% include "includes/_navbar_auth.html" %}
 
+    {# === CONTENIDO PRINCIPAL === #}
     <main id="main" class="container-fluid px-0 flex-grow-1">
-      
       <div class="row g-0">
+
+        {# Sidebar fijo (desktop) #}
         <aside class="col-12 col-lg-3 d-none d-lg-block border-end bg-body-tertiary">
           <div class="sticky-top pt-5">
             {% include "includes/_sidebar.html" %}
           </div>
         </aside>
-    
+
+        {# Sección de contenido (scroll principal) #}
         <section class="col-12 col-lg-9">
           <div class="container py-4 pt-lg-5">
             {% include "includes/_messages.html" %}
             {% block content %}{% endblock %}
           </div>
         </section>
+
       </div>
     </main>
-    
 
+    {# === FOOTER === #}
     {% include "includes/_footer.html" %}
+
+    {# === SIDEBAR MOBILE (Offcanvas) === #}
+    <div class="offcanvas offcanvas-start" tabindex="-1" id="mobileSidebar" aria-labelledby="mobileSidebarLabel">
+      <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="mobileSidebarLabel">Menú</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+      </div>
+      <div class="offcanvas-body">
+        {% include "includes/_sidebar.html" %}
+      </div>
+    </div>
+
+    {# === JS PRINCIPAL === #}
     <script src="{% static 'js/bootstrap.bundle.min.js' %}"></script>
     <script src="{% static 'js/app.js' %}"></script>
+
+    {# Activar tooltips globales #}
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const tooltips = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltips.forEach(el => new bootstrap.Tooltip(el));
+      });
+    </script>
+
     {% block extra_js %}{% endblock %}
   </body>
 </html>

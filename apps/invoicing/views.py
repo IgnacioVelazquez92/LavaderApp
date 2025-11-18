@@ -20,6 +20,7 @@ from apps.invoicing.services.emit import emitir
 from apps.sales.models import Venta
 from apps.org.models import Sucursal
 from apps.org.permissions import EmpresaPermRequiredMixin, Perm
+from io import BytesIO
 
 
 # ======================================================================
@@ -215,42 +216,44 @@ class EmitirComprobanteView(EmpresaPermRequiredMixin, VentaScopedMixin, FormView
 # Descarga / Visualización
 # ======================================================================
 
-
-# ======================================================================
-# Descarga / Visualización
-# ======================================================================
-
 class ComprobanteDownloadView(EmpresaPermRequiredMixin, View):
     """
-    Descarga privada del comprobante (valida empresa activa + permiso).
+    Descarga privada del comprobante.
+    NO lee archivos en disco: siempre genera HTML/PDF al vuelo
+    a partir del snapshot almacenado en la BD.
     """
     required_perms = (Perm.INVOICING_DOWNLOAD,)
 
     def get(self, request: HttpRequest, pk: str, *args, **kwargs) -> HttpResponse:
-        empresa = self.empresa_activa  # <- usar atributo del mixin
+        from apps.invoicing.services import renderers
+
+        empresa = self.empresa_activa
         comp = get_object_or_404(
             Comprobante.objects.filter(empresa=empresa),
             pk=pk
         )
 
-        # Prefiere PDF; si no hay, entrega HTML
-        f = comp.archivo_pdf or comp.archivo_html
-        if not f:
-            raise Http404("El comprobante no tiene archivo.")
+        snapshot = comp.snapshot
 
-        guessed, _ = mimetypes.guess_type(f.name)
-        content_type = guessed or (
-            "application/pdf" if comp.archivo_pdf else "text/html; charset=utf-8")
+        # Renderizamos HTML a partir del snapshot
+        html = renderers.render_html({"snapshot": snapshot})
 
-        try:
+        # Intentamos generar PDF
+        pdf_bytes = renderers.html_to_pdf(html)
+        if pdf_bytes:
+            # Servimos el PDF en memoria
             return FileResponse(
-                f.open("rb"),
-                content_type=content_type,
+                BytesIO(pdf_bytes),
+                content_type="application/pdf",
                 as_attachment=True,
-                filename=f.name.split("/")[-1],
+                filename=f"{comp.id}.pdf",
             )
-        except FileNotFoundError:
-            raise Http404("Archivo no disponible.")
+
+        # Si por alguna razón no se pudo generar PDF, devolvemos el HTML
+        return HttpResponse(
+            html,
+            content_type="text/html; charset=utf-8",
+        )
 
 
 class PublicInvoiceView(DetailView):
@@ -281,25 +284,36 @@ class PublicInvoiceView(DetailView):
 
 class PublicInvoiceDownloadView(View):
     """
-    Descarga pública del comprobante (PDF si existe; si no, HTML).
+    Descarga pública del comprobante (link con token).
+    NO lee archivos en disco: genera HTML/PDF al vuelo a partir del snapshot.
     """
 
     def get(self, request, *args, **kwargs):
+        from apps.invoicing.services import renderers
+
         key = kwargs.get("key")
         comp = get_object_or_404(Comprobante, public_key=key)
 
         if comp.public_revocado or (comp.public_expires_at and timezone.now() > comp.public_expires_at):
             raise Http404("Link inválido")
 
-        file_field = comp.archivo_pdf or comp.archivo_html
-        if not file_field:
-            raise Http404("Sin archivo")
+        snapshot = comp.snapshot
 
-        filename = (
-            comp.archivo_pdf and "comprobante.pdf") or "comprobante.html"
-        return FileResponse(
-            file_field.open("rb"),
-            as_attachment=True,
-            filename=filename,
-            content_type="application/pdf" if comp.archivo_pdf else "text/html; charset=utf-8",
+        # Renderizamos HTML desde el snapshot
+        html = renderers.render_html({"snapshot": snapshot})
+
+        # Intentamos generar PDF
+        pdf_bytes = renderers.html_to_pdf(html)
+        if pdf_bytes:
+            return FileResponse(
+                BytesIO(pdf_bytes),
+                as_attachment=True,
+                filename=f"{comp.id}.pdf",
+                content_type="application/pdf",
+            )
+
+        # Fallback: HTML directo
+        return HttpResponse(
+            html,
+            content_type="text/html; charset=utf-8",
         )

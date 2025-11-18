@@ -191,3 +191,98 @@ def calcular_totales(
         "total": total,
         "saldo_pendiente": total,  # baseline; payments lo ajusta después
     }
+
+
+def calcular_montos_por_ajuste(
+    items: Iterable[Any],
+    adjustments: Optional[Iterable[Any]] = None,
+) -> Dict[int, Decimal]:
+    """
+    Calcula el impacto bruto de cada ajuste sobre la venta, sin cambiar totales.
+    Devuelve un dict: {adjustment_id -> Decimal(monto_descuento)}
+
+    Reglas:
+    - Descuentos ITEM: se aplican secuencialmente sobre el subtotal del ítem,
+      sin dejar que el descuento total de ese ítem supere su subtotal.
+    - Descuentos ORDER: se aplican secuencialmente sobre el subtotal luego de
+      aplicar descuentos por ítem, sin dejar que el total supere esa base.
+    - No hace redondeo ni prorrateo final; eso se resuelve en services.sales
+      para que la suma matchee exactamente venta.descuento.
+    """
+    items = list(items or [])
+    adjustments = list(adjustments or [])
+    if not adjustments:
+        return {}
+
+    # Subtotales por ítem y subtotal total
+    subtotales = [_item_subtotal(it) for it in items]
+    subtotal_base = sum(subtotales, Q("0"))
+
+    # Separar ajustes por ítem y por venta
+    order_adjs, item_adjs_map = _normalize_adjustments(adjustments)
+
+    montos: Dict[int, Decimal] = {}
+
+    # 1) Descuentos por ÍTEM
+    desc_items_total = Q("0")
+    for it, it_sub in zip(items, subtotales):
+        it_id = getattr(it, "id", None) or getattr(it, "pk", None)
+        base_restante_item = _D(it_sub)
+
+        for adj in item_adjs_map.get(it_id, []):
+            mode = (getattr(adj, "mode", "") or "").lower()
+            val = _D(getattr(adj, "value", 0))
+            if val < 0:
+                continue
+
+            if base_restante_item <= Q("0"):
+                delta = Q("0")
+            else:
+                if mode == "percent":
+                    delta = base_restante_item * val / Q("100")
+                else:  # "amount" u otro => monto fijo
+                    delta = val
+
+                # No permitir que un ítem quede en negativo
+                if delta > base_restante_item:
+                    delta = base_restante_item
+
+            if delta <= Q("0"):
+                continue
+
+            desc_items_total += delta
+            base_restante_item -= delta
+
+            montos[adj.id] = montos.get(adj.id, Q("0")) + delta
+
+    # 2) Base para descuentos por VENTA (post ítems)
+    subtotal_post_items = subtotal_base - desc_items_total
+    if subtotal_post_items < Q("0"):
+        subtotal_post_items = Q("0")
+
+    # 3) Descuentos por VENTA (ORDER)
+    base_restante_order = subtotal_post_items
+    for adj in order_adjs:
+        mode = (getattr(adj, "mode", "") or "").lower()
+        val = _D(getattr(adj, "value", 0))
+        if val < 0:
+            continue
+
+        if base_restante_order <= Q("0"):
+            delta = Q("0")
+        else:
+            if mode == "percent":
+                delta = base_restante_order * val / Q("100")
+            else:
+                delta = val
+
+            if delta > base_restante_order:
+                delta = base_restante_order
+
+        if delta <= Q("0"):
+            continue
+
+        base_restante_order -= delta
+        montos[adj.id] = montos.get(adj.id, Q("0")) + delta
+
+    return montos

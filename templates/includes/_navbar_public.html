@@ -1,9 +1,9 @@
 {% load static %}
-<nav class="navbar navbar-expand-lg bg-body border-bottom shadow-sm sticky-top">
+<nav class="navbar navbar-expand-lg bg-body border-bottom shadow-sm sticky-top navbar-public">
   <div class="container">
-    <a class="navbar-brand d-flex align-items-center" href="/">
-      <img src="{% static 'img/logo.png' %}" alt="Logo" width="32" height="32" class="me-2">
-      <span class="fw-bold">Lavaderos</span>
+    <a class="navbar-brand d-flex align-items-center" href="{% url 'public_home' %}">
+      <img src="{% static 'img/logo.png' %}" alt="Logo Lavaderos" width="32" height="32" class="me-2">
+      <span class="fw-bold logo-text">Lavaderos</span>
     </a>
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar"
@@ -13,15 +13,30 @@
 
     <div class="collapse navbar-collapse" id="mainNavbar">
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <!-- Links públicos (docs, precios, contacto) si querés -->
+        <li class="nav-item"><a class="nav-link" href="{% url 'public_home' %}#features">Características</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'public_home' %}#precios">Planes</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'public_home' %}#faq">FAQ</a></li>
       </ul>
-      <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
-        <li class="nav-item">
-          <a class="btn btn-sm btn-primary me-2" href="/accounts/login/">Ingresar</a>
-        </li>
-        <li class="nav-item">
-          <a class="btn btn-sm btn-outline-secondary" href="/accounts/signup/">Crear cuenta</a>
-        </li>
+
+      <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
+        {% if user.is_authenticated %}
+          <li class="nav-item">
+            <a class="btn btn-sm btn-success" href="{% url 'home' %}">
+              <i class="bi bi-speedometer2 me-1"></i> Ir al panel
+            </a>
+          </li>
+        {% else %}
+          <li class="nav-item me-lg-2 mb-2 mb-lg-0">
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'account_login' %}">
+              <i class="bi bi-box-arrow-in-right me-1"></i> Ingresar
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="btn btn-sm btn-primary" href="{% url 'account_signup' %}">
+              <i class="bi bi-stars me-1"></i> Probar gratis
+            </a>
+          </li>
+        {% endif %}
       </ul>
     </div>
   </div>

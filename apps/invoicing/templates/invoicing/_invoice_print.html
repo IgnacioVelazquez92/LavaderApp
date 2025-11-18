@@ -211,33 +211,46 @@
         <th class="w-15 text-right">Monto</th>
       </tr>
       {% for a in snapshot.ajustes %}
-      <tr>
-        <td>{{ a.kind_label }}</td>
-        <td>
-          {{ a.label }}
-          {% if a.target %}<span class="xsmall muted"> (ítem: {{ a.target }})</span>{% endif %}
-          {% if a.porcentaje %}<span class="xsmall muted"> · %</span>{% endif %}
-        </td>
-        <td>{{ a.scope|upper }}</td>
-        <td class="text-right">{{ a.monto }}</td>
-      </tr>
+        {# Mostrar solo ajustes con monto distinto de 0 #}
+        {% if a.monto|floatformat:2 != "0.00" %}
+        <tr>
+          <td>{{ a.kind_label }}</td>
+          <td>
+            {{ a.label }}
+            {% if a.target %}
+              <span class="xsmall muted"> (ítem: {{ a.target }})</span>
+            {% endif %}
+            {% if a.porcentaje %}
+              <span class="xsmall muted"> · %</span>
+            {% endif %}
+          </td>
+          <td>{{ a.scope|upper }}</td>
+          <td class="text-right">{{ a.monto }}</td>
+        </tr>
+        {% endif %}
       {% endfor %}
+
+
     </tbody>
   </table>
   {% endif %}
 
   {# LEYENDA / OBSERVACIONES #}
+{# LEYENDA / OBSERVACIONES #}
   <table class="table no-border mt-3">
     <tr>
       <td class="border-0 align-top w-60">
         <div class="small muted">Observaciones</div>
-        <div class="border rounded p-0" style="min-height: 56px;"></div>
+        <div class="border rounded p-0" style="min-height: 56px;">
+          {{ snapshot.venta.notas|default:"&nbsp;"|safe }}
+        </div>
       </td>
       <td class="border-0 align-top w-40">
         <div class="xsmall muted">{{ snapshot.leyendas.no_fiscal }}</div>
       </td>
     </tr>
   </table>
+
 
   <table class="table no-border mt-3">
     <tr>

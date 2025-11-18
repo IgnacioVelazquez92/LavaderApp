@@ -1,20 +1,15 @@
 # apps/invoicing/services/emit.py
 from __future__ import annotations
-
 import base64
 import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, Optional
-
-from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils.timezone import now
-
 from apps.invoicing.models import Comprobante, TipoComprobante
 from apps.invoicing.services.numbering import next_number
-from apps.invoicing.services import renderers
 from apps.sales.models import Venta
 from apps.customers.models import ClienteFacturacion  # OneToOne con Cliente
 
@@ -98,8 +93,15 @@ def _build_snapshot(
     Genera el snapshot inmutable de la venta en el momento de emitir.
     Incluye: items, precio_lista, descuentos, total, payment_status, detalle de ajustes y,
     si corresponde, datos de cliente de facturación.
+
+    IMPORTANTE:
+    - Los montos de cada ajuste provienen de `SalesAdjustment.amount_applied`,
+      que ya fue calculado/prorrateado en `recalcular_totales`.
     """
-    # Items
+
+    # -----------------------
+    # 1) Ítems de la venta
+    # -----------------------
     items = []
     for it in _items_qs(venta):
         qty = getattr(it, "cantidad", 1)
@@ -107,6 +109,7 @@ def _build_snapshot(
         subtotal_item = getattr(it, "subtotal", None)
         if subtotal_item is None:
             subtotal_item = qty * unit
+
         items.append({
             "servicio_id": it.servicio_id,
             "servicio_nombre": getattr(it.servicio, "nombre", ""),
@@ -115,50 +118,70 @@ def _build_snapshot(
             "subtotal": str(Decimal(str(subtotal_item))),
         })
 
-    # Ajustes (promos/descuentos)
-    # Ajustes (promos/descuentos)
+    # -----------------------
+    # 2) Totales de la venta
+    # -----------------------
+    subtotal = Decimal(str(getattr(venta, "subtotal", Decimal("0.00"))))
+    descuento = Decimal(str(getattr(venta, "descuento", Decimal("0.00"))))
+    propina = Decimal(str(getattr(venta, "propina", Decimal("0.00"))))
+    total = Decimal(str(getattr(venta, "total", Decimal("0.00"))))
+
+    # Lo que mostramos como "Precio de lista":
+    # base visible para el cliente. Si querés que sea "antes de descuentos",
+    # usá: precio_lista = subtotal + descuento
+    precio_lista = subtotal
+
+    # -----------------------
+    # 3) Ajustes (descuentos / promos)
+    # -----------------------
     ajustes = []
     for adj in _ajustes_qs(venta):
+        # Etiqueta visible
         label = (
             getattr(getattr(adj, "promotion", None), "nombre", None)
             or getattr(adj, "motivo", None)
             or getattr(adj, "label", None)
             or "Ajuste"
         )
-        monto = getattr(adj, "monto", None)
-        if monto is None:
-            monto = getattr(adj, "importe", Decimal("0.00"))
-        es_porcentaje = bool(getattr(adj, "es_porcentaje", False))
 
-        # Soportar FK al ítem con nombre 'venta_item' o 'item'
+        # Modo (percent / amount)
+        mode = (getattr(adj, "mode", "") or "").lower()
+        es_porcentaje = (mode == "percent")
+
+        # Ítem asociado (si lo hay)
         item_obj = getattr(adj, "venta_item", None) or getattr(
             adj, "item", None)
         scope = "item" if item_obj is not None else "venta"
         target = getattr(getattr(item_obj, "servicio", None),
                          "nombre", None) if item_obj else None
+
+        # Tipo de ajuste: promo vs descuento manual
         kind = "promo" if getattr(
             adj, "promotion_id", None) else "descuento_manual"
-
-        # NUEVO: etiqueta ya resuelta para el template
         kind_label = "Promoción" if kind == "promo" else "Descuento"
 
-        ajustes.append({
-            "scope": scope,                         # "venta" | "item"
-            "kind": kind,                           # "promo" | "descuento_manual"
-            "kind_label": kind_label,               # <- NUEVO
-            "label": label,                         # texto visible
-            "monto": str(Decimal(str(monto))),      # monto absoluto
-            "porcentaje": es_porcentaje,            # flag indicativo
-            "target": target,                       # nombre de servicio si aplica
-        })
-    # Totales y flags de pago
-    subtotal = Decimal(str(getattr(venta, "subtotal", Decimal("0.00"))))
-    descuento = Decimal(str(getattr(venta, "descuento", Decimal("0.00"))))
-    # no se imprime, pero queda en snapshot
-    propina = Decimal(str(getattr(venta, "propina", Decimal("0.00"))))
-    total = Decimal(str(getattr(venta, "total", Decimal("0.00"))))
-    precio_lista = subtotal + descuento  # antes de aplicar descuentos/promos
+        # NUEVO: usar el monto realmente aplicado al descuento total
+        raw_monto = getattr(adj, "amount_applied", None)
+        if raw_monto is None:
+            # fallback ultra defensivo para datos viejos (no debería usarse ya)
+            raw_monto = Decimal("0.00")
+        monto_dec = Decimal(str(raw_monto))
 
+        ajustes.append({
+            "scope": scope,                # "venta" | "item"
+            "kind": kind,                  # "promo" | "descuento_manual"
+            "kind_label": kind_label,      # "Promoción" / "Descuento"
+            "label": label,                # texto visible (ej: "Familiar")
+            "monto": str(monto_dec),       # monto REAL aplicado
+            # alias por si algún template usa 'importe'
+            "importe": str(monto_dec),
+            "porcentaje": es_porcentaje,   # flag si viene de % originalmente
+            "target": target,              # nombre de servicio si aplica
+        })
+
+    # -----------------------
+    # 4) Armado del snapshot
+    # -----------------------
     snapshot: Dict[str, Any] = {
         "comprobante": {
             "tipo": tipo,
@@ -205,7 +228,7 @@ def _build_snapshot(
         },
     }
 
-    # Incluir cliente de facturación si se usó
+    # Cliente de facturación (si corresponde)
     if cliente_facturacion:
         snapshot["cliente_facturacion"] = {
             "razon_social": cliente_facturacion.razon_social,
@@ -218,10 +241,10 @@ def _build_snapshot(
     json.dumps(snapshot)
     return snapshot
 
-
 # -------------------------------
 # Caso de uso: emitir
 # -------------------------------
+
 
 @transaction.atomic
 def emitir(
@@ -235,7 +258,14 @@ def emitir(
 ) -> EmitirResultado:
     """
     Emite un Comprobante para una venta pagada (payment_status='pagada').
+
+    - Valida estado de la venta.
+    - Garantiza idempotencia 1:1 (venta -> comprobante).
+    - Calcula numeración.
+    - Construye snapshot inmutable.
+    - Persiste SOLO datos + snapshot (no guarda HTML/PDF en disco).
     """
+    # 1) Cargar venta con relaciones necesarias
     venta = (
         Venta.objects
         .select_related("empresa", "sucursal", "cliente", "vehiculo", "vehiculo__tipo")
@@ -243,26 +273,27 @@ def emitir(
         .get(pk=venta_id)
     )
 
-    # 1) Validaciones de pago/proceso
+    # 2) Validaciones de pago/proceso
     if getattr(venta, "payment_status", None) != "pagada":
         raise ValueError(
             "La venta no está pagada; no se puede emitir comprobante.")
+
     if getattr(venta, "estado", None) == "cancelado":
         raise ValueError(
             "La venta fue cancelada; no se puede emitir comprobante.")
 
-    # 2) Idempotencia 1:1 (si ya existe, devolver)
+    # 3) Idempotencia 1:1 (si ya existe, devolver)
     existente = getattr(venta, "comprobante", None)
     if existente:
         if reintentos_idempotentes:
             return EmitirResultado(comprobante=existente, creado=False)
         raise ValueError("La venta ya posee un comprobante emitido.")
 
-    # 3) Tipo válido
+    # 4) Tipo válido
     if tipo not in TipoComprobante.values:
         raise ValueError(f"Tipo de comprobante inválido: {tipo}")
 
-    # 4) Cliente de facturación (opcional): debe ser del MISMO cliente de la venta
+    # 5) Cliente de facturación (opcional): debe ser del MISMO cliente de la venta
     cf: Optional[ClienteFacturacion] = None
     if cliente_facturacion_id is not None:
         cf = (
@@ -274,13 +305,16 @@ def emitir(
             raise ValueError(
                 "Cliente de facturación inválido para esta venta.")
 
-    # 5) Numeración atómica
-    numero_ctx = next_number(sucursal=venta.sucursal,
-                             tipo=tipo, punto_venta=punto_venta)
+    # 6) Numeración atómica
+    numero_ctx = next_number(
+        sucursal=venta.sucursal,
+        tipo=tipo,
+        punto_venta=punto_venta,
+    )
     numero_completo = numero_ctx.numero_completo
     pv_real = int(numero_ctx.punto_venta)
 
-    # 6) Snapshot y render (incluye cliente_facturacion si corresponde)
+    # 7) Snapshot inmutable (NO guardamos HTML/PDF acá)
     snapshot = _build_snapshot(
         venta=venta,
         tipo=tipo,
@@ -288,10 +322,8 @@ def emitir(
         punto_venta=pv_real,
         cliente_facturacion=cf,
     )
-    html = renderers.render_html({"snapshot": snapshot})
-    pdf_bytes = renderers.html_to_pdf(html)  # Puede ser None
 
-    # 7) Persistir comprobante
+    # 8) Persistir comprobante con snapshot
     comp = Comprobante.objects.create(
         empresa=venta.empresa,
         sucursal=venta.sucursal,
@@ -306,12 +338,6 @@ def emitir(
         snapshot=snapshot,
         emitido_por=actor,
     )
-
-    # 8) Archivos
-    comp.archivo_html.save(
-        f"{comp.id}.html", ContentFile(html.encode("utf-8")))
-    if pdf_bytes:
-        comp.archivo_pdf.save(f"{comp.id}.pdf", ContentFile(pdf_bytes))
 
     return EmitirResultado(comprobante=comp, creado=True)
 

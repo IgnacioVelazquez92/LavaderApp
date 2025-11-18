@@ -4,12 +4,8 @@ from django.utils import timezone
 import uuid
 from django.db import models
 from django.conf import settings
-
-from apps.org.models import Empresa, Sucursal
-from apps.customers.models import Cliente
-from apps.vehicles.models import Vehiculo
 from apps.catalog.models import Servicio
-from django.db.models import Q, UniqueConstraint
+from django.db.models import Q
 
 
 class Venta(models.Model):
@@ -235,6 +231,12 @@ class SalesAdjustment(models.Model):
         max_digits=10, decimal_places=2)  # % 0..100 o monto ≥ 0
     source = models.CharField(
         max_length=10, choices=SOURCE_CHOICES, default=SOURCE_MANUAL
+    )
+    amount_applied = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Importe monetario aplicado por este ajuste (en la moneda de la venta)."
     )
     promotion = models.ForeignKey(
         "sales.Promotion",

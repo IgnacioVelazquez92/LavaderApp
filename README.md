@@ -945,7 +945,7 @@ lavaderosapp/
 │       ├── production.py            # Postgres, seguridad, SMTP real
 │       └── render.py                # ajustes para Render.com (si aplica)
 ├── templates/                       # templates globales + overrides de librerías
-│   ├── base.html                    # layout PÚBLICO (landing, marketing, login/signup)
+│   ├── base_public.html                    # layout PÚBLICO (landing, marketing, login/signup)
 │   ├── base_auth.html               # layout AUTENTICADO (navbar compacto + sidebar)
 │   ├── home_dashboard.html          # panel contextual para usuarios logueados
 │   ├── includes/
@@ -1004,7 +1004,7 @@ lavaderosapp/
 
 ## 2) Layouts y herencia de templates
 
-### 2.1 `templates/base.html` (público)
+### 2.1 `templates/base_public.html` (público)
 
 - **Uso**: landing/marketing, login/signup y páginas no autenticadas.
 - **Bloques clave**: `title`, `meta_description`, `navbar`, `hero`, `content`, `extra_css`, `extra_js`, `footer`.
@@ -1144,7 +1144,7 @@ apps/<app>/
 ## 9) Accesibilidad, SEO y calidad
 
 - **A11y**: skip link, labels, `autocomplete` en formularios, colores y contrastes por Bootstrap.
-- **SEO meta** en `base.html`: `title`, `description`, Open Graph y Twitter Cards con valores por defecto y bloques sobrescribibles.
+- **SEO meta** en `base_public.html`: `title`, `description`, Open Graph y Twitter Cards con valores por defecto y bloques sobrescribibles.
 - **Mensajería** clara: usar `django.contrib.messages` para éxitos y errores de validación/flujo.
 - **Errores**: páginas personalizadas en `templates/errors/` (401/403/404/500).
 
@@ -1152,7 +1152,7 @@ apps/<app>/
 
 ## 10) Cómo agregar una página nueva (checklist)
 
-1. Elegí layout: **público** (`base.html`) o **autenticado** (`base_auth.html`).
+1. Elegí layout: **público** (`base_public.html`) o **autenticado** (`base_auth.html`).
 2. Creá el template en `apps/<app>/templates/<app>/mi_pagina.html` y extendé el layout correspondiente.
 3. Agregá la **CBV** en `views.py` y la ruta en `urls.py` del app (namespace).
 4. Si la página necesita navegación del sistema, usa **`base_auth.html`** para heredar sidebar.
@@ -1200,7 +1200,7 @@ apps/accounts/
 
 ```
 templates/
-├─ base.html
+├─ base_public.html
 ├─ includes/
 │  ├─ _navbar.html            # menú Cuenta, selector de empresa, logout
 │  └─ _messages.html          # alerts Bootstrap (django.messages)
@@ -1225,7 +1225,7 @@ templates/
 - **`views.py`**: vistas delgadas; mutaciones en **services**, lecturas en **selectors**.
 - **`services/*`**: casos de uso (perfil y membresías), con logging mínimo.
 - **`selectors.py`**: consultas para vistas/UX (p.ej., membresías del usuario).
-- **`templates/account/*`**: todos los flujos de allauth con el layout de `base.html`.
+- **`templates/account/*`**: todos los flujos de allauth con el layout de `base_public.html`.
 - **`_messages.html`**: muestra feedback como alerts.
 - **`_navbar.html`**: accesos a Perfil, Membresías, Selector de empresa y Logout.
 
@@ -1310,7 +1310,7 @@ ACCOUNT_FORMS = {
 
 ## 6) UX / UI (convenciones)
 
-- **Bootstrap 5** global en `base.html` (tema Bootswatch ok).
+- **Bootstrap 5** global en `base_public.html` (tema Bootswatch ok).
 - **Mensajes** → `_messages.html` (alerts).
 - **Navbar** → `_navbar.html` con acciones de cuenta y chip de empresa activa (si `empresa_id` en sesión).
 - **Accesibilidad**: labels y `autocomplete` correctos; placeholders coherentes.
@@ -4621,3 +4621,4 @@ return {
 - **Total teórico**: suma de `Venta.total` (base de conciliación); **no** incluye propinas.
 - **Diferencia**: `total_ventas - total_pagos` (control grueso, puede haber timing/ajustes).
 - **Ticket promedio**: `total_ventas / ventas` (por agrupación/periodo).
+  s
