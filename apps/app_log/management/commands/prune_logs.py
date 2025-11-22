@@ -1,45 +1,46 @@
-# apps/app_log/management/commands/prune_logs.py
-"""
-Comando de gestión para purgar logs antiguos y controlar retención.
-"""
-
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
+
 from apps.app_log.models import AppLog, AuditLog
 
 
 class Command(BaseCommand):
-    help = "Purge old logs by kind and retention days"
+    help = "Elimina logs antiguos de AppLog y AuditLog según la retención indicada (en días)."
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--kind",
-            choices=["app", "audit", "all"],
-            default="all",
-            help="Tipo de log a purgar",
-        )
-        parser.add_argument(
             "--days",
             type=int,
-            required=True,
-            help="Cantidad de días a conservar",
+            default=30,
+            help="Cantidad de días de retención. Ej: --days 15 conserva solo los últimos 15 días.",
         )
 
-    def handle(self, *args, **opts):
-        days = opts["days"]
+    def handle(self, *args, **options):
+        days = options["days"]
+
+        if days < 0:
+            self.stderr.write(self.style.ERROR(
+                "El parámetro --days debe ser >= 0."))
+            return
+
         cutoff = timezone.now() - timedelta(days=days)
-        kind = opts["kind"]
-        total = 0
 
-        if kind in ("app", "all"):
-            n = AppLog.objects.filter(creado_en__lt=cutoff).delete()[0]
-            self.stdout.write(self.style.SUCCESS(f"AppLog purged: {n}"))
-            total += n
+        # --- AppLog ---
+        old_app_logs = AppLog.objects.filter(creado_en__lt=cutoff)
+        count_app = old_app_logs.count()
+        old_app_logs.delete()
 
-        if kind in ("audit", "all"):
-            n = AuditLog.objects.filter(creado_en__lt=cutoff).delete()[0]
-            self.stdout.write(self.style.SUCCESS(f"AuditLog purged: {n}"))
-            total += n
+        # --- AuditLog ---
+        old_audit_logs = AuditLog.objects.filter(creado_en__lt=cutoff)
+        count_audit = old_audit_logs.count()
+        old_audit_logs.delete()
 
-        self.stdout.write(self.style.SUCCESS(f"Total purged: {total}"))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"✔ Limpieza completada. "
+                f"AppLog eliminados: {count_app}. "
+                f"AuditLog eliminados: {count_audit}. "
+                f"Retención aplicada: {days} días."
+            )
+        )
